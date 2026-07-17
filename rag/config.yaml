@@ -1,0 +1,22 @@
+# Configuración del RAG para SRE Copilot
+embedding_model: "intfloat/multilingual-e5-large"
+chunk_size: 512
+chunk_overlap: 128
+max_chunk_length: 2048
+db_path: "/home/ccmai/sre-copilot/rag/chroma_db"
+collection_name: "sre_knowledge"
+levels:
+  - basico
+  - medio
+  - avanzado
+categories:
+  - linux
+  - systemd
+  - redes
+  - seguridad
+  - docker
+  - nginx
+  - ansible
+  - prometheus
+  - almacenamiento
+  - troubleshooting

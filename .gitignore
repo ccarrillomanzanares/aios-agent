@@ -1,0 +1,36 @@
+# Entorno Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Secretos y configuración local
+.env
+config.sh
+info.txt
+*.key
+*.pem
+
+# Datos derivados y binarios grandes
+models/*.gguf
+models/*.bin
+rag/chroma_db/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs y temporales
+*.log
+*.tmp
+tmp/
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
