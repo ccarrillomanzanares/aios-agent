@@ -23,26 +23,37 @@ CLI interactivo (orchestrator/main.py)
 ```bash
 # Clonar o entrar al directorio del proyecto
 cd aios-agent
-python3 -m venv venv
+
+# Instalación automática (compila llama.cpp, descarga modelo y reconstruye RAG)
+./setup.sh
+
+# En otra terminal, arrancar el servidor LLM
 source venv/bin/activate
-pip install -r requirements.txt
-
-# Descargar un modelo GGUF compatible (ej. Meta-Llama-3.1-8B-Instruct-Q5_K_M)
-# y colocarlo en models/
-
-# Arrancar el servidor LLM local
 scripts/start_llm.sh
 
-# Orquestador interactivo
+# Lanzar el orquestador
+source venv/bin/activate
 python orchestrator/main.py
 
 # Evaluación automática
+source venv/bin/activate
 python scripts/evaluate.py
+```
 
-# Reconstruir índice RAG
-python rag/build_index.py --reset
-# O con progreso detallado
-python scripts/build_index_verbose.py
+El script `setup.sh` realiza los siguientes pasos:
+
+1. Verifica CPU x86_64 con AVX2 y dependencias del sistema (`git`, `curl`, `wget`, `python3`, `pip3`, `make`, `cmake`, `g++`).
+2. Crea el entorno virtual en `venv/` e instala dependencias Python.
+3. Clona y compila `llama.cpp` (tag `b5200`) en `llama.cpp/build/`.
+4. Descarga el modelo por defecto (`Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf`) de HuggingFace.
+5. Reconstruye el índice RAG con los documentos de `data/external/`.
+
+Para usar otro modelo, define `MODEL_NAME` y `MODEL_REPO` antes de ejecutar `setup.sh`:
+
+```bash
+MODEL_NAME="Llama-3.2-3B-Instruct-Q4_K_M.gguf" \
+MODEL_REPO="bartowski/Llama-3.2-3B-Instruct-GGUF" \
+./setup.sh
 ```
 
 El servicio LLM puede ejecutarse como servicio systemd del usuario:
@@ -77,7 +88,7 @@ systemctl --user status sre-llm.service
 Cambiar de modelo:
 
 ```bash
-MODEL=models/Otro.gguf systemctl --user restart sre-llm.service
+MODEL=models/Otro.gguf scripts/start_llm.sh
 ```
 
 O editando `scripts/start_llm.sh` antes de reiniciar.
