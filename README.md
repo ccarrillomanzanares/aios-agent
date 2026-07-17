@@ -18,16 +18,20 @@ CLI interactivo (orchestrator/main.py)
         Executor seguro (solo-lectura auto, resto con aprobación)
 ```
 
-## Ubicación
-
-`/home/ccmai/sre-copilot/` en el VPS `31.220.80.78`.
-
 ## Inicio rápido
 
 ```bash
-ssh ccmai@31.220.80.78
-cd /home/ccmai/sre-copilot
+# Clonar o entrar al directorio del proyecto
+cd aios-agent
+python3 -m venv venv
 source venv/bin/activate
+pip install -r requirements.txt
+
+# Descargar un modelo GGUF compatible (ej. Meta-Llama-3.1-8B-Instruct-Q5_K_M)
+# y colocarlo en models/
+
+# Arrancar el servidor LLM local
+scripts/start_llm.sh
 
 # Orquestador interactivo
 python orchestrator/main.py
@@ -41,7 +45,7 @@ python rag/build_index.py --reset
 python scripts/build_index_verbose.py
 ```
 
-El servicio LLM ya está activo como `sre-llm.service`:
+El servicio LLM puede ejecutarse como servicio systemd del usuario:
 
 ```bash
 systemctl --user status sre-llm.service
@@ -60,7 +64,7 @@ systemctl --user status sre-llm.service
 - Lista blanca de comandos de solo lectura (`ls`, `df`, `systemctl status`, `journalctl`, etc.).
 - Cualquier redirección (`>`, `>>`), pipe (`|`), secuencia (`;`, `&&`, `||`) o subshell requiere aprobación.
 - Lista negra de comandos destructivos.
-- Logs en `/home/ccmai/sre-copilot/logs/orchestrator.log`.
+- Logs en `logs/orchestrator.log`.
 
 ## Modelo
 
@@ -73,8 +77,10 @@ systemctl --user status sre-llm.service
 Cambiar de modelo:
 
 ```bash
-MODEL=/home/ccmai/sre-copilot/models/Otro.gguf systemctl --user restart sre-llm.service
+MODEL=models/Otro.gguf systemctl --user restart sre-llm.service
 ```
+
+O editando `scripts/start_llm.sh` antes de reiniciar.
 
 Modelos disponibles:
 
@@ -142,7 +148,7 @@ Modelos disponibles:
 
 - `scripts/start_llm.sh` — arranca `llama-server`.
 - `scripts/fetch_sre_docs.py` — descarga documentación pública.
-- `scripts/extract_manpages.sh` — extrae manpages del VPS.
+- `scripts/extract_manpages.sh` — extrae manpages del sistema Linux anfitrión.
 - `scripts/gen_sre_docs.py` — genera guías SRE estándar.
 - `rag/build_index.py` — reconstruye la base vectorial.
 - `scripts/build_index_verbose.py` — reconstruye con progreso detallado.
