@@ -1,26 +1,100 @@
 """Agente SRE ligero — function calling con Qwen3-8B."""
 import json
 import re
+from pathlib import Path
 import requests
 
 LLAMA_SERVER = "http://localhost:8083/v1/chat/completions"
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
-MAX_TURNS = 5
+MAX_TURNS = 10
+MAX_HISTORY_TOKENS = 6000
+SESSION_FILE = Path("data/session.json")
+
 
 SYSTEM_PROMPT = """Eres un sysadmin Linux experto. Puedes ejecutar comandos, leer y escribir archivos.
 Responde en español. Sé conciso.
 Si ejecutas un comando, muestra el resultado al usuario.
 Antes de comandos destructivos (rm -rf, dd, mkfs, fdisk), advierte y pide confirmación.
 Si no sabes algo, dilo honestamente: 'No lo sé'.
-No uses etiquetas <think>."""
+No uses etiquetas <think>.
+
+Para tareas complejas, NO expliques — EJECUTA. Genera un plan con pasos numerados y ejecuta cada paso automáticamente, verificando el resultado antes de continuar.
+Ejemplo:
+  Usuario: "instala WordPress con Docker y MariaDB"
+  Agente: ejecuta paso 1 (verificar Docker), paso 2 (crear compose), paso 3 (levantar), paso 4 (verificar). Sin preguntar, sin explicar. Solo ejecuta."""
 
 from tools import TOOLS, execute_tool
+from memory import ProceduralMemory
 
 
 class Agent:
     def __init__(self):
+        self.memory = ProceduralMemory()
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._load_session()
+
+    def _quick_llm(self, prompt: str, tokens: int = 20, temp: float = 0.0) -> str:
+        """LLM rápido sin tools, para generación de claves y compresión."""
+        resp = requests.post(
+            LLAMA_SERVER,
+            json={"messages": [{"role": "user", "content": f"/no_think {prompt}"}],
+                  "max_tokens": tokens, "temperature": temp},
+            timeout=15
+        )
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+    def _count_tokens(self, texts: list[str]) -> int:
+        """Estimación burda: 4 chars ≈ 1 token."""
+        return sum(len(t) // 4 for t in texts)
+
+    def _compress(self):
+        """Comprime el historial cuando supera el límite."""
+        texts = [m.get("content", "") for m in self.messages]
+        if self._count_tokens(texts) < MAX_HISTORY_TOKENS:
+            return
+        # Mantener system prompt + últimos 3 intercambios (6 mensajes)
+        keep = [self.messages[0]]
+        if len(self.messages) > 6:
+            old = self.messages[1:-6]
+            history_str = "\n".join(
+                f"{m['role']}: {m['content'][:200]}" for m in old if m.get("content")
+            )
+            try:
+                summary = self._quick_llm(
+                    f"Resume la siguiente conversación en 2-3 frases, capturando solo información técnica relevante:\n\n{history_str}",
+                    tokens=100, temp=0.3
+                )
+                keep.append({"role": "system", "content": f"[Resumen de conversación anterior: {summary}]"})
+            except Exception:
+                keep.append({"role": "system", "content": "[Conversación anterior omitida por error de compresión]"})
+            keep.extend(self.messages[-6:])
+        else:
+            keep = self.messages
+        self.messages = keep
+
+    def _save_session(self):
+        """Guarda el historial de la conversación al salir."""
+        SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump(self.messages, f, ensure_ascii=False)
+
+    def _load_session(self):
+        """Carga el historial de la conversación anterior."""
+        if SESSION_FILE.exists():
+            try:
+                old = json.loads(SESSION_FILE.read_text())
+                # Mantener system prompt original, concatenar historial cargado
+                loaded_messages = [m for m in old if m["role"] != "system"]
+                self.messages.extend(loaded_messages)
+                # Comprimir si el historial cargado es muy largo
+                texts = [m.get("content", "") for m in self.messages]
+                if self._count_tokens(texts) > MAX_HISTORY_TOKENS:
+                    self._compress()
+                print(f"  [Sesión reanudada: {len(loaded_messages)} mensajes anteriores]")
+            except Exception:
+                pass
 
     def _clean(self, text: str) -> str:
         """Limpia think blocks y normaliza."""
@@ -28,7 +102,15 @@ class Agent:
         return text
 
     def run(self, query: str) -> str:
-        """Procesa una consulta con function calling loop."""
+        """Procesa una consulta con function calling loop. Primero busca en memoria procedural."""
+        # Comprimir historial si es necesario
+        self._compress()
+
+        # 1. Buscar en caché procedural
+        cached = self.memory.find(query, self._quick_llm)
+        if cached:
+            return f"[cache] {cached}"
+
         self.messages.append({"role": "user", "content": f"/no_think {query}"})
 
         final_response = ""
@@ -81,6 +163,11 @@ class Agent:
             if msg.get("content"):
                 final_response = self._clean(msg["content"])
                 self.messages.append({"role": "assistant", "content": final_response})
+                # Si hubo tools, guardar en memoria procedural
+                had_tools = any(m["role"] == "tool" for m in self.messages[-5:])
+                if had_tools and final_response and final_response != "No lo sé":
+                    self.memory.store(query, final_response, self._quick_llm)
+                self._save_session()
                 break
             else:
                 final_response = "(respuesta vacía del modelo)"
