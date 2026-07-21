@@ -1,4 +1,4 @@
-# aios-agent v2.0 — Agente SRE con function calling nativo
+# aios-agent v2.1 — Agente SRE con function calling nativo
 
 Agente ligero de Operaciones de Fiabilidad de Sitio (SRE) que usa **function calling nativo** sobre el modelo local **Qwen3-8B** (servido por llama.cpp). Puede ejecutar comandos Linux, leer archivos de configuración/logs y escribir cambios controlados, todo a través de una conversación en español.
 
