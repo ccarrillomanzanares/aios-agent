@@ -1,5 +1,8 @@
 """Tools for the SRE agent — native function calling."""
 import json
+import sys
+import re
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -7,6 +10,60 @@ from pathlib import Path
 import requests
 import yaml
 from playbook import run_playbook
+
+def _is_blocked_command(command: str) -> bool:
+    """Return True if command matches an unconditionally blocked dangerous pattern."""
+    lower = command.lower()
+    # rm -rf / or rm -rf /* (root destruction only; allow rm -rf /tmp/...)
+    if re.search(r"rm\s+-rf\s+/\s*$", lower) or        re.search(r"rm\s+-rf\s+/\*", lower):
+        return True
+    if re.search(r"dd\s+if=\S+\s+of=/dev/\S+", lower):
+        return True
+    if re.search(r"mkfs\.\w+\s+\S+", lower):
+        return True
+    if re.search(r"fdisk", lower):
+        return True
+    if re.search(r"chmod.*(?:-r\s+)?000", lower):
+        return True
+    return False
+
+
+def _is_destructive_command(command: str) -> bool:
+    """Return True if command requires human confirmation before execution."""
+    lower = command.lower()
+    if re.search(r"rm\s+-rf", lower):
+        return True
+    if re.search(r"sudo\s+rm", lower):
+        return True
+    if re.search(r">\s*/dev/sd[a-z]", lower):
+        return True
+    if re.search(r"format", lower):
+        return True
+    if re.search(r"dd\s+if=\S+", lower):
+        return True
+    return False
+
+
+def _confirm_destructive(command: str, timeout: int = 10) -> bool:
+    """Ask user for confirmation before running a destructive command."""
+    print(f"⚠️ Destructive command detected: {command}. Continue? (y/N): ", file=sys.stderr, end="", flush=True)
+    try:
+        def _timeout_handler(signum, frame):
+            raise TimeoutError
+        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(timeout)
+        try:
+            answer = sys.stdin.readline().strip()
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+        return answer in ("y", "Y")
+    except TimeoutError:
+        print("Confirmation timeout", file=sys.stderr)
+        return False
+    except Exception:
+        return False
+
 
 def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     """Execute a shell command. Returns JSON with stdout, stderr, exit_code, elapsed.
@@ -16,6 +73,17 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     - "Could not get lock" -> try `sudo apt-get` as an alternative.
     Total timeout is respected.
     """
+    # Tool allowlist: block unconditionally dangerous commands
+    if _is_blocked_command(command):
+        return json.dumps({"error": "Command blocked: dangerous operation", "exit_code": -1,
+                          "stdout": "", "stderr": "Blocked for security reasons"}, ensure_ascii=False)
+
+    # Human-in-the-loop for high-risk but not blocked commands
+    if _is_destructive_command(command):
+        if not _confirm_destructive(command):
+            return json.dumps({"error": "Command cancelled by user", "exit_code": -1,
+                              "stdout": "", "stderr": "Cancelled by user"}, ensure_ascii=False)
+
     t0 = time.time()
     attempts = 0
     max_attempts = 3
