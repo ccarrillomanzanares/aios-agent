@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Chat interactivo con el agente SRE.
-La sesión se guarda automáticamente al salir y se reanuda al arrancar."""
+"""Interactive chat with the SRE agent.
+The session is automatically saved on exit and resumed on startup."""
 import json
 from pathlib import Path
 
@@ -9,35 +9,35 @@ from tools import execute_tool
 
 
 def handle_slash(agent: Agent, query: str) -> bool:
-    """Procesa comandos slash. Devuelve True si el comando fue consumido."""
+    """Process slash commands. Returns True if the command was consumed."""
     cmd = query.strip()
     lowered = cmd.lower()
 
     if lowered == "/retry":
-        # Elimina el último intercambio del historial (user + assistant/tool)
+        # Remove the last exchange from history (user + assistant/tool)
         if len(agent.messages) <= 1:
-            print("  [No hay intercambios para reintentar]")
+            print("  [No exchanges to retry]")
         else:
             removed = []
-            # Borrar en orden inverso hasta consumir un intercambio completo
+            # Delete in reverse order until a full exchange is consumed
             while len(agent.messages) > 1:
                 last = agent.messages.pop()
                 removed.append(last["role"])
                 if last["role"] == "user":
                     break
-            print(f"  [Último intercambio eliminado ({', '.join(removed)})]")
+            print(f"  [Last exchange removed ({', '.join(removed)})]")
         return True
 
     if lowered == "/save":
         agent._save_session()
         from agent import SESSION_FILE
-        print(f"  [Sesión guardada en {SESSION_FILE}]")
+        print(f"  [Session saved to {SESSION_FILE}]")
         return True
 
     if lowered == "/clear":
         system = agent.messages[0] if agent.messages else {"role": "system", "content": ""}
         agent.messages = [system]
-        print("  [Historial borrado; system prompt conservado]")
+        print("  [History cleared; system prompt preserved]")
         return True
 
     if lowered == "/stats":
@@ -46,7 +46,7 @@ def handle_slash(agent: Agent, query: str) -> bool:
         from agent import SESSION_FILE
         session_file = Path(SESSION_FILE)
         session_size = session_file.stat().st_size if session_file.exists() else 0
-        print(f"  [Stats] mensajes: {total_msgs}, skills en memoria: {memory_count}, session.json: {session_size} bytes")
+        print(f"  [Stats] messages: {total_msgs}, skills in memory: {memory_count}, session.json: {session_size} bytes")
         return True
 
     if lowered.startswith("/git"):
@@ -74,7 +74,7 @@ def handle_slash(agent: Agent, query: str) -> bool:
             if parsed.get("stderr"):
                 print(f"  stderr:\n{parsed['stderr']}")
         except Exception as e:
-            print(f"  [Error ejecutando git_operation: {e}]")
+            print(f"  [Error executing git_operation: {e}]")
         return True
 
     return False
@@ -82,26 +82,26 @@ def handle_slash(agent: Agent, query: str) -> bool:
 
 def main():
     agent = Agent()
-    print("Agente SRE. Escribe tu consulta o 'salir'.")
-    print("Comandos: /retry /save /clear /stats /git [status|diff|...]")
-    print("El agente puede ejecutar comandos, leer y escribir archivos.\n")
+    print("SRE Agent. Type your query or 'exit'.")
+    print("Commands: /retry /save /clear /stats /git [status|diff|...]")
+    print("The agent can run commands, read and write files.\n")
 
     while True:
         try:
             query = input("> ").strip()
         except (EOFError, KeyboardInterrupt):
             agent._save_session()
-            print("\n¡Hasta luego!")
+            print("\nGoodbye!")
             break
 
         if not query:
             continue
         if query.lower() in ("salir", "exit", "quit"):
             agent._save_session()
-            print("¡Hasta luego!")
+            print("Goodbye!")
             break
 
-        # Procesar slash commands antes de enviar al agente
+        # Process slash commands before sending to the agent
         if query.startswith("/") and handle_slash(agent, query):
             continue
 

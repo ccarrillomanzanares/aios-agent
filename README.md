@@ -1,22 +1,22 @@
-# aios-agent v2.1 — Agente SRE con function calling nativo
+# aios-agent v2.1 — SRE Agent with native function calling
 
-Agente ligero de Operaciones de Fiabilidad de Sitio (SRE) que usa **function calling nativo** sobre el modelo local **Qwen3-8B** (servido por llama.cpp). Puede ejecutar comandos Linux, leer archivos de configuración/logs y escribir cambios controlados, todo a través de una conversación en español.
+A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen3-8B** model (served by llama.cpp). It can run Linux commands, read configuration/log files, and write controlled changes, all through a conversation in Spanish.
 
-## ¿Qué hace?
+## What does it do?
 
-- Responde preguntas de sysadmin en español.
-- Ejecuta comandos shell en la máquina local (`run_command`).
-- Lee archivos de configuración y logs (`read_file`).
-- Escribe archivos en rutas permitidas, bloqueando directorios de sistema (`write_file`).
-- Mantiene contexto conversacional y realiza hasta 5 turnos de razonamiento tool→LLM.
-- Planifica y ejecuta tareas multi-paso sin intervención intermedia.
+- Answers sysadmin questions in Spanish.
+- Executes shell commands on the local machine (`run_command`).
+- Reads configuration files and logs (`read_file`).
+- Writes files to allowed paths, blocking system directories (`write_file`).
+- Maintains conversational context and performs up to 5 reasoning turns of tool→LLM.
+- Plans and executes multi-step tasks without intermediate human intervention.
 
-## Arquitectura
+## Architecture
 
 ```
 ┌─────────────┐     HTTP JSON     ┌──────────────────┐
 │  chat.py    │ ────────────────▶ │   agent.py       │
-│ (CLI loop)  │                   │  orquestador     │
+│ (CLI loop)  │                   │  orchestrator    │
 └─────────────┘                   │  function calls  │
                                   └────────┬─────────┘
                                            │ tools schema
@@ -30,115 +30,115 @@ Agente ligero de Operaciones de Fiabilidad de Sitio (SRE) que usa **function cal
                                            │
                                            ▼
                                   ┌──────────────────┐
-                                  │  Qwen3-8B vía    │
+                                  │  Qwen3-8B via    │
                                   │ llama.cpp :8083  │
                                   └──────────────────┘
 ```
 
-- `chat.py`: bucle interactivo.
-- `agent.py`: gestiona mensajes, llama al LLM, ejecuta tool calls y devuelve respuestas.
-- `tools.py`: definición de herramientas y handlers.
+- `chat.py`: interactive loop.
+- `agent.py`: manages messages, calls the LLM, executes tool calls, and returns responses.
+- `tools.py`: tool definitions and handlers.
 
 ## Roadmap
 
-Features implementadas en v2.0 (todas completadas):
+Features implemented in v2.0 (all completed):
 
-- ✅ Function calling nativo sobre llama.cpp server (`/v1/chat/completions`)
-- ✅ Tool `run_command`: ejecución de comandos shell con timeout, captura de stdout/stderr/exit_code/elapsed
-- ✅ Tool `read_file`: lectura de archivos con control de permisos y límites de tamaño
-- ✅ Tool `write_file`: escritura de archivos con bloqueo de rutas de sistema críticas
-- ✅ Bucle conversacional con hasta 5 turnos tool→LLM y contexto persistente por sesión
-- ✅ Planificación y ejecución multi-paso sin intervención humana intermedia
-- ✅ Seguridad básica: advertencia previa a comandos destructivos y protección de `/etc`, `/boot`, `/sys`, `/proc`, `/dev`
-- ✅ CLI interactivo en español (`chat.py`) con comandos `salir`/`exit`/`quit`
-- ✅ README.md completo con arquitectura, uso y roadmap
-- ✅ Documentación ejecutiva en PDF (`docs/ejecutivo.pdf`)
+- ✅ Native function calling over llama.cpp server (`/v1/chat/completions`)
+- ✅ Tool `run_command`: execute shell commands with timeout, capturing stdout/stderr/exit_code/elapsed
+- ✅ Tool `read_file`: read files with permission checks and size limits
+- ✅ Tool `write_file`: write files, blocking critical system paths
+- ✅ Conversational loop with up to 5 tool→LLM turns and persistent per-session context
+- ✅ Multi-step planning and execution without intermediate human intervention
+- ✅ Basic security: warning before destructive commands and protection of `/etc`, `/boot`, `/sys`, `/proc`, `/dev`
+- ✅ Interactive CLI in Spanish (`chat.py`) with commands `salir`/`exit`/`quit`
+- ✅ Complete README.md with architecture, usage, and roadmap
+- ✅ Executive documentation in PDF (`docs/ejecutivo.pdf`)
 
-## Planificación multi-paso
+## Multi-step planning
 
-Para tareas complejas el agente no ejecuta un único function call: primero **piensa**, descompone y luego ejecuta los pasos de forma secuencial.
+For complex tasks the agent does not perform a single function call: it first **thinks**, decomposes, and then executes the steps sequentially.
 
-### Cómo funciona
+### How it works
 
-1. **Prompt de planificación**: el system prompt instruye al LLM a generar un plan numerado de pasos y a seguir ejecutándolo con la instrucción `EJECUTA sin explicar`.
-2. **`MAX_TURNS=5`**: el loop de function calling permite hasta 5 turnos, suficiente para tareas de varios pasos sin quedar corto.
-3. **Ejecución secuencial**: cada tool call se realiza, se inyecta el resultado en el contexto y el LLM decide el siguiente paso hasta que la tarea termine o se agote el presupuesto de turnos.
-4. **Sin intervención humana intermedia**: el modelo ejecuta directamente; el usuario recibe solo el resultado final resumido.
+1. **Planning prompt**: the system prompt instructs the LLM to generate a numbered plan of steps and keep executing it with the instruction `EJECUTA without explaining`.
+2. **`MAX_TURNS=5`**: the function-calling loop allows up to 5 turns, enough for several-step tasks without falling short.
+3. **Sequential execution**: each tool call is performed, its result is injected into context, and the LLM decides the next step until the task finishes or the turn budget runs out.
+4. **No intermediate human intervention**: the model executes directly; the user only receives the final summarized result.
 
-### Ejemplo de ejecución
+### Example execution
 
-**Usuario**: `instala WordPress con Docker y MariaDB`
+**User**: `install WordPress with Docker and MariaDB`
 
 ```text
-Paso 1: Verificar que Docker esté instalado y corriendo.
-Paso 2: Crear red Docker y contenedor MariaDB con variables de entorno.
-Paso 3: Levantar contenedor WordPress vinculado a MariaDB.
-Paso 4: Mostrar estado final de contenedores y puertos expuestos.
+Step 1: Verify Docker is installed and running.
+Step 2: Create Docker network and MariaDB container with environment variables.
+Step 3: Start WordPress container linked to MariaDB.
+Step 4: Show final container and exposed port status.
 ```
 
-El agente ejecuta cada paso vía `run_command`, recibe la salida y avanza automáticamente. Al finalizar responde con el resumen de lo realizado.
+The agent executes each step via `run_command`, receives the output, and advances automatically. At the end it responds with a summary of what was done.
 
-### Beneficios
+### Benefits
 
-- Resuelve tareas compuestas sin fragmentar la consulta del usuario.
-- Aprovecha el razonamiento del LLM para ordenar dependencias (`primero MariaDB, luego WordPress`).
-- Mantiene el control del bucle: puede pedir confirmación si detecta un paso destructivo o crítico.
+- Resolves composite tasks without fragmenting the user's query.
+- Leverages the LLM's reasoning to order dependencies (`first MariaDB, then WordPress`).
+- Keeps the loop under control: it can ask for confirmation if it detects a destructive or critical step.
 
-## Requisitos
+## Requirements
 
 - Python 3.10+
 - `requests` (`pip install requests`)
-- llama.cpp server corriendo Qwen3-8B en `http://localhost:8083/v1/chat/completions`
+- llama.cpp server running Qwen3-8B at `http://localhost:8083/v1/chat/completions`
 
-## Uso
+## Usage
 
 ```bash
 python3 chat.py
 ```
 
-Ejemplos de consulta:
+Example queries:
 
 ```text
-> muestra el uso de disco
-> lee /var/log/syslog
-> escribe un script de backup en /tmp/backup.sh
-> reinicia nginx
+> show disk usage
+> read /var/log/syslog
+> write a backup script at /tmp/backup.sh
+> restart nginx
 ```
 
-Escribe `salir`, `exit` o `quit` para terminar.
+Type `salir`, `exit`, or `quit` to finish.
 
-## Seguridad
+## Security
 
-- Antes de comandos destructivos el modelo advierte y pide confirmación.
-- `write_file` bloquea rutas de sistema (`/etc`, `/boot`, `/sys`, `/proc`, `/dev`).
-- El agente no guarda historial conversacional entre sesiones.
+- Before destructive commands the model warns and asks for confirmation.
+- `write_file` blocks system paths (`/etc`, `/boot`, `/sys`, `/proc`, `/dev`).
+- The agent does not persist conversational history across sessions.
 
-## Archivos
+## Files
 
-- `agent.py` — orquestador de function calling.
-- `tools.py` — herramientas shell, lectura y escritura.
-- `chat.py` — interfaz de chat por terminal.
-- `README.md` — este documento.
-- `CHANGELOG.md` — histórico de cambios.
-- `docs/ejecutivo.pdf` — resumen ejecutivo en PDF.
+- `agent.py` — function-calling orchestrator.
+- `tools.py` — shell, read, and write tools.
+- `chat.py` — terminal chat interface.
+- `README.md` — this document.
+- `CHANGELOG.md` — change history.
+- `docs/ejecutivo.pdf` — executive summary in PDF.
 
-## Historial de versiones
+## Version history
 
-### v2.0 — Agente SRE con function calling nativo sobre Qwen3-8B
+### v2.0 — SRE Agent with native function calling on Qwen3-8B
 
-- Reescritura completa del repositorio.
-- Agente ligero de SRE con function calling nativo vía llama.cpp server.
-- Nuevas herramientas:
-  - `run_command`: ejecuta comandos shell en Linux.
-  - `read_file`: lee archivos de configuración y logs.
-  - `write_file`: escribe archivos, bloqueando rutas de sistema críticas.
-- Soporte conversacional en español con hasta 5 turnos de razonamiento.
-- Planificación y ejecución multi-paso sin intervención intermedia.
-- Seguridad básica: advertencia antes de comandos destructivos y bloqueo de `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
-- CLI interactivo en `chat.py`.
-- README.md completo con roadmap de features implementadas.
-- PDF ejecutivo v2.0 en `docs/ejecutivo.pdf`.
+- Complete repository rewrite.
+- Lightweight SRE agent with native function calling via llama.cpp server.
+- New tools:
+  - `run_command`: execute Linux shell commands.
+  - `read_file`: read configuration and log files.
+  - `write_file`: write files, blocking critical system paths.
+- Spanish conversational support with up to 5 reasoning turns.
+- Multi-step planning and execution without intermediate intervention.
+- Basic security: warning before destructive commands and blocking of `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
+- Interactive CLI in `chat.py`.
+- Complete README.md with roadmap of implemented features.
+- Executive PDF v2.0 in `docs/ejecutivo.pdf`.
 
-## Licencia
+## License
 
-MIT / Uso interno.
+MIT / Internal use.

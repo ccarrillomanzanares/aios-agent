@@ -1,4 +1,4 @@
-"""Agente SRE ligero — function calling con Qwen3-8B."""
+"""Lightweight SRE Agent — native function calling with Qwen3-8B."""
 import json
 import re
 from pathlib import Path
@@ -35,7 +35,7 @@ class Agent:
         self._load_session()
 
     def _quick_llm(self, prompt: str, tokens: int = 20, temp: float = 0.0) -> str:
-        """LLM rápido sin tools, para generación de claves y compresión."""
+        """Fast LLM call without tools, used for key generation and compression."""
         resp = requests.post(
             LLAMA_SERVER,
             json={"messages": [{"role": "user", "content": f"/no_think {prompt}"}],
@@ -46,15 +46,15 @@ class Agent:
         return data["choices"][0]["message"]["content"].strip()
 
     def _count_tokens(self, texts: list[str]) -> int:
-        """Estimación burda: 4 chars ≈ 1 token."""
+        """Rough token estimator: 4 chars ≈ 1 token."""
         return sum(len(t) // 4 for t in texts)
 
     def _compress(self):
-        """Comprime el historial cuando supera el límite."""
+        """Compress history when it exceeds the token limit."""
         texts = [m.get("content", "") for m in self.messages]
         if self._count_tokens(texts) < MAX_HISTORY_TOKENS:
             return
-        # Mantener system prompt + últimos 3 intercambios (6 mensajes)
+        # Keep system prompt + last 3 exchanges (6 messages)
         keep = [self.messages[0]]
         if len(self.messages) > 6:
             old = self.messages[1:-6]
@@ -75,20 +75,20 @@ class Agent:
         self.messages = keep
 
     def _save_session(self):
-        """Guarda el historial de la conversación al salir."""
+        """Save conversation history on exit."""
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
             json.dump(self.messages, f, ensure_ascii=False)
 
     def _load_session(self):
-        """Carga el historial de la conversación anterior."""
+        """Load previous conversation history."""
         if SESSION_FILE.exists():
             try:
                 old = json.loads(SESSION_FILE.read_text())
-                # Mantener system prompt original, concatenar historial cargado
+                # Keep original system prompt, append loaded history
                 loaded_messages = [m for m in old if m["role"] != "system"]
                 self.messages.extend(loaded_messages)
-                # Comprimir si el historial cargado es muy largo
+                # Compress if loaded history is too long
                 texts = [m.get("content", "") for m in self.messages]
                 if self._count_tokens(texts) > MAX_HISTORY_TOKENS:
                     self._compress()
@@ -97,16 +97,16 @@ class Agent:
                 pass
 
     def _clean(self, text: str) -> str:
-        """Limpia think blocks y normaliza."""
+        """Clean think blocks and normalize."""
         text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
         return text
 
     def run(self, query: str) -> str:
-        """Procesa una consulta con function calling loop. Primero busca en memoria procedural."""
-        # Comprimir historial si es necesario
+        """Process a query with a function-calling loop. First checks procedural memory."""
+        # Compress history if needed
         self._compress()
 
-        # 1. Buscar en caché procedural
+        # 1. Search procedural cache
         cached = self.memory.find(query, self._quick_llm)
         if cached:
             return f"[cache] {cached}"
@@ -133,7 +133,7 @@ class Agent:
             msg = choice["message"]
             finish = choice.get("finish_reason", "")
 
-            # Tool call → ejecutar y devolver resultado al LLM
+            # Tool call → execute and return result to LLM
             if finish == "tool_calls" or msg.get("tool_calls"):
                 assistant_msg = {"role": "assistant", "content": msg.get("content") or ""}
                 if msg.get("tool_calls"):
@@ -157,13 +157,13 @@ class Agent:
                         "tool_call_id": tc.get("id", "call_0"),
                         "content": result
                     })
-                continue  # siguiente iteración: LLM procesa el resultado
+                continue  # next iteration: LLM processes the result
 
-            # Respuesta final (texto)
+            # Final response (text)
             if msg.get("content"):
                 final_response = self._clean(msg["content"])
                 self.messages.append({"role": "assistant", "content": final_response})
-                # Si hubo tools, guardar en memoria procedural
+                # If tools were used, store in procedural memory
                 had_tools = any(m["role"] == "tool" for m in self.messages[-5:])
                 if had_tools and final_response and final_response != "No lo sé":
                     self.memory.store(query, final_response, self._quick_llm)
@@ -176,5 +176,5 @@ class Agent:
         return final_response or "(sin respuesta)"
 
     def reset(self):
-        """Reinicia la conversación."""
+        """Reset conversation."""
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
