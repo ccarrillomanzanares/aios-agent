@@ -1,28 +1,14 @@
-# CHANGELOG.md
+# Changelog
 
-Todos los cambios notables de este proyecto se documentarán aquí.
+## v2.0 — Agente SRE con function calling nativo sobre Qwen3-8B
 
-## [Unreleased]
-
-### Añadido
-- `setup.sh`: instalador automático que verifica CPU, compila llama.cpp, crea venv, instala dependencias Python, descarga el modelo GGUF por defecto y reconstruye el índice RAG.
-- `requirements.txt`: dependencias Python del proyecto.
-- CHANGELOG.md: registro de cambios.
-
-### Cambiado
-- `README.md`: eliminadas referencias específicas al VPS y convertido a instrucciones genéricas con `./setup.sh`.
-- `scripts/start_llm.sh`: paths absolutos reemplazados por paths relativos al directorio del proyecto.
-- `rag/config.yaml`: `db_path` ahora es relativo (`./rag/chroma_db`).
-
-### Arreglado
-- Corrección de nombres en comandos anteriores: el orquestador detecta patrones como `no X, Y` y reemplaza la palabra en el comando manteniendo la acción.
-- Executor con detección de inactividad: comandos como `apt install` que emiten progreso no mueren por timeout absoluto.
-
-## [Initial] - 2026-07-17
-
-### Añadido
-- MVP de orquestador SRE con RAG local, LLM local y executor seguro.
-- Modos del orquestador: EXPLAIN, COMMAND, PLAN, ASK, DONE.
-- Dataset de 96 documentos SRE técnicos.
-- Evaluación automática con `scripts/evaluate.py`.
-- Documentación: README.md, STATUS.md, SECURITY.md, DECISIONS.md.
+- Reescritura completa del repositorio.
+- Agente ligero de SRE con function calling nativo vía llama.cpp server.
+- Nuevas herramientas:
+  - `run_command`: ejecuta comandos shell en Linux.
+  - `read_file`: lee archivos de configuración y logs.
+  - `write_file`: escribe archivos, bloqueando rutas de sistema críticas.
+- Soporte conversacional en español con hasta 5 turnos de razonamiento.
+- Seguridad básica: advertencia antes de comandos destructivos y bloqueo de `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
+- CLI interactivo en `chat.py`.
+- README.md y PDF ejecutivo en `docs/ejecutivo.pdf`.

@@ -1,176 +1,81 @@
-# SRE Copilot
+# aios-agent v2.0 — Agente SRE con function calling nativo
 
-Asistente de administración de sistemas Linux basado en LLM local + RAG + orquestador seguro.
+Agente ligero de Operaciones de Fiabilidad de Sitio (SRE) que usa **function calling nativo** sobre el modelo local **Qwen3-8B** (servido por llama.cpp). Puede ejecutar comandos Linux, leer archivos de configuración/logs y escribir cambios controlados, todo a través de una conversación en español.
+
+## ¿Qué hace?
+
+- Responde preguntas de sysadmin en español.
+- Ejecuta comandos shell en la máquina local (`run_command`).
+- Lee archivos de configuración y logs (`read_file`).
+- Escribe archivos en rutas permitidas, bloqueando directorios de sistema (`write_file`).
+- Mantiene contexto conversacional y realiza hasta 5 turnos de razonamiento tool→LLM.
 
 ## Arquitectura
 
 ```
-Usuario
-  │
-  ▼
-CLI interactivo (orchestrator/main.py)
-  │
-  ├──► RAG (ChromaDB + intfloat/multilingual-e5-large)
-  │
-  └──► LLM local (llama.cpp + Meta-Llama-3.1-8B-Instruct)
-            │
-            ▼
-        Executor seguro (solo-lectura auto, resto con aprobación)
+┌─────────────┐     HTTP JSON     ┌──────────────────┐
+│  chat.py    │ ────────────────▶ │   agent.py       │
+│ (CLI loop)  │                   │  orquestador     │
+└─────────────┘                   │  function calls  │
+                                  └────────┬─────────┘
+                                           │ tools schema
+                                           ▼
+                                  ┌──────────────────┐
+                                  │    tools.py      │
+                                  │ run_command      │
+                                  │ read_file        │
+                                  │ write_file       │
+                                  └──────────────────┘
+                                           │
+                                           ▼
+                                  ┌──────────────────┐
+                                  │  Qwen3-8B vía    │
+                                  │ llama.cpp :8083  │
+                                  └──────────────────┘
 ```
 
-## Inicio rápido
+- `chat.py`: bucle interactivo.
+- `agent.py`: gestiona mensajes, llama al LLM, ejecuta tool calls y devuelve respuestas.
+- `tools.py`: definición de herramientas y handlers.
+
+## Requisitos
+
+- Python 3.10+
+- `requests` (`pip install requests`)
+- llama.cpp server corriendo Qwen3-8B en `http://localhost:8083/v1/chat/completions`
+
+## Uso
 
 ```bash
-# Clonar o entrar al directorio del proyecto
-cd aios-agent
-
-# Instalación automática (compila llama.cpp, descarga modelo y reconstruye RAG)
-./setup.sh
-
-# En otra terminal, arrancar el servidor LLM
-source venv/bin/activate
-scripts/start_llm.sh
-
-# Lanzar el orquestador
-source venv/bin/activate
-python orchestrator/main.py
-
-# Evaluación automática
-source venv/bin/activate
-python scripts/evaluate.py
+python3 chat.py
 ```
 
-El script `setup.sh` realiza los siguientes pasos:
+Ejemplos de consulta:
 
-1. Verifica CPU x86_64 con AVX2 y dependencias del sistema (`git`, `curl`, `wget`, `python3`, `pip3`, `make`, `cmake`, `g++`).
-2. Crea el entorno virtual en `venv/` e instala dependencias Python.
-3. Clona y compila `llama.cpp` (tag `b5200`) en `llama.cpp/build/`.
-4. Descarga el modelo por defecto (`Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf`) de HuggingFace.
-5. Reconstruye el índice RAG con los documentos de `data/external/`.
-
-Para usar otro modelo, define `MODEL_NAME` y `MODEL_REPO` antes de ejecutar `setup.sh`:
-
-```bash
-MODEL_NAME="Llama-3.2-3B-Instruct-Q4_K_M.gguf" \
-MODEL_REPO="bartowski/Llama-3.2-3B-Instruct-GGUF" \
-./setup.sh
+```text
+> muestra el uso de disco
+> lee /var/log/syslog
+> escribe un script de backup en /tmp/backup.sh
+> reinicia nginx
 ```
 
-El servicio LLM puede ejecutarse como servicio systemd del usuario:
-
-```bash
-systemctl --user status sre-llm.service
-```
-
-## Modos del orquestador
-
-- **EXPLAIN:** respuesta informativa.
-- **COMMAND:** un solo comando, aprobación si no es solo-lectura.
-- **PLAN:** lista de comandos; se pide aprobación paso a paso.
-- **ASK:** aclaración al usuario.
-- **DONE:** tarea finalizada.
+Escribe `salir`, `exit` o `quit` para terminar.
 
 ## Seguridad
 
-- Lista blanca de comandos de solo lectura (`ls`, `df`, `systemctl status`, `journalctl`, etc.).
-- Cualquier redirección (`>`, `>>`), pipe (`|`), secuencia (`;`, `&&`, `||`) o subshell requiere aprobación.
-- Lista negra de comandos destructivos.
-- Logs en `logs/orchestrator.log`.
+- Antes de comandos destructivos el modelo advierte y pide confirmación.
+- `write_file` bloquea rutas de sistema (`/etc`, `/boot`, `/sys`, `/proc`, `/dev`).
+- El agente no guarda historial entre sesiones.
 
-## Modelo
+## Archivos
 
-- **Base:** `Meta-Llama-3.1-8B-Instruct-GGUF`
-- **Quant:** `Q5_K_M` (~5.4 GB)
-- **Backend:** `llama.cpp` build 5200
-- **API:** OpenAI-compatible en `http://127.0.0.1:8080/v1`
-- **Contexto:** 8192 tokens
+- `agent.py` — orquestador de function calling.
+- `tools.py` — herramientas shell, lectura y escritura.
+- `chat.py` — interfaz de chat por terminal.
+- `README.md` — este documento.
+- `CHANGELOG.md` — histórico de cambios.
+- `docs/ejecutivo.pdf` — resumen ejecutivo en PDF.
 
-Cambiar de modelo:
+## Licencia
 
-```bash
-MODEL=models/Otro.gguf scripts/start_llm.sh
-```
-
-O editando `scripts/start_llm.sh` antes de reiniciar.
-
-Modelos disponibles:
-
-- `Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf` (activo)
-- `Llama-3.2-3B-Instruct-Q4_K_M.gguf` (backup)
-- `microsoft_Phi-4-mini-instruct-Q4_K_M.gguf` (backup, no probado con éxito)
-
-## Dataset
-
-96 documentos técnicos indexados en ChromaDB (507 chunks):
-
-### Seguridad
-- SSH hardening, sudoers/PAM
-- UFW, firewalld, nftables
-- auditd, AppArmor, SELinux
-- OpenSCAP/CIS, Lynis
-- WireGuard, OpenVPN, Tailscale
-- Fail2Ban, certbot/acme.sh
-
-### Redes
-- iproute2, VLAN/bonding/bridge
-- HAProxy, Traefik, Caddy, Squid
-- BIND9, Unbound, DHCP
-
-### Almacenamiento y backups
-- LVM, ZFS, Btrfs, mdadm, LUKS
-- NFS, rsync, restic, BorgBackup
-
-### Bases de datos y mensajería
-- PostgreSQL, MySQL/MariaDB, Redis
-
-### Monitorización y logs
-- Prometheus + Node Exporter + Alertmanager
-- Grafana, Loki/Promtail, ELK/EFK, Netdata
-
-### Contenedores y virtualización
-- Docker, Docker Compose, Podman
-- Kubernetes básico, Helm, Kustomize
-
-### Automatización e infraestructura
-- Ansible, Terraform, cloud-init
-- GitHub Actions, GitLab CI
-- systemd timers
-
-### Rendimiento y troubleshooting
-- strace/ltrace, perf/flame graphs
-- Sysdig/Falco, cgroup v2
-- tuned/cpupower, I/O schedulers
-- zram/zswap
-
-### Cloud
-- AWS CLI, rclone/s3cmd
-
-### Servicios clásicos
-- Postfix, OpenLDAP cliente, Samba
-- SFTP chroot
-
-### Sistema y referencia
-- systemd, systemd-networkd, systemd timers
-- Linux kernel sysctl, proc filesystem
-- Manpages locales de herramientas clave
-- SRE-Copilot metadata
-
-## Scripts útiles
-
-- `scripts/start_llm.sh` — arranca `llama-server`.
-- `scripts/fetch_sre_docs.py` — descarga documentación pública.
-- `scripts/extract_manpages.sh` — extrae manpages del sistema Linux anfitrión.
-- `scripts/gen_sre_docs.py` — genera guías SRE estándar.
-- `rag/build_index.py` — reconstruye la base vectorial.
-- `scripts/build_index_verbose.py` — reconstruye con progreso detallado.
-- `scripts/debug_llm.py` — depura respuestas del LLM.
-- `scripts/evaluate.py` — suite de evaluación automática.
-
-## Configuración
-
-- `rag/config.yaml`
-- `orchestrator/prompts.yaml`
-
-## Autor
-
-Proyecto experimental de Carlos (SRE Copilot).
+MIT / Uso interno.
