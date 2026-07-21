@@ -9,7 +9,7 @@ Agente ligero de Operaciones de Fiabilidad de Sitio (SRE) que usa **function cal
 - Lee archivos de configuración y logs (`read_file`).
 - Escribe archivos en rutas permitidas, bloqueando directorios de sistema (`write_file`).
 - Mantiene contexto conversacional y realiza hasta 5 turnos de razonamiento tool→LLM.
-- Recuerda soluciones de interacciones anteriores mediante una **memoria procedural** caché (skills_memory.json).
+- Planifica y ejecuta tareas multi-paso sin intervención intermedia.
 
 ## Arquitectura
 
@@ -38,43 +38,51 @@ Agente ligero de Operaciones de Fiabilidad de Sitio (SRE) que usa **function cal
 - `chat.py`: bucle interactivo.
 - `agent.py`: gestiona mensajes, llama al LLM, ejecuta tool calls y devuelve respuestas.
 - `tools.py`: definición de herramientas y handlers.
-- `memory.py`: memoria procedural (caché de skills).
 
-## Memoria procedural
+## Roadmap
 
-El agente incluye una capa de **memoria procedural** inspirada en *Skill-Pro: Learning Procedural Memory for Autonomous Coding Agents* (ICML 2026 spotlight, arXiv 2602.01869) y en el mecanismo de *Agent Skills* de Claude Code.
+Features implementadas en v2.0 (todas completadas):
 
-### ¿Por qué?
+- ✅ Function calling nativo sobre llama.cpp server (`/v1/chat/completions`)
+- ✅ Tool `run_command`: ejecución de comandos shell con timeout, captura de stdout/stderr/exit_code/elapsed
+- ✅ Tool `read_file`: lectura de archivos con control de permisos y límites de tamaño
+- ✅ Tool `write_file`: escritura de archivos con bloqueo de rutas de sistema críticas
+- ✅ Bucle conversacional con hasta 5 turnos tool→LLM y contexto persistente por sesión
+- ✅ Planificación y ejecución multi-paso sin intervención humana intermedia
+- ✅ Seguridad básica: advertencia previa a comandos destructivos y protección de `/etc`, `/boot`, `/sys`, `/proc`, `/dev`
+- ✅ CLI interactivo en español (`chat.py`) con comandos `salir`/`exit`/`quit`
+- ✅ README.md completo con arquitectura, uso y roadmap
+- ✅ Documentación ejecutiva en PDF (`docs/ejecutivo.pdf`)
 
-Resolver problemas de SRE repetidos —por ejemplo, reiniciar un servicio tras un error, limpiar logs o diagnosticar un puerto— obliga al LLM local a razonar desde cero en cada consulta. Con la memoria procedural, el agente almacena la solución una vez y la reutiliza en siguientes ocasiones, reduciendo drásticamente la latencia.
+## Planificación multi-paso
+
+Para tareas complejas el agente no ejecuta un único function call: primero **piensa**, descompone y luego ejecuta los pasos de forma secuencial.
 
 ### Cómo funciona
 
-- `memory.py` mantiene un caché JSON (`skills_memory.json`) junto al agente.
-- Cada entrada guarda:
-  - una **clave canónica** generada por el LLM,
-  - la consulta original,
-  - la solución ejecutada,
-  - contadores de uso (`hits`) y timestamps.
-- Las claves se normalizan **vía LLM** (2-5 palabras técnicas) en lugar de embeddings, manteniendo el sistema ligero y sin dependencias vectoriales.
-- Búsqueda híbrida: primero coincidencia exacta de clave, luego similitud de palabras con umbral 0.75.
-- El caché se limita a 200 entradas; las menos usadas se descartan automáticamente.
+1. **Prompt de planificación**: el system prompt instruye al LLM a generar un plan numerado de pasos y a seguir ejecutándolo con la instrucción `EJECUTA sin explicar`.
+2. **`MAX_TURNS=5`**: el loop de function calling permite hasta 5 turnos, suficiente para tareas de varios pasos sin quedar corto.
+3. **Ejecución secuencial**: cada tool call se realiza, se inyecta el resultado en el contexto y el LLM decide el siguiente paso hasta que la tarea termine o se agote el presupuesto de turnos.
+4. **Sin intervención humana intermedia**: el modelo ejecuta directamente; el usuario recibe solo el resultado final resumido.
 
-### Ahorro real de tiempo
+### Ejemplo de ejecución
 
-| Consulta | Primera vez | Con memoria |
-|----------|-------------|-------------|
-| Reiniciar nginx tras error 502 | ~25 s | ~0.2 s |
-| Limpiar logs de /var/log | ~25 s | ~0.2 s |
-| Diagnosticar puerto 8080 ocupado | ~25 s | ~0.2 s |
+**Usuario**: `instala WordPress con Docker y MariaDB`
 
-La primera vez el agente razona con el LLM y ejecuta herramientas; la segunda vez recupera la solución aprendida y la devuelve casi instantáneamente.
+```text
+Paso 1: Verificar que Docker esté instalado y corriendo.
+Paso 2: Crear red Docker y contenedor MariaDB con variables de entorno.
+Paso 3: Levantar contenedor WordPress vinculado a MariaDB.
+Paso 4: Mostrar estado final de contenedores y puertos expuestos.
+```
 
-### Ficheros implicados
+El agente ejecuta cada paso vía `run_command`, recibe la salida y avanza automáticamente. Al finalizar responde con el resumen de lo realizado.
 
-- `memory.py` — implementación de `ProceduralMemory`.
-- `skills_memory.json` — caché persistente de soluciones aprendidas.
-- `agent.py` y `chat.py` — integración con el flujo conversacional.
+### Beneficios
+
+- Resuelve tareas compuestas sin fragmentar la consulta del usuario.
+- Aprovecha el razonamiento del LLM para ordenar dependencias (`primero MariaDB, luego WordPress`).
+- Mantiene el control del bucle: puede pedir confirmación si detecta un paso destructivo o crítico.
 
 ## Requisitos
 
@@ -99,51 +107,37 @@ Ejemplos de consulta:
 
 Escribe `salir`, `exit` o `quit` para terminar.
 
-## Planificación multi-paso
-
-Para tareas complejas el agente no ejecuta un único function call: primero **piensa**, descompone y luego ejecuta los pasos de forma secuencial.
-
-### Cómo funciona
-
-1. **Prompt de planificación**: el system prompt instruye al LLM a generar un plan numerado de pasos y a seguir ejecutándolo con la instrucción `EJECUTA sin explicar`.
-2. **`MAX_TURNS=10`**: el loop de function calling permite hasta 10 turnos, suficiente para tareas de varios pasos sin quedar corto.
-3. **Ejecución secuencial**: cada tool call se realiza, se inyecta el resultado en el contexto y el LLM decide el siguiente paso hasta que la tarea termina o se agota el presupuesto de turnos.
-4. **Sin intervención humana intermedia**: el modelo ejecuta directamente; el usuario recibe solo el resultado final resumido.
-
-### Ejemplo de ejecución
-
-**Usuario**: `instala WordPress con Docker y MariaDB`
-
-```text
-Paso 1: Verificar que Docker esté instalado y corriendo.
-Paso 2: Crear red Docker y contenedor MariaDB con variables de entorno.
-Paso 3: Levantar contenedor WordPress vinculado a MariaDB.
-Paso 4: Mostrar estado final de contenedores y puertos expuestos.
-```
-
-El agente ejecuta cada paso vía `run_command`, recibe la salida y avanza automáticamente. Al finalizar responde con el resumen de lo realizado.
-
-### Beneficios
-
-- Resuelve tareas compuestas sin fragmentar la consulta del usuario.
-- Aprovecha el razonamiento del LLM para ordenar dependencias (`primero MariaDB, luego WordPress`).
-- Mantiene el control del bucle: puede pedir confirmación si detecta un paso destructivo o crítico.
-
 ## Seguridad
 
 - Antes de comandos destructivos el modelo advierte y pide confirmación.
 - `write_file` bloquea rutas de sistema (`/etc`, `/boot`, `/sys`, `/proc`, `/dev`).
-- El agente no guarda historial conversacional entre sesiones; solo persiste la memoria procedural.
+- El agente no guarda historial conversacional entre sesiones.
 
 ## Archivos
 
 - `agent.py` — orquestador de function calling.
-- `tools.py` — herrameras shell, lectura y escritura.
+- `tools.py` — herramientas shell, lectura y escritura.
 - `chat.py` — interfaz de chat por terminal.
-- `memory.py` — memoria procedural.
 - `README.md` — este documento.
 - `CHANGELOG.md` — histórico de cambios.
 - `docs/ejecutivo.pdf` — resumen ejecutivo en PDF.
+
+## Historial de versiones
+
+### v2.0 — Agente SRE con function calling nativo sobre Qwen3-8B
+
+- Reescritura completa del repositorio.
+- Agente ligero de SRE con function calling nativo vía llama.cpp server.
+- Nuevas herramientas:
+  - `run_command`: ejecuta comandos shell en Linux.
+  - `read_file`: lee archivos de configuración y logs.
+  - `write_file`: escribe archivos, bloqueando rutas de sistema críticas.
+- Soporte conversacional en español con hasta 5 turnos de razonamiento.
+- Planificación y ejecución multi-paso sin intervención intermedia.
+- Seguridad básica: advertencia antes de comandos destructivos y bloqueo de `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
+- CLI interactivo en `chat.py`.
+- README.md completo con roadmap de features implementadas.
+- PDF ejecutivo v2.0 en `docs/ejecutivo.pdf`.
 
 ## Licencia
 
