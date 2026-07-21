@@ -39,9 +39,32 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 - `agent.py`: manages messages, calls the LLM, executes tool calls, and returns responses.
 - `tools.py`: tool definitions and handlers.
 
+## Model
+
+The definitive model is **Qwen3-8B** (Q4_K_M quantization) served by llama.cpp.
+
+During development we also evaluated **Qwen3-4B**, but it was discarded because its function calling was inconsistent: it produced malformed tool calls, invented non-existent functions, and ignored the JSON schema. Since native function calling is the core mechanism of the agent, Qwen3-4B was not reliable enough for unattended, multi-step SRE tasks.
+
+Qwen3-8B was chosen because it consistently emits valid `tool_calls` payloads, respects the declared schema, and completes multi-step plans correctly, while keeping acceptable latency on modest hardware.
+
+- Production service points to `:8083` and loads **Qwen3-8B Q4_K_M**.
+- Qwen3-4B has been removed from the server and is no longer available.
+- All documentation, tests, and examples assume Qwen3-8B as the backing model.
+
+## Readline history
+
+The interactive CLI now supports standard terminal line editing through Python's `readline` module:
+
+- **Up / Down arrows**: browse previous commands entered in the current session and across sessions.
+- **Left / Right arrows**: move the cursor to edit the current line.
+- **Persistent history**: commands are saved to `data/.chat_history` and reloaded on startup (up to 500 entries).
+- This works in any standard terminal on Linux, macOS, and in Windows terminals using a readline-compatible shell.
+
+Session context (files read/written and tool results) is still managed by the agent; the readline history only stores the user's input lines.
+
 ## Roadmap
 
-Features implemented in v2.0 (all completed):
+Features implemented in v2.1 (all completed):
 
 - ✅ Native function calling over llama.cpp server (`/v1/chat/completions`)
 - ✅ Tool `run_command`: execute shell commands with timeout, capturing stdout/stderr/exit_code/elapsed
@@ -51,6 +74,7 @@ Features implemented in v2.0 (all completed):
 - ✅ Multi-step planning and execution without intermediate human intervention
 - ✅ Basic security: warning before destructive commands and protection of `/etc`, `/boot`, `/sys`, `/proc`, `/dev`
 - ✅ Interactive CLI in Spanish (`chat.py`) with commands `salir`/`exit`/`quit`
+- ✅ Readline history and cursor navigation in the CLI
 - ✅ Complete README.md with architecture, usage, and roadmap
 - ✅ Executive documentation in PDF (`docs/ejecutivo.pdf`)
 
@@ -84,27 +108,6 @@ The agent executes each step via `run_command`, receives the output, and advance
 - Leverages the LLM's reasoning to order dependencies (`first MariaDB, then WordPress`).
 - Keeps the loop under control: it can ask for confirmation if it detects a destructive or critical step.
 
-## Comparison: Qwen3-4B vs Qwen3-8B
-
-During development we evaluated both the **Qwen3-4B** and **Qwen3-8B** models (Q4_K_M quantization) served by llama.cpp.
-
-| Model | Speed | Function calling reliability | Verdict |
-|-------|-------|------------------------------|---------|
-| **Qwen3-4B** | Faster, lower latency | **Inconsistent** — often emits malformed tool calls, invents non-existent functions, or ignores the provided JSON schema | **Discarded** |
-| **Qwen3-8B** | Slightly slower, still responsive | **Reliable** — consistently produces valid `tool_calls` payloads, respects the schema, and completes multi-step tasks correctly | **Definitive model** |
-
-### Why we chose Qwen3-8B
-
-- **Function calling is the core mechanism of this agent.** A tool call that does not match the declared schema breaks the execution loop and forces the user to retry.
-- Qwen3-4B was attractive because of its lower resource consumption and faster token generation, but in practice it produced enough errors to make the agent unreliable.
-- Qwen3-8B maintains acceptable latency on modest hardware while delivering the stability required for unattended, multi-step SRE tasks.
-
-### Current deployment
-
-- The production service points to `:8083` and loads **Qwen3-8B Q4_K_M**.
-- The Qwen3-4B model has already been removed from the server and is no longer available.
-- All documentation, tests, and examples assume Qwen3-8B as the backing model.
-
 ## Requirements
 
 - Python 3.10+
@@ -132,18 +135,26 @@ Type `salir`, `exit`, or `quit` to finish.
 
 - Before destructive commands the model warns and asks for confirmation.
 - `write_file` blocks system paths (`/etc`, `/boot`, `/sys`, `/proc`, `/dev`).
-- The agent does not persist conversational history across sessions.
+- The agent does not persist conversational history across sessions (only readline input history is kept).
 
 ## Files
 
 - `agent.py` — function-calling orchestrator.
 - `tools.py` — shell, read, and write tools.
-- `chat.py` — terminal chat interface.
+- `chat.py` — terminal chat interface with readline history.
 - `README.md` — this document.
 - `CHANGELOG.md` — change history.
 - `docs/ejecutivo.pdf` — executive summary in PDF.
 
 ## Version history
+
+### v2.1 — SRE Agent with native function calling on Qwen3-8B
+
+- Definitive model set to Qwen3-8B; Qwen3-4B evaluated and discarded due to inconsistent function calling.
+- Readline history and cursor navigation in the interactive CLI (`chat.py`).
+- Session context persisted across restarts.
+- README updated with final model choice and readline section.
+- Executive PDF regenerated.
 
 ### v2.0 — SRE Agent with native function calling on Qwen3-8B
 
