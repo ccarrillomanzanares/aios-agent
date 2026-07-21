@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 
 import requests
+import yaml
+from playbook import run_playbook
 
 def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     """Execute a shell command. Returns JSON with stdout, stderr, exit_code, elapsed.
@@ -294,6 +296,20 @@ TOOLS = [
                 "required": ["server", "tool"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_playbook",
+            "description": "Read a YAML playbook and execute its steps sequentially, verifying each step. Use for: multi-step installation, configuration or maintenance workflows.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Absolute path to the .yml/.yaml playbook file"}
+                },
+                "required": ["path"]
+            }
+        }
     }
 ]
 
@@ -306,6 +322,7 @@ def execute_tool(name: str, args: dict) -> str:
         "web_search": web_search,
         "git_operation": git_operation,
         "mcp_call": mcp_call,
+        "run_playbook": run_playbook,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
