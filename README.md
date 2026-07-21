@@ -99,6 +99,36 @@ Ejemplos de consulta:
 
 Escribe `salir`, `exit` o `quit` para terminar.
 
+## Planificación multi-paso
+
+Para tareas complejas el agente no ejecuta un único function call: primero **piensa**, descompone y luego ejecuta los pasos de forma secuencial.
+
+### Cómo funciona
+
+1. **Prompt de planificación**: el system prompt instruye al LLM a generar un plan numerado de pasos y a seguir ejecutándolo con la instrucción `EJECUTA sin explicar`.
+2. **`MAX_TURNS=10`**: el loop de function calling permite hasta 10 turnos, suficiente para tareas de varios pasos sin quedar corto.
+3. **Ejecución secuencial**: cada tool call se realiza, se inyecta el resultado en el contexto y el LLM decide el siguiente paso hasta que la tarea termina o se agota el presupuesto de turnos.
+4. **Sin intervención humana intermedia**: el modelo ejecuta directamente; el usuario recibe solo el resultado final resumido.
+
+### Ejemplo de ejecución
+
+**Usuario**: `instala WordPress con Docker y MariaDB`
+
+```text
+Paso 1: Verificar que Docker esté instalado y corriendo.
+Paso 2: Crear red Docker y contenedor MariaDB con variables de entorno.
+Paso 3: Levantar contenedor WordPress vinculado a MariaDB.
+Paso 4: Mostrar estado final de contenedores y puertos expuestos.
+```
+
+El agente ejecuta cada paso vía `run_command`, recibe la salida y avanza automáticamente. Al finalizar responde con el resumen de lo realizado.
+
+### Beneficios
+
+- Resuelve tareas compuestas sin fragmentar la consulta del usuario.
+- Aprovecha el razonamiento del LLM para ordenar dependencias (`primero MariaDB, luego WordPress`).
+- Mantiene el control del bucle: puede pedir confirmación si detecta un paso destructivo o crítico.
+
 ## Seguridad
 
 - Antes de comandos destructivos el modelo advierte y pide confirmación.
