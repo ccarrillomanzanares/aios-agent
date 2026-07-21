@@ -84,6 +84,27 @@ The agent executes each step via `run_command`, receives the output, and advance
 - Leverages the LLM's reasoning to order dependencies (`first MariaDB, then WordPress`).
 - Keeps the loop under control: it can ask for confirmation if it detects a destructive or critical step.
 
+## Comparison: Qwen3-4B vs Qwen3-8B
+
+During development we evaluated both the **Qwen3-4B** and **Qwen3-8B** models (Q4_K_M quantization) served by llama.cpp.
+
+| Model | Speed | Function calling reliability | Verdict |
+|-------|-------|------------------------------|---------|
+| **Qwen3-4B** | Faster, lower latency | **Inconsistent** — often emits malformed tool calls, invents non-existent functions, or ignores the provided JSON schema | **Discarded** |
+| **Qwen3-8B** | Slightly slower, still responsive | **Reliable** — consistently produces valid `tool_calls` payloads, respects the schema, and completes multi-step tasks correctly | **Definitive model** |
+
+### Why we chose Qwen3-8B
+
+- **Function calling is the core mechanism of this agent.** A tool call that does not match the declared schema breaks the execution loop and forces the user to retry.
+- Qwen3-4B was attractive because of its lower resource consumption and faster token generation, but in practice it produced enough errors to make the agent unreliable.
+- Qwen3-8B maintains acceptable latency on modest hardware while delivering the stability required for unattended, multi-step SRE tasks.
+
+### Current deployment
+
+- The production service points to `:8083` and loads **Qwen3-8B Q4_K_M**.
+- The Qwen3-4B model has already been removed from the server and is no longer available.
+- All documentation, tests, and examples assume Qwen3-8B as the backing model.
+
 ## Requirements
 
 - Python 3.10+
