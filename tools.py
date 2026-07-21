@@ -15,15 +15,15 @@ def _is_blocked_command(command: str) -> bool:
     """Return True if command matches an unconditionally blocked dangerous pattern."""
     lower = command.lower()
     # rm -rf / or rm -rf /* (root destruction only; allow rm -rf /tmp/...)
-    if re.search(r"rm\s+-rf\s+/\s*$", lower) or        re.search(r"rm\s+-rf\s+/\*", lower):
+    if re.search(r"\brm\s+-rf\s+/\s*$", lower) or        re.search(r"\brm\s+-rf\s+/\*\b", lower):
         return True
-    if re.search(r"dd\s+if=\S+\s+of=/dev/\S+", lower):
+    if re.search(r"\bdd\s+if=\S+\s+of=/dev/\S+", lower):
         return True
-    if re.search(r"mkfs\.\w+\s+\S+", lower):
+    if re.search(r"\bmkfs\.\w+\s+\S+", lower):
         return True
-    if re.search(r"fdisk", lower):
+    if re.search(r"\bfdisk\b", lower):
         return True
-    if re.search(r"chmod.*(?:-r\s+)?000", lower):
+    if re.search(r"\bchmod\b.*(?:-r\s+)?000\b", lower):
         return True
     return False
 
@@ -31,15 +31,15 @@ def _is_blocked_command(command: str) -> bool:
 def _is_destructive_command(command: str) -> bool:
     """Return True if command requires human confirmation before execution."""
     lower = command.lower()
-    if re.search(r"rm\s+-rf", lower):
+    if re.search(r"\brm\b", lower):
         return True
-    if re.search(r"sudo\s+rm", lower):
+    if re.search(r"\bsudo\s+rm\b", lower):
         return True
-    if re.search(r">\s*/dev/sd[a-z]", lower):
+    if re.search(r"\b>\s*/dev/sd[a-z]", lower):
         return True
-    if re.search(r"format", lower):
+    if re.search(r"\bformat\b", lower):
         return True
-    if re.search(r"dd\s+if=\S+", lower):
+    if re.search(r"\bdd\s+if=\S+", lower):
         return True
     return False
 
