@@ -2,22 +2,22 @@
 
 ## Propósito
 
-aios-agent es un agente ligero de SRE que utiliza **function calling nativo** sobre el modelo local **Qwen3-8B** (served by llama.cpp). Responde en español, ejecuta comandos Linux, lee archivos de configuración y logs, y escribe archivos bajo ciertas rutas permitidas.
+aios-agent es un agente ligero de SRE que utiliza **function calling nativo** sobre el modelo local **Qwen2.5-7B-Instruct** (served by llama.cpp). Responde en español, ejecuta comandos Linux, lee archivos de configuración y logs, y escribe archivos bajo ciertas rutas permitidas.
 
 ## Modelo definitivo
 
-- **Qwen3-8B Q3_K_M** en `http://localhost:8083/v1/chat/completions`, con ventana de contexto de 8K y `MAX_HISTORY_TOKENS=6000`.
-- Se evaluó **Qwen3-4B** y se descartó: su function calling era inconsistente (tool calls mal formados, funciones inventadas, ignoraba el esquema JSON).
-- Qwen3-8B emite `tool_calls` válidos de forma consistente y completa planes multi-paso.
+- **Qwen2.5-7B-Instruct-Q4_K_M** en `http://localhost:8083/v1/chat/completions`, con ventana de contexto de 8K y `MAX_HISTORY_TOKENS=6000`.
+- Se evaluó **Qwen2.5-Coder-3B** y se descartó: su function calling era inconsistente (tool calls mal formados, funciones inventadas, ignoraba el esquema JSON).
+- Qwen2.5-7B-Instruct emite `tool_calls` válidos de forma consistente y completa planes multi-paso.
+- Los modelos antiguos de la familia Qwen3 (Qwen3-8B Q4_K_M/Q6_K/Q3_K_M y Qwen3-4B) ya han sido eliminados del servidor.
 
 ### Cuantización del modelo
 
 | Cuantización | Velocidad (tok/s) | RAM/VRAM | Calidad observada | Caso de uso |
 |--------------|-------------------|----------|-------------------|-------------|
-| Q4_K_M       | 17.0              | 4.7 GB   | Referencia        | Servidor productivo con suficiente memoria |
-| Q3_K_M       | 14.9              | 3.9 GB   | Equivalente en pruebas SRE | VPS limitado o host compartido |
+| Q4_K_M       | 57 prompt / 20 gen | 4.7 GB   | Referencia        | Servidor productivo con suficiente memoria |
 
-La instancia desplegada actualmente usa **Qwen3-8B Q3_K_M**. Para evitar desbordamientos silenciosos de contexto, `agent.py` cuenta tokens con el endpoint real `/v1/tokenize` antes de comprimir o truncar el historial, en lugar de estimar con una relación fija de caracteres por token.
+La instancia desplegada actualmente usa **Qwen2.5-7B-Instruct-Q4_K_M**. Para evitar desbordamientos silenciosos de contexto, `agent.py` cuenta tokens con el endpoint real `/v1/tokenize` antes de comprimir o truncar el historial, en lugar de estimar con una relación fija de caracteres por token.
 
 ## Funcionalidades v2.1
 
@@ -38,7 +38,7 @@ La instancia desplegada actualmente usa **Qwen3-8B Q3_K_M**. Para evitar desbord
 ## Arquitectura
 
 ```
-chat.py  --▶  agent.py  --▶  tools.py  --▶  Qwen3-8B vía llama.cpp:8083
+chat.py  --▶  agent.py  --▶  tools.py  --▶  Qwen2.5-7B-Instruct vía llama.cpp:8083
 ```
 
 - `chat.py`: bucle interactivo con readline.
@@ -83,4 +83,4 @@ Escribe `salir`, `exit` o `quit` para terminar.
 - Integrar más herramientas: `git_operation`, gestión de paquetes, consulta de estado de systemd.
 
 ---
-*Documento generado el 21 de julio de 2026.*
+*Documento generado el 22 de julio de 2026.*

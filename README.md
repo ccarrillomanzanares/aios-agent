@@ -1,6 +1,6 @@
 # aios-agent v2.1 — SRE Agent with native function calling
 
-A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen3-8B** model (served by llama.cpp). It can run Linux commands, read configuration/log files, and write controlled changes, all through a conversation in Spanish.
+A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen2.5-7B-Instruct** model (served by llama.cpp). It can run Linux commands, read configuration/log files, and write controlled changes, all through a conversation in Spanish.
 
 ## What does it do?
 
@@ -30,7 +30,7 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
                                            │
                                            ▼
                                   ┌──────────────────┐
-                                  │  Qwen3-8B via    │
+                                  │  Qwen2.5-7B-Instruct via    │
                                   │ llama.cpp :8083  │
                                   └──────────────────┘
 ```
@@ -41,26 +41,25 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 
 ## Model
 
-The definitive model is **Qwen3-8B** served by llama.cpp.
+The definitive model is **Qwen2.5-7B-Instruct** served by llama.cpp.
 
-During development we evaluated **Qwen3-4B**, but it was discarded because its function calling was inconsistent: it produced malformed tool calls, invented non-existent functions, and ignored the JSON schema. Since native function calling is the core mechanism of the agent, Qwen3-4B was not reliable enough for unattended, multi-step SRE tasks.
+During development we evaluated **Qwen2.5-Coder-3B**, but it was discarded because its function calling was inconsistent: it produced malformed tool calls, invented non-existent functions, and ignored the JSON schema. Since native function calling is the core mechanism of the agent, Qwen2.5-Coder-3B was not reliable enough for unattended, multi-step SRE tasks.
 
-Qwen3-8B was chosen because it consistently emits valid `tool_calls` payloads, respects the declared schema, and completes multi-step plans correctly, while keeping acceptable latency on modest hardware.
+Qwen2.5-7B-Instruct was chosen because it consistently emits valid `tool_calls` payloads, respects the declared schema, and completes multi-step plans correctly, while keeping acceptable latency on modest hardware.
 
-- Production service points to `:8083` and loads **Qwen3-8B**.
-- Qwen3-4B has been removed from the server and is no longer available.
-- All documentation, tests, and examples assume Qwen3-8B as the backing model.
+- Production service points to `:8083` and loads **Qwen2.5-7B-Instruct**.
+- Qwen2.5-Coder-3B has been removed from the server and is no longer available.
+- All documentation, tests, and examples assume Qwen2.5-7B-Instruct as the backing model.
 
 ### Model quantization
 
-We compared the two most practical quantizations for on-premise SRE use. Both keep the full context budget and tool-calling quality; the trade-off is speed versus memory footprint.
+The deployed instance uses a single quantization that balances tool-calling quality, context budget, and speed on a modest VPS.
 
 | Quantization | Speed (tok/s) | RAM/VRAM | Observed quality | Use case |
 |--------------|---------------|----------|------------------|----------|
-| Q4_K_M       | 17.0          | 4.7 GB   | Reference        | Production server with enough memory |
-| Q3_K_M       | 14.9          | 3.9 GB   | Equivalent in our SRE tests | Constrained VPS or shared host |
+| Q4_K_M       | 57 prompt / 20 gen | 4.7 GB   | Reference        | Production server with enough memory |
 
-The current deployed instance uses **Qwen3-8B Q3_K_M** with an 8K context window and `MAX_HISTORY_TOKENS=6000`. To avoid silent context overflow, `agent.py` now counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
+The current deployed instance uses **Qwen2.5-7B-Instruct-Q4_K_M** at :8083 with an 8K context window and `MAX_HISTORY_TOKENS=6000`. Older Qwen3-family and smaller Qwen2.5-Coder-3B models have been removed from the server. To avoid silent context overflow, `agent.py` now counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
 
 ## Readline history
 
@@ -123,7 +122,7 @@ The agent executes each step via `run_command`, receives the output, and advance
 
 - Python 3.10+
 - `requests` (`pip install requests`)
-- llama.cpp server running Qwen3-8B at `http://localhost:8083/v1/chat/completions`
+- llama.cpp server running Qwen2.5-7B-Instruct at `http://localhost:8083/v1/chat/completions`
 
 ## Usage
 
@@ -159,15 +158,15 @@ Type `salir`, `exit`, or `quit` to finish.
 
 ## Version history
 
-### v2.1 — SRE Agent with native function calling on Qwen3-8B
+### v2.1 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
-- Definitive model set to Qwen3-8B; Qwen3-4B evaluated and discarded due to inconsistent function calling.
+- Definitive model set to Qwen2.5-7B-Instruct; Qwen2.5-Coder-3B evaluated and discarded due to inconsistent function calling.
 - Readline history and cursor navigation in the interactive CLI (`chat.py`).
 - Session context persisted across restarts.
 - README updated with final model choice and readline section.
 - Executive PDF regenerated.
 
-### v2.0 — SRE Agent with native function calling on Qwen3-8B
+### v2.0 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
 - Complete repository rewrite.
 - Lightweight SRE agent with native function calling via llama.cpp server.
