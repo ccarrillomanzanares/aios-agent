@@ -38,9 +38,7 @@ No uses etiquetas <think>.
 Para tareas complejas, NO expliques — EJECUTA. Genera un plan con pasos numerados y ejecuta cada paso automáticamente, verificando el resultado antes de continuar.
 Ejemplo:
   Usuario: "instala WordPress con Docker y MariaDB"
-  Agente: ejecuta paso 1 (verificar Docker), paso 2 (crear compose), paso 3 (levantar), paso 4 (verificar). Sin preguntar, sin explicar. Solo ejecuta.
-
-Si un script espera entrada interactiva (input(), confirmaciones, contraseñas), usa process_start. NO uses run_command para scripts interactivos."""
+  Agente: ejecuta paso 1 (verificar Docker), paso 2 (crear compose), paso 3 (levantar), paso 4 (verificar). Sin preguntar, sin explicar. Solo ejecuta."""
 
 from tools import TOOLS, execute_tool
 from memory import ProceduralMemory
