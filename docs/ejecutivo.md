@@ -76,6 +76,70 @@ Escribe `salir`, `exit` o `quit` para terminar.
 - `write_file` bloquea `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
 - La memoria conversacional se guarda en sesión; el historial readline solo guarda líneas de entrada del usuario.
 
+## Historial del proyecto
+
+### Semana 1 — RAG + híbrido
+
+- Se empezó con **Qwen3-0.6B** + ChromaDB (`e5-large` embeddings) + corpus procedural de **955 documentos**.
+- Batería de pruebas: solo **7/43 PASS (16%)**.
+- Se intentó fine-tune del 0.6B con dataset SRE (500 ejemplos) vía Unsloth en GPU Lambda.
+- El fine-tune falló por incompatibilidades de versiones (`trl`, `transformers`).
+- Se abandonó el enfoque RAG por frágil y caro.
+
+### Semana 2 — Reset: function calling puro
+
+- Se borraron los proyectos híbridos (~10 GB) y se empezó de cero.
+- Se instaló **llama.cpp** compilado para CPU con `-j16`.
+- Se descargó **Qwen3-8B** (bartowski instruct GGUF).
+- Se construyó un agente en 3 archivos (~200 líneas) con function calling nativo.
+- Tools iniciales: `run_command`, `read_file`, `write_file`.
+- El agente funcionó en español, con **17 tok/s**.
+
+### Semana 3 — Features por capas
+
+- Memoria procedural (Skill-Pro, ICML 2026): cache JSON para respuestas repetitivas.
+- Planificación multi-paso: prompt con `EJECUTA sin explicar`.
+- Compresión de contexto: contar tokens reales vía `/v1/tokenize`.
+- Recuperación de errores: reintentos con `apt-get` si `apt` falla.
+- Log de auditoría (`audit.jsonl`).
+- Sesión persistente + historial readline (flechas arriba/abajo).
+
+### Semana 3 — Tools avanzadas
+
+- `web_search` vía Firecrawl local.
+- `git_operation` (status, commit, push, diff, log).
+- `mcp_call` (conectar APIs externas vía MCP).
+- `run_playbook` (ejecutar YAML secuencialmente).
+- `process_start` / `send` / `close` / `list` (procesos interactivos con PTY).
+
+### Semana 3 — Seguridad (OWASP)
+
+- Tool allowlist: `rm -rf /`, `dd`, `mkfs`, `fdisk`, `chmod 000` bloqueados.
+- Human-in-the-loop: comandos destructivos piden confirmación.
+- Input validation: sanitizar input, límite 1000 chars, anti-inyección.
+- Se creó `SECURITY.md` con análisis OWASP completo.
+
+### Semana 4 — Evaluación de modelos
+
+Se probaron 5 configuraciones de modelos buscando un modelo <8B fiable:
+
+1. **Qwen3-8B Q3_K_M (3.9 GB)**: 14.9 tok/s. FC fiable pero más lento. Descartado.
+2. **Qwen3-4B con `--jinja` (42 tok/s)**: FC inconsistente. Respondía de memoria.
+3. **Qwen3-4B sin `--jinja` (30 tok/s)**: FC fallaba sin plantilla jinja.
+4. **Qwen2.5-Coder-3B (25 tok/s)**: Respondía de memoria, no usaba tools.
+5. **Qwen2.5-7B-Instruct Q4_K_M (4.4 GB, 20 tok/s)**: FC fiable, español correcto.
+   **→ ELEGIDO COMO MODELO ACTUAL**
+
+Conclusión: modelos <7B no son fiables para FC en sysadmin.  
+**Qwen2.5-7B-Instruct** es el sweet spot para CPU.
+
+## Estado final
+
+- Modelo: **Qwen2.5-7B-Instruct Q4_K_M** (bartowski)
+- Velocidad: **57/20 tok/s** prompt/gen
+- 11 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- Repo: [github.com/ccarrillomanzanares/aios-agent](https://github.com/ccarrillomanzanares/aios-agent)
+
 ## Siguientes pasos recomendados
 
 - Evaluar en escenarios reales de SRE (reinicio de servicios, diagnóstico de logs, backups).

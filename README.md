@@ -156,6 +156,70 @@ Type `salir`, `exit`, or `quit` to finish.
 - `CHANGELOG.md` — change history.
 - `docs/ejecutivo.pdf` — executive summary in PDF.
 
+## Project history
+
+### Week 1 — RAG + hybrid approach
+
+- Started with **Qwen3-0.6B** + ChromaDB (`e5-large` embeddings) + a procedural corpus of **955 documents**.
+- Test battery: only **7/43 PASS (16%)**.
+- Attempted fine-tune of the 0.6B model on an SRE dataset of 500 examples via Unsloth on a Lambda GPU.
+- Fine-tune failed due to version incompatibilities (`trl`, `transformers`).
+- The RAG approach was abandoned as fragile and expensive.
+
+### Week 2 — Reset: pure function calling
+
+- Deleted the hybrid projects (~10 GB) and started from scratch.
+- Compiled **llama.cpp** for CPU with `-j16`.
+- Downloaded **Qwen3-8B** (bartowski instruct GGUF).
+- Built an agent in 3 files (~200 lines) with native function calling.
+- Initial tools: `run_command`, `read_file`, `write_file`.
+- The agent worked in Spanish at **17 tok/s**.
+
+### Week 3 — Feature layers
+
+- Procedural memory (Skill-Pro, ICML 2026): JSON cache for repetitive responses.
+- Multi-step planning: prompt with `EJECUTA without explaining`.
+- Context compression: real token counting via `/v1/tokenize`.
+- Error recovery: retries with `apt-get` when `apt` fails.
+- Audit log (`audit.jsonl`).
+- Persistent session + readline history (up/down arrows).
+
+### Week 3 — Advanced tools
+
+- `web_search` via local Firecrawl.
+- `git_operation` (status, commit, push, diff, log).
+- `mcp_call` (connect external APIs via MCP).
+- `run_playbook` (execute YAML sequentially).
+- `process_start` / `send` / `close` / `list` (interactive processes with PTY).
+
+### Week 3 — Security (OWASP)
+
+- Tool allowlist: blocks `rm -rf /`, `dd`, `mkfs`, `fdisk`, `chmod 000`, etc.
+- Human-in-the-loop: destructive commands ask for confirmation.
+- Input validation: sanitized input, 1000 char limit, anti-injection.
+- Created `SECURITY.md` with a full OWASP analysis.
+
+### Week 4 — Model evaluation
+
+We tested 5 model configurations looking for a reliable <8B model:
+
+1. **Qwen3-8B Q3_K_M (3.9 GB)**: 14.9 tok/s. Reliable FC but slower. Discarded.
+2. **Qwen3-4B with `--jinja` (42 tok/s)**: Inconsistent FC. Responded from memory.
+3. **Qwen3-4B without `--jinja` (30 tok/s)**: FC failed without jinja template.
+4. **Qwen2.5-Coder-3B (25 tok/s)**: Responded from memory, did not use tools.
+5. **Qwen2.5-7B-Instruct Q4_K_M (4.4 GB, 20 tok/s)**: Reliable FC, correct Spanish.
+   **→ CHOSEN AS CURRENT MODEL**
+
+Conclusion: models <7B are not reliable for function calling in sysadmin tasks.  
+**Qwen2.5-7B-Instruct** is the CPU sweet spot.
+
+## Final state
+
+- Model: **Qwen2.5-7B-Instruct Q4_K_M** (bartowski)
+- Speed: **57/20 tok/s** prompt/gen
+- Tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- Repo: [github.com/ccarrillomanzanares/aios-agent](https://github.com/ccarrillomanzanares/aios-agent)
+
 ## Version history
 
 ### v2.1 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
