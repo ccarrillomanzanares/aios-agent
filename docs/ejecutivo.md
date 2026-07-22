@@ -6,9 +6,18 @@ aios-agent es un agente ligero de SRE que utiliza **function calling nativo** so
 
 ## Modelo definitivo
 
-- **Qwen3-8B Q4_K_M** en `http://localhost:8083/v1/chat/completions`.
+- **Qwen3-8B Q3_K_M** en `http://localhost:8083/v1/chat/completions`, con ventana de contexto de 8K y `MAX_HISTORY_TOKENS=6000`.
 - Se evaluó **Qwen3-4B** y se descartó: su function calling era inconsistente (tool calls mal formados, funciones inventadas, ignoraba el esquema JSON).
 - Qwen3-8B emite `tool_calls` válidos de forma consistente y completa planes multi-paso.
+
+### Cuantización del modelo
+
+| Cuantización | Velocidad (tok/s) | RAM/VRAM | Calidad observada | Caso de uso |
+|--------------|-------------------|----------|-------------------|-------------|
+| Q4_K_M       | 17.0              | 4.7 GB   | Referencia        | Servidor productivo con suficiente memoria |
+| Q3_K_M       | 14.9              | 3.9 GB   | Equivalente en pruebas SRE | VPS limitado o host compartido |
+
+La instancia desplegada actualmente usa **Qwen3-8B Q3_K_M**. Para evitar desbordamientos silenciosos de contexto, `agent.py` cuenta tokens con el endpoint real `/v1/tokenize` antes de comprimir o truncar el historial, en lugar de estimar con una relación fija de caracteres por token.
 
 ## Funcionalidades v2.1
 

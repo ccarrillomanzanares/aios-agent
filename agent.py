@@ -12,6 +12,22 @@ MAX_HISTORY_TOKENS = 6000
 SESSION_FILE = Path("data/session.json")
 
 
+def _estimate_tokens(text: str) -> int:
+    """Estimate tokens via llama.cpp tokenize endpoint (accurate)."""
+    try:
+        resp = requests.post(
+            LLAMA_SERVER + "/tokenize",
+            json={"content": text},
+            timeout=5
+        )
+        if resp.status_code == 200:
+            return len(resp.json().get("tokens", []))
+    except Exception:
+        pass
+    # Fallback: rough estimate
+    return len(text) // 2
+
+
 SYSTEM_PROMPT = """Eres un sysadmin Linux experto. Puedes ejecutar comandos, leer y escribir archivos.
 Responde en español. Sé conciso.
 Si ejecutas un comando, muestra el resultado al usuario.
@@ -50,11 +66,11 @@ class Agent:
         return sum(len(t) // 4 for t in texts)
 
     def _compress(self):
-        """Comprime el historial cuando supera el límite."""
-        texts = [m.get("content", "") for m in self.messages]
-        if self._count_tokens(texts) < MAX_HISTORY_TOKENS:
+        """Compress history when approaching context limit. Keeps system prompt + last 3 exchanges."""
+        all_text = "\n".join(m.get("content", "") for m in self.messages)
+        total = _estimate_tokens(all_text)
+        if total < MAX_HISTORY_TOKENS:
             return
-        # Mantener system prompt + últimos 3 intercambios (6 mensajes)
         keep = [self.messages[0]]
         if len(self.messages) > 6:
             old = self.messages[1:-6]
@@ -63,12 +79,12 @@ class Agent:
             )
             try:
                 summary = self._quick_llm(
-                    f"Resume la siguiente conversación en 2-3 frases, capturando solo información técnica relevante:\n\n{history_str}",
+                    f"Resume the following conversation in 2-3 sentences keeping only technical details:\n\n{history_str}",
                     tokens=100, temp=0.3
                 )
-                keep.append({"role": "system", "content": f"[Resumen de conversación anterior: {summary}]"})
+                keep.append({"role": "system", "content": f"[Summary: {summary}]"})
             except Exception:
-                keep.append({"role": "system", "content": "[Conversación anterior omitida por error de compresión]"})
+                keep.append({"role": "system", "content": "[Previous conversation compressed]"})
             keep.extend(self.messages[-6:])
         else:
             keep = self.messages

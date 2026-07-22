@@ -41,15 +41,26 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 
 ## Model
 
-The definitive model is **Qwen3-8B** (Q4_K_M quantization) served by llama.cpp.
+The definitive model is **Qwen3-8B** served by llama.cpp.
 
-During development we also evaluated **Qwen3-4B**, but it was discarded because its function calling was inconsistent: it produced malformed tool calls, invented non-existent functions, and ignored the JSON schema. Since native function calling is the core mechanism of the agent, Qwen3-4B was not reliable enough for unattended, multi-step SRE tasks.
+During development we evaluated **Qwen3-4B**, but it was discarded because its function calling was inconsistent: it produced malformed tool calls, invented non-existent functions, and ignored the JSON schema. Since native function calling is the core mechanism of the agent, Qwen3-4B was not reliable enough for unattended, multi-step SRE tasks.
 
 Qwen3-8B was chosen because it consistently emits valid `tool_calls` payloads, respects the declared schema, and completes multi-step plans correctly, while keeping acceptable latency on modest hardware.
 
-- Production service points to `:8083` and loads **Qwen3-8B Q4_K_M**.
+- Production service points to `:8083` and loads **Qwen3-8B**.
 - Qwen3-4B has been removed from the server and is no longer available.
 - All documentation, tests, and examples assume Qwen3-8B as the backing model.
+
+### Model quantization
+
+We compared the two most practical quantizations for on-premise SRE use. Both keep the full context budget and tool-calling quality; the trade-off is speed versus memory footprint.
+
+| Quantization | Speed (tok/s) | RAM/VRAM | Observed quality | Use case |
+|--------------|---------------|----------|------------------|----------|
+| Q4_K_M       | 17.0          | 4.7 GB   | Reference        | Production server with enough memory |
+| Q3_K_M       | 14.9          | 3.9 GB   | Equivalent in our SRE tests | Constrained VPS or shared host |
+
+The current deployed instance uses **Qwen3-8B Q3_K_M** with an 8K context window and `MAX_HISTORY_TOKENS=6000`. To avoid silent context overflow, `agent.py` now counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
 
 ## Readline history
 

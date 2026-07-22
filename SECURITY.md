@@ -8,8 +8,11 @@
 - **Logging**: all tool calls logged to audit.jsonl (timestamp, query, tool, result) ✅
 - **Cost controls**: MAX_TURNS=10, MAX_TOKENS=512, timeout per tool call ✅
 
+## Discarded
+- **Sandbox execution**: running the agent as a non-sudo user or inside a Docker container was evaluated and **discarded** for this deployment. The current design relies on direct shell access and file-system reach for SRE tasks; adding a sandbox would require reimplementing privilege boundaries and tool wrappers. Security is instead enforced through the tool allowlist, human-in-the-loop for destructive commands, and input validation. ❌
+
 ## Pending (medium effort)
-- **Sandbox execution**: run agent as non-sudo user or in Docker container ⏳ Medium
+- *(none at this time)*
 
 ## Does NOT apply (single-user, local model, no external APIs)
 - Multi-agent security
