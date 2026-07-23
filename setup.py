@@ -9,9 +9,34 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 
 def detect_cpu():
-    """Return recommended thread count (80% of cores)."""
+    """Return recommended thread count (87.5% of cores)."""
     cores = os.cpu_count() or 4
     return max(1, int(cores * 0.875))
+
+
+def detect_ram_gb():
+    """Detect total RAM in GB from /proc/meminfo."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return round(kb / 1024 / 1024)
+    except:
+        pass
+    return 12  # fallback
+
+
+def auto_context(ram_gb):
+    """Auto-select context size based on available RAM."""
+    if ram_gb <= 8:
+        return 8192
+    elif ram_gb <= 12:
+        return 16384
+    elif ram_gb <= 24:
+        return 32768
+    else:
+        return 65536
 
 
 def clear():
@@ -161,6 +186,8 @@ def main():
     clear()
     print_box("AIOS AGENT - INITIAL SETUP", [
         "",
+        f"  Detected: {detect_cpu()} CPU threads, {detect_ram_gb()} GB RAM -> {auto_context(detect_ram_gb())//1024}K context",
+        "",
         "  Choose how to use the agent:",
         "",
         "  1) LOCAL (no internet) [RECOMMENDED]",
@@ -190,12 +217,15 @@ def main():
         print("\n  Invalid option. Defaulting to LOCAL mode.")
         mode = 1
 
+    ram_gb = detect_ram_gb()
+    ctx = auto_context(ram_gb)
+
     config = {
         "mode": {1: "local", 2: "cloud", 3: "hybrid"}[mode],
         "local": {
             "model": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
             "threads": detect_cpu(),
-            "context": 32768,
+            "context": ctx,
         },
         "cloud": {
             "provider": None,
