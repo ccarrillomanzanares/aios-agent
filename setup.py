@@ -11,7 +11,7 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 def detect_cpu():
     """Return recommended thread count (80% of cores)."""
     cores = os.cpu_count() or 4
-    return max(1, int(cores * 0.8))
+    return max(1, int(cores * 0.875))
 
 
 def clear():
