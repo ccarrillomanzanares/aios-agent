@@ -166,8 +166,9 @@ def main():
         "  1) LOCAL (no internet) [RECOMMENDED]",
         "     Qwen2.5-7B-Incluided in ISO",
         "     CPU: x86_64, 4+ cores",
-        "     RAM: 8 GB minimum, 12 GB recommended",
+        "     RAM: 12 GB minimum, 16 GB recommended",
         "     Disk: 5 GB free",
+        "     Context: 32K tokens",
         "     Works 100% offline",
         "",
         "  2) CLOUD (internet required)",
@@ -194,7 +195,7 @@ def main():
         "local": {
             "model": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
             "threads": detect_cpu(),
-            "context": 8192,
+            "context": 32768,
         },
         "cloud": {
             "provider": None,
