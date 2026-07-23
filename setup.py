@@ -31,10 +31,8 @@ def auto_context(ram_gb):
     """Auto-select context size based on available RAM."""
     if ram_gb <= 8:
         return 8192
-    elif ram_gb <= 12:
-        return 16384
-    elif ram_gb <= 24:
-        return 32768
+    elif ram_gb <= 16:
+        return 32768  # 12-16 GB → 32K
     else:
         return 65536
 
@@ -194,8 +192,8 @@ def main():
         "     Qwen2.5-7B-Incluided in ISO",
         "     CPU: x86_64, 4+ cores",
         "     RAM: 12 GB minimum, 16 GB recommended",
+        "     Context: {auto_context(detect_ram_gb())//1024}K tokens auto",
         "     Disk: 5 GB free",
-        "     Context: 32K tokens",
         "     Works 100% offline",
         "",
         "  2) CLOUD (internet required)",
