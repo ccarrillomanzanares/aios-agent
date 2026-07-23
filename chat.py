@@ -103,7 +103,7 @@ def main():
         print(f"  [{mode_label}] Local + {prov}: {mod}")
     print(f"  [{mode_label}] Independent session (context not shared across modes)")
     print('  Type your query or "exit".')
-    print("  (Local model: EN, ZH, ES. Cloud model: language of chosen provider)")
+    print("  (Local model: EN, ZH natively. ES works (tested). Other languages may work but are not guaranteed.)")
     print()
 
     while True:
