@@ -101,22 +101,22 @@ def main():
         prov = config.get("cloud", {}).get("provider", "?")
         mod = config.get("cloud", {}).get("model", "?")
         print(f"  [{mode_label}] Local + {prov}: {mod}")
-    print(f"  [{mode_label}] Sesión independiente por modo (no se comparte contexto entre modos)")
-    print("  Escribe tu consulta o 'salir'.\n")
+    print(f"  [{mode_label}] Independent session (context not shared across modes)")
+    print('  Type your query or "exit".\\n')
 
     while True:
         try:
             query = input("> ").strip()
         except (EOFError, KeyboardInterrupt):
             agent._save_session()
-            print("\n¡Hasta luego!")
+            print("\nGoodbye!")
             break
 
         if not query:
             continue
         if query.lower() in ("salir", "exit", "quit"):
             agent._save_session()
-            print("¡Hasta luego!")
+            print("Goodbye!")
             break
 
         try:

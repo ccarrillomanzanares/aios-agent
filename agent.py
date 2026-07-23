@@ -103,7 +103,7 @@ class Agent:
         self.messages = keep
 
     def _save_session(self):
-        """Guarda el historial de la conversación al salir."""
+        """Saves the conversation history on exit."""
         SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
             json.dump(self.messages, f, ensure_ascii=False)
@@ -120,7 +120,7 @@ class Agent:
                 texts = [m.get("content", "") for m in self.messages]
                 if self._count_tokens(texts) > MAX_HISTORY_TOKENS:
                     self._compress()
-                print(f"  [Sesión reanudada: {len(loaded_messages)} mensajes anteriores]")
+                print(f"  [Session resumed:  {len(loaded_messages)} previous messages]")
             except Exception:
                 pass
 
