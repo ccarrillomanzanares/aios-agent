@@ -14,7 +14,13 @@ CLOUD_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
 MAX_TURNS = 10
-MAX_HISTORY_TOKENS = 6000
+# Compression thresholds per mode
+MODE_THRESHOLDS = {
+    "local": 6000,      # 80% of 8192
+    "cloud": 500000,    # 50% of 1M (casi nunca comprime)
+    "hybrid": 6000,     # local is orchestrator
+}
+MAX_HISTORY_TOKENS = MODE_THRESHOLDS.get(os.environ.get("AIOS_MODE", "local"), 6000)
 SESSION_FILE = Path("data/session.json")
 
 
