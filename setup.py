@@ -79,6 +79,14 @@ def select_provider_and_model():
             "env": "KIMI_API_KEY",
         },
         {
+            "name": "Ollama Cloud",
+            "models": [
+                ("kimi-k2.7-code", "kimi-k2.7-code - código y ejecución"),
+                ("kimi-k2.7-thinking", "kimi-k2.7-thinking - razonamiento"),
+            ],
+            "env": "OLLAMA_CLOUD_API_KEY",
+        },
+        {
             "name": "OpenRouter",
             "models": [],
             "env": "OPENROUTER_API_KEY",
@@ -94,17 +102,17 @@ def select_provider_and_model():
             for i, p in enumerate(providers)
         ] + [
             "",
-            "  7) Back",
+            "  8) Back",
             "",
         ])
         try:
-            opt = int(input("  Select (1-7): "))
+            opt = int(input("  Select (1-8): "))
         except ValueError:
             continue
 
-        if opt == 7:
+        if opt == 8:
             return None, None
-        if opt < 1 or opt > 6:
+        if opt < 1 or opt > 7:
             continue
 
         prov = providers[opt - 1]
