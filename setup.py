@@ -41,8 +41,8 @@ def select_provider_and_model():
         {
             "name": "DeepSeek",
             "models": [
-                ("deepseek-chat", "deepseek-chat - rápido y barato"),
-                ("deepseek-reasoner", "deepseek-reasoner - razonamiento profundo"),
+                ("deepseek-v4-flash", "deepseek-v4-flash - rápido y barato"),
+                ("deepseek-v4-pro", "deepseek-v4-pro - razonamiento profundo"),
             ],
             "env": "DEEPSEEK_API_KEY",
         },
@@ -112,7 +112,7 @@ def select_provider_and_model():
         # OpenRouter: free input
         if prov["name"] == "OpenRouter":
             clear()
-            print_box("OPENROUTER", ["", "  Enter the model name:", "  e.g. openai/gpt-4o, anthropic/claude-sonnet-4", ""])
+            print_box("OPENROUTER", ["", "  Enter the model name:", "  e.g. deepseek/deepseek-v4-flash, openai/gpt-4o", ""])
             model = input("  Model: ").strip()
             if not model:
                 continue
