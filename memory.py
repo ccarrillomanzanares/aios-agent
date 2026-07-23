@@ -1,9 +1,10 @@
-"""Lightweight procedural memory for the SRE agent.
+"""Memoria procedural ligera para el agente SRE.
 
-Learns solutions from experience without modifying the LLM.
-Based on the ProcMEM pattern (arXiv 2602.01869) and Claude Agent Skills.
+Aprende soluciones de la experiencia sin modificar el LLM.
+Basado en el patrón ProcMEM (arXiv 2602.01869) y Claude Agent Skills.
 """
 import json
+import os
 import time
 from pathlib import Path
 
@@ -12,10 +13,11 @@ SIMILARITY_THRESHOLD = 0.75
 
 
 class ProceduralMemory:
-    """Procedural cache: query → solution, with duplicate removal."""
+    """Caché procedural: query → solución, con eliminación de duplicados."""
 
-    def __init__(self, path: str = MEMORY_FILE):
-        self.path = Path(path)
+    def __init__(self, path: str = None):
+        self.mode = os.environ.get("AIOS_MODE", "local")
+        self.path = Path(path or f"skills_memory_{self.mode}.json")
         self.skills: list[dict] = []
         self._load()
 
@@ -30,14 +32,14 @@ class ProceduralMemory:
         self.path.write_text(json.dumps(self.skills, ensure_ascii=False, indent=2))
 
     def _simple_sim(self, a: str, b: str) -> float:
-        """Basic similarity: word intersection / union."""
+        """Similitud básica: intersección de palabras / unión."""
         sa, sb = set(a.lower().split()), set(b.lower().split())
         if not sa or not sb:
             return 0.0
         return len(sa & sb) / len(sa | sb)
 
     def _normalize_key(self, query: str, llm_call) -> str:
-        """Use the LLM to generate a canonical key for the query."""
+        """Usa el LLM para generar clave canónica de la consulta."""
         prompt = f"Convierte esta consulta en una clave técnica de 2-5 palabras, solo la clave, sin explicación:\n\n{query}"
         try:
             key = llm_call(prompt).strip().lower()
@@ -46,16 +48,16 @@ class ProceduralMemory:
             return query.lower()
 
     def find(self, query: str, llm_call) -> str | None:
-        """Search for a cached solution. Returns None if not found."""
+        """Busca una solución cacheada. Devuelve None si no hay."""
         key = self._normalize_key(query, llm_call)
-        # Exact search
+        # Búsqueda exacta
         for s in self.skills:
             if s.get("key") == key:
                 s["hits"] = s.get("hits", 0) + 1
                 s["last_used"] = time.time()
                 self._save()
                 return s["solution"]
-        # Similarity search
+        # Búsqueda por similitud
         for s in self.skills:
             if self._simple_sim(key, s.get("key", "")) > SIMILARITY_THRESHOLD:
                 s["hits"] = s.get("hits", 0) + 1
@@ -65,12 +67,12 @@ class ProceduralMemory:
         return None
 
     def store(self, query: str, solution: str, llm_call):
-        """Store a new solution."""
+        """Guarda una nueva solución."""
         try:
             key = self._normalize_key(query, llm_call)
         except Exception:
             key = query.lower()
-        # Avoid duplicates
+        # Evitar duplicados
         for s in self.skills:
             if s.get("key") == key:
                 s["solution"] = solution
@@ -86,7 +88,7 @@ class ProceduralMemory:
             "created": time.time(),
             "last_used": time.time(),
         })
-        # Limit to 200 entries, drop least used
+        # Limitar a 200 entradas, eliminar las menos usadas
         if len(self.skills) > 200:
             self.skills.sort(key=lambda s: s.get("hits", 0))
             self.skills = self.skills[-200:]
