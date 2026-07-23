@@ -1,5 +1,28 @@
 # aios-agent v2.1 — SRE Agent with native function calling
 
+**⚠️ DISCLAIMER**
+This software is provided as is, without warranty of any kind, express or implied.
+The authors and contributors assume no responsibility or liability for any damages,
+data loss, system failures, or other consequences arising from the use of this agent.
+
+This agent executes shell commands and modifies system files. Improper use,
+misconfiguration, or unexpected model behavior may result in:
+- Data loss or corruption
+- Service disruption
+- Security vulnerabilities
+- Unauthorized system changes
+
+**You are solely responsible for:**
+- Reviewing actions before confirmation
+- Testing in a safe environment before production use
+- Configuring appropriate security measures
+- Understanding the capabilities and limitations of the LLM model in use
+
+By using this software, you accept these terms and assume all risk.
+
+---
+
+
 A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen2.5-7B-Instruct** model (served by llama.cpp). It can run Linux commands, read configuration/log files, write controlled changes, search the web, run playbooks, manage interactive processes, and interact with Git — all through a conversation in Spanish.
 
 ## What does it do?
