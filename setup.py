@@ -46,6 +46,7 @@ def select_provider_and_model():
                 ("deepseek-v4-pro", "deepseek-v4-pro - razonamiento profundo"),
             ],
             "env": "DEEPSEEK_API_KEY",
+            "context_limit": 1048576,
         },
         {
             "name": "OpenAI",
@@ -54,6 +55,7 @@ def select_provider_and_model():
                 ("gpt-4o-mini", "gpt-4o-mini - económico"),
             ],
             "env": "OPENAI_API_KEY",
+            "context_limit": 128000,
         },
         {
             "name": "Anthropic",
@@ -62,6 +64,7 @@ def select_provider_and_model():
                 ("claude-haiku-3.5", "claude-haiku-3.5 - rápido"),
             ],
             "env": "ANTHROPIC_API_KEY",
+            "context_limit": 200000,
         },
         {
             "name": "Google Gemini",
@@ -70,6 +73,7 @@ def select_provider_and_model():
                 ("gemini-2.0-pro", "gemini-2.0-pro - calidad"),
             ],
             "env": "GOOGLE_API_KEY",
+            "context_limit": 1048576,
         },
         {
             "name": "Kimi / Moonshot",
@@ -78,6 +82,7 @@ def select_provider_and_model():
                 ("kimi-k2.7-thinking", "kimi-k2.7-thinking - razonamiento"),
             ],
             "env": "KIMI_API_KEY",
+            "context_limit": 128000,
         },
         {
             "name": "Ollama Cloud",
@@ -86,11 +91,13 @@ def select_provider_and_model():
                 ("kimi-k2.7-thinking", "kimi-k2.7-thinking - razonamiento"),
             ],
             "env": "OLLAMA_CLOUD_API_KEY",
+            "context_limit": 128000,
         },
         {
             "name": "OpenRouter",
             "models": [],
             "env": "OPENROUTER_API_KEY",
+            "context_limit": 128000,
         },
     ]
 
@@ -125,7 +132,7 @@ def select_provider_and_model():
             model = input("  Model: ").strip()
             if not model:
                 continue
-            return prov["name"], model
+            return prov, model
 
         # Other providers: select model
         clear()
@@ -139,7 +146,7 @@ def select_provider_and_model():
         if idx < 0 or idx >= len(prov["models"]):
             continue
 
-        return prov["name"], prov["models"][idx][0]
+        return prov, prov["models"][idx][0]
 
 
 def main():
@@ -198,10 +205,11 @@ def main():
 
     if mode in (2, 3):
         clear()
-        prov, model = select_provider_and_model()
-        if prov and model:
-            config["cloud"]["provider"] = prov
+        prov_data, model = select_provider_and_model()
+        if prov_data and model:
+            config["cloud"]["provider"] = prov_data["name"]
             config["cloud"]["model"] = model
+            config["cloud"]["context_limit"] = prov_data.get("context_limit", 128000)
             clear()
             print_box("API KEY", ["", "  Enter your API key.", ""])
             key = input_key("  API Key")

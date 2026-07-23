@@ -14,8 +14,10 @@ CLOUD_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
 MAX_TURNS = 10
-# Only compress in local mode (cloud APIs manage their own context)
-MAX_HISTORY_TOKENS = 6000 if os.environ.get("AIOS_MODE", "local") == "local" else 99999999
+# Compression: 95% for local (8K), 50% for cloud (per-provider context_limit)
+_LOCAL_CONTEXT = 8192
+_cloud_context = int(os.environ.get("AIOS_CLOUD_CONTEXT", "128000"))
+MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") == "local" else int(_cloud_context * 0.50)
 SESSION_FILE = Path("data/session.json")
 
 

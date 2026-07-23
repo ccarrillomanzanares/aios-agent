@@ -56,10 +56,12 @@ def main():
         provider = config.get("cloud", {}).get("provider")
         model = config.get("cloud", {}).get("model")
         api_key = config.get("cloud", {}).get("api_key")
+        ctx = config.get("cloud", {}).get("context_limit", 128000)
         endpoint = CLOUD_ENDPOINTS.get(provider, "https://api.deepseek.com/v1")
         os.environ["AIOS_LLAMA_SERVER"] = endpoint
         os.environ["AIOS_API_KEY"] = api_key or ""
         os.environ["AIOS_CLOUD_MODEL"] = model or "deepseek-chat"
+        os.environ["AIOS_CLOUD_CONTEXT"] = str(ctx)
         # Set provider-specific env var
         env_var = config.get("cloud", {}).get("provider_env", "")
         if env_var and api_key:
@@ -70,9 +72,11 @@ def main():
         provider = config.get("cloud", {}).get("provider")
         model = config.get("cloud", {}).get("model")
         api_key = config.get("cloud", {}).get("api_key")
+        ctx = config.get("cloud", {}).get("context_limit", 128000)
         if provider and api_key:
             os.environ["AIOS_CLOUD_PROVIDER"] = provider
             os.environ["AIOS_CLOUD_MODEL"] = model or "deepseek-chat"
+            os.environ["AIOS_CLOUD_CONTEXT"] = str(ctx)
             os.environ["AIOS_CLOUD_ENDPOINT"] = CLOUD_ENDPOINTS.get(provider, "")
             os.environ["AIOS_API_KEY"] = api_key
             env_var = config.get("cloud", {}).get("provider_env", "")
