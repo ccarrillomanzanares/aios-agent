@@ -214,6 +214,7 @@ def main():
                 "Anthropic": "ANTHROPIC_API_KEY",
                 "Google Gemini": "GOOGLE_API_KEY",
                 "Kimi / Moonshot": "KIMI_API_KEY",
+                "Ollama Cloud": "OLLAMA_CLOUD_API_KEY",
                 "OpenRouter": "OPENROUTER_API_KEY",
             }.get(prov, "API_KEY")
         else:

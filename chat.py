@@ -17,6 +17,7 @@ CLOUD_ENDPOINTS = {
     "Anthropic": "https://api.anthropic.com/v1/chat/completions",
     "Google Gemini": "https://generativelanguage.googleapis.com/v1beta",
     "Kimi / Moonshot": "https://api.moonshot.cn/v1/chat/completions",
+    "Ollama Cloud": "https://api.ollama.cloud/v1/chat/completions",
     "OpenRouter": "https://openrouter.ai/api/v1/chat/completions",
 }
 
