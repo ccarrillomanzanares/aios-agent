@@ -82,8 +82,17 @@ def main():
     from agent import Agent
 
     agent = Agent()
-    mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HÍBRIDO"}.get(mode, "LOCAL")
-    print(f"  [{mode_label}] Qwen2.5-7B-Instruct (~20 tok/s, CPU 80%)")
+    mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HIBRIDO"}.get(mode, "LOCAL")
+    if mode == "local":
+        print(f"  [{mode_label}] Qwen2.5-7B-Instruct (~20 tok/s, CPU {config['local']['threads']*100//os.cpu_count()}%)")
+    elif mode == "cloud":
+        prov = config.get("cloud", {}).get("provider", "?")
+        mod = config.get("cloud", {}).get("model", "?")
+        print(f"  [{mode_label}] {prov}: {mod}")
+    else:  # hybrid
+        prov = config.get("cloud", {}).get("provider", "?")
+        mod = config.get("cloud", {}).get("model", "?")
+        print(f"  [{mode_label}] Local + {prov}: {mod}")
     print("  Escribe tu consulta o 'salir'.\n")
 
     while True:
