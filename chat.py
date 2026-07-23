@@ -102,7 +102,9 @@ def main():
         mod = config.get("cloud", {}).get("model", "?")
         print(f"  [{mode_label}] Local + {prov}: {mod}")
     print(f"  [{mode_label}] Independent session (context not shared across modes)")
-    print('  Type your query or "exit".\\n')
+    print('  Type your query or "exit".')
+    print("  (Local model supports ES, EN, CN, FR, DE, PT, RU, JP, KR, AR)")
+    print()
 
     while True:
         try:
