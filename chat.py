@@ -51,6 +51,7 @@ def main():
     if mode == "local":
         os.environ["AIOS_MODE"] = "local"
         os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1/chat/completions"
+        os.environ["AIOS_CONTEXT_MAX"] = str(config['local']['context'])
     elif mode == "cloud":
         os.environ["AIOS_MODE"] = "cloud"
         provider = config.get("cloud", {}).get("provider")

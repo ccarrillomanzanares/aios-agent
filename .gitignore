@@ -2,3 +2,5 @@ __pycache__/
 data/
 skills_memory.json
 *.log
+
+gcc*

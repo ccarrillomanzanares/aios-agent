@@ -177,6 +177,29 @@ class Agent:
                         args = json.loads(func["arguments"])
                     except json.JSONDecodeError:
                         args = {}
+                    
+                    # Anti-bucle: detect repeated tool calls
+                    _last_call = getattr(self, '_last_tool', None)
+                    _repeat_count = getattr(self, '_tool_repeat_count', 0)
+                    if _last_call and _last_call['name'] == name and _last_call['args'] == args:
+                        self._tool_repeat_count = _repeat_count + 1
+                    else:
+                        self._tool_repeat_count = 0
+                    self._last_tool = {'name': name, 'args': args}
+                    
+                    if self._tool_repeat_count >= 3:
+                        print(f"  ⚠️ Misma llamada {name} repetida {self._tool_repeat_count + 1} veces")
+                        print("  ¿Aborto la tarea? (y/N): ", end="", flush=True)
+                        try:
+                            import sys
+                            import select
+                            # 10s timeout
+                            r, _, _ = select.select([sys.stdin], [], [], 10)
+                            if r and sys.stdin.readline().strip().lower() == 'y':
+                                return "Tarea abortada por el usuario tras detectar bucle."
+                        except:
+                            pass
+                    
                     result = execute_tool(name, args, context=self.messages)
                     print(f"  🔧 {name}({func.get('arguments','')})")
                     if name == "run_command":

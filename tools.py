@@ -1,5 +1,6 @@
 """Tools for the SRE agent — native function calling."""
 import json
+import os
 import sys
 import re
 import signal
@@ -408,6 +409,14 @@ TOOLS = [
                 "required": ["prompt"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_context_usage",
+            "description": "Shows current context usage: tokens used vs maximum. Helps monitor session size.",
+            "parameters": {"type": "object", "properties": {}}
+        }
     }
 ]
 
@@ -457,6 +466,16 @@ def cloud_reasoning(args: dict, context=None) -> str:
         return json.dumps({"error": f"Cloud reasoning failed: {e}"}, ensure_ascii=False)
 
 
+def get_context_usage(args: dict, context=None) -> str:
+    """Return context usage stats (tokens used / max)."""
+    max_tokens = int(os.environ.get("AIOS_CONTEXT_MAX", str(MAX_HISTORY_TOKENS)))
+    if context:
+        total = sum(len(m.get("content", "")) // 4 for m in context)
+        pct = min(100, int(total * 100 / max_tokens))
+        return json.dumps({"tokens_used": total, "max_tokens": max_tokens, "usage_pct": pct}, ensure_ascii=False)
+    return json.dumps({"error": "No context available"}, ensure_ascii=False)
+
+
 # Handler to execute tools
 def execute_tool(name: str, args: dict, context=None) -> str:
     handlers = {
@@ -472,6 +491,7 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "process_close": process_close,
         "process_list": process_list,
         "cloud_reasoning": lambda **kw: cloud_reasoning(kw, context=context),
+        "get_context_usage": lambda **kw: get_context_usage(kw, context=context),
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
