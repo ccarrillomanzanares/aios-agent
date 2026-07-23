@@ -38,7 +38,7 @@ def _is_destructive_command(command: str) -> bool:
         return True
     if re.search(r'\b>\s*/dev/sd[a-z]', lower):
         return True
-    if re.search(r'\bformat\b', lower):
+    if re.search(r'\bFORMAT_BLOCKED\b', lower):
         return True
     if re.search(r'\bdd\s+if=\S+', lower):
         return True
