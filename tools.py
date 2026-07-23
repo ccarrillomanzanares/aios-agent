@@ -394,12 +394,71 @@ TOOLS = [
             "description": "List all running interactive processes.",
             "parameters": {"type": "object", "properties": {}}
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cloud_reasoning",
+            "description": "Delegate a complex reasoning task to a cloud LLM (DeepSeek/GPT/Claude). Use for architecture design, debugging, multi-step planning. Receives the full conversation context.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "The reasoning task for the cloud model"}
+                },
+                "required": ["prompt"]
+            }
+        }
     }
 ]
 
 
+def cloud_reasoning(args: dict, context=None) -> str:
+    """Send a reasoning task to a cloud LLM with full conversation context."""
+    import os as _os
+
+    endpoint = _os.environ.get("AIOS_CLOUD_ENDPOINT", "https://api.deepseek.com/v1/chat/completions")
+    api_key = _os.environ.get("AIOS_API_KEY", "")
+    model = _os.environ.get("AIOS_CLOUD_MODEL", "deepseek-v4-pro")
+
+    if not api_key:
+        return json.dumps({"error": "No API key configured for cloud reasoning"}, ensure_ascii=False)
+
+    prompt = args.get("prompt", "")
+    if not prompt:
+        return json.dumps({"error": "No prompt provided"}, ensure_ascii=False)
+
+    # Build minimal messages: context summary + prompt
+    messages = []
+    if context and len(context) > 2:
+        summary = "\n".join(
+            f"{m['role']}: {m['content'][:200]}"
+            for m in context[-10:]  # last 10 messages for context
+        )
+        messages.append({"role": "system", "content": f"Conversation context:\n{summary}"})
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        resp = _requests.post(
+            endpoint,
+            json={
+                "model": model,
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 2048,
+            },
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"].get("content", "")
+        return content
+    except Exception as e:
+        return json.dumps({"error": f"Cloud reasoning failed: {e}"}, ensure_ascii=False)
+
+
 # Handler to execute tools
-def execute_tool(name: str, args: dict) -> str:
+def execute_tool(name: str, args: dict, context=None) -> str:
     handlers = {
         "run_command": run_command,
         "read_file": read_file,
@@ -412,6 +471,7 @@ def execute_tool(name: str, args: dict) -> str:
         "process_send": process_send,
         "process_close": process_close,
         "process_list": process_list,
+        "cloud_reasoning": lambda **kw: cloud_reasoning(kw, context=context),
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)

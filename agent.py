@@ -177,7 +177,7 @@ class Agent:
                         args = json.loads(func["arguments"])
                     except json.JSONDecodeError:
                         args = {}
-                    result = execute_tool(name, args)
+                    result = execute_tool(name, args, context=self.messages)
                     print(f"  🔧 {name}({func.get('arguments','')})")
                     if name == "run_command":
                         r = json.loads(result)
