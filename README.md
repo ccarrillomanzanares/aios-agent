@@ -36,6 +36,8 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 - Calls external tools through MCP (`mcp_call`).
 - Runs YAML playbooks sequentially (`run_playbook`).
 - Starts, sends input to, and closes interactive processes (`process_start`, `process_send`, `process_close`, `process_list`).
+- Offloads complex reasoning to a cloud model in hybrid mode (`cloud_reasoning`).
+- Reports current context usage (`get_context_usage`).
 - Maintains conversational context and performs up to 10 reasoning turns of tool→LLM.
 - Plans and executes multi-step tasks without intermediate human intervention.
 - Learns from repeated procedural queries through lightweight procedural memory (Skill-Pro pattern).
@@ -93,7 +95,12 @@ The first time the agent starts, `setup.py` presents a text-menu installer that 
 - Operating mode (`local`, `cloud`, or `hybrid`).
 - Cloud provider and model (only for cloud/hybrid modes). Provider-specific `context_limit` is stored in `data/config.yaml`.
 - API key, entered once with hidden input (`getpass`).
-- CPU auto-allocation: reserves one core for the OS and assigns the rest to llama.cpp (e.g. 14/16 cores, 87.5% utilization).
+- CPU auto-allocation: reserves one core for the OS and assigns the rest to llama.cpp (e.g. 14/16 cores, 87.5% utilization); the menu shows actual cores used (`N/16 cores`) rather than a percentage.
+- RAM auto-detection from `/proc/meminfo` and auto-scaled local context:
+  - ≤8 GB RAM → 8K context
+  - 12–16 GB RAM → 32K context
+  - >16 GB RAM → 64K context
+- Detection banner shown during setup: `Detected: 14 CPU threads, 62 GB RAM -> 64K context`.
 
 Configuration is written to `data/config.json` and read automatically on subsequent runs. Run `python3 setup.py` again at any time to reconfigure.
 
@@ -153,16 +160,18 @@ On startup the chat prints: *"Sesión independiente por modo (no se comparte con
 
 | Mode | Context window | History kept | Compression |
 |------|----------------|--------------|-------------|
-| LOCAL | 8192 tokens | ~7782 tokens (95%) | Sliding-window + token-counting via `/v1/tokenize` |
-| CLOUD | Provider `context_limit` | 50% of `context_limit` | Same token-counting strategy |
-| HYBRID | 8192 tokens (local) | ~7782 tokens (95%) | Local compression; `cloud_reasoning` decides when to offload |
+| LOCAL | 32768 tokens (default) | ~31129 tokens (95%) | Sliding-window + token-counting via `/v1/tokenize` |
+| CLOUD | Provider `context_limit` | 50% of `context_limit` | Token-counting via provider tokenizer |
+| HYBRID | 32768 tokens (local) | ~31129 tokens (95%) | Local compression; `cloud_reasoning` decides when to offload |
+
+Session files are separated by mode (`data/session_local.json`, `data/session_cloud.json`, `data/session_hybrid.json`) and procedural-memory caches likewise (`data/skills_memory_local.json`, `data/skills_memory_cloud.json`, `data/skills_memory_hybrid.json`).
 
 ## Roadmap
 
 Features implemented in v2.1 (all completed):
 
 - ✅ Native function calling over llama.cpp server (`/v1/chat/completions`)
-- ✅ 12 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`
+- ✅ 13 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`, `get_context_usage`
 - ✅ Conversational loop with up to 10 tool→LLM turns and persistent session context
 - ✅ Multi-step planning and execution without intermediate human intervention
 - ✅ Procedural memory / Skill-Pro pattern for repeated queries
@@ -202,12 +211,14 @@ The agent executes each step via `run_command`, receives the output, and advance
 
 ## Cloud reasoning tool
 
-`cloud_reasoning` is the twelfth tool and is only used in hybrid mode. When the local orchestrator decides a query needs deeper reasoning, it sends the user prompt plus the last 10 messages of local context to the configured cloud endpoint.
+`cloud_reasoning` (tool #12) is only used in hybrid mode. When the local orchestrator decides a query needs deeper reasoning, it sends the user prompt plus the last 10 messages of local context to the configured cloud endpoint.
 
 - Environment: `AIOS_CLOUD_ENDPOINT` and `AIOS_API_KEY` (set by the setup wizard).
 - Timeout: 120 seconds.
 - Temperature: 0.3.
 - Use case: complex multi-step plans, code review, or analysis that exceeds the local 7B model's capacity.
+
+`get_context_usage` (tool #13) returns tokens used vs. the configured context maximum, helping monitor session growth.
 
 ## Requirements
 
@@ -330,16 +341,18 @@ Type `salir`, `exit`, or `quit` to finish.
 ### v2.1 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
 - Definitive model set to Qwen2.5-7B-Instruct; Qwen2.5-Coder-3B and other <7B models evaluated and discarded due to unreliable function calling.
-- 11 tools implemented: shell, file, web, git, MCP, playbook, and interactive process management.
+- 13 tools implemented: shell, file, web, git, MCP, playbook, interactive process management, cloud reasoning delegation, and context-usage monitoring.
 - Procedural memory (Skill-Pro), real token-counting compression, persistent session, and error recovery.
 - Readline history, cursor navigation, and Ctrl+C turn interrupt in the interactive CLI (`chat.py`).
 - Setup wizard (`setup.py`) for local/cloud/hybrid mode with 7 providers (DeepSeek V4 Flash/Pro, OpenAI, Anthropic, Google, Kimi, Ollama Cloud, OpenRouter), per-mode sessions, per-mode memory, and provider-specific `context_limit` stored in `data/config.yaml`.
-- 12th tool `cloud_reasoning` for hybrid mode, calling the cloud endpoint with the prompt + last 10 local messages.
-- Context compression tuned per mode: 95% of 8K for local/hybrid, 50% of provider limit for cloud.
-- Corrections: Docker `--format` no longer flagged as destructive, local endpoint fixed to `/v1/chat/completions`, CPU display shows actual cores (e.g. 14/16), DeepSeek models updated to V4 Flash and V4 Pro, Ollama Cloud added as provider.
+- RAM auto-detection in setup with auto-scaled local context: ≤8 GB → 8K, 12–16 GB → 32K, >16 GB → 64K.
+- CPU auto-allocation adjusted to 87.5% (14/16 cores on typical hardware); menu shows `N/16 cores` instead of a percentage.
+- 12th tool `cloud_reasoning` and 13th tool `get_context_usage`: cloud delegation and context-usage monitoring.
+- Context compression tuned per mode: 95% of 32K default for local/hybrid, 50% of provider limit for cloud; sessions and procedural caches are separated by mode.
+- Anti-loop guard: if the same tool + arguments repeats ≥3 times, the agent asks whether to abort with a 10-second timeout.
+- Corrections: Docker `--format` no longer flagged as destructive, local endpoint fixed to `/v1/chat/completions`, API key hidden via `getpass`, CPU display shows actual cores (e.g. 14/16), DeepSeek models updated to V4 Flash and V4 Pro, Ollama Cloud added as provider, `.gitignore` updated with `gcc*`, minimum local RAM raised from 8 GB to 12 GB, liability disclaimer added to README.
 - OWASP-aligned security: tool allowlist, human-in-the-loop, input validation, audit log.
-- README updated with setup wizard, model evaluation table, and final state.
-- Executive PDF regenerated.
+- README and executive PDF regenerated.
 
 ### v2.0 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
