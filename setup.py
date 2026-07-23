@@ -30,8 +30,9 @@ def print_box(title, lines):
 
 
 def input_key(label):
-    """Read API key once."""
-    k = input(f"  {label}: ").strip()
+    """Read API key once, hidden input."""
+    import getpass
+    k = getpass.getpass(f"  {label}: ").strip()
     return k if k else None
 
 
@@ -227,22 +228,29 @@ def main():
         yaml.dump(config, f, default_flow_style=False)
 
     clear()
-    print_box("SETUP COMPLETE", [
+    summary = [
         "",
         f"  Mode: {config['mode']}",
-        f"  CPU threads: {config['local']['threads']} ({config['local']['threads']*100//os.cpu_count()}%)",
-        f"  Context: {config['local']['context']} tokens",
-    ] + ([
-        f"  Cloud: {config['cloud']['provider']}",
-        f"  Model: {config['cloud']['model']}",
-        f"  API Key: {'saved' if config['cloud'].get('api_key') else 'not configured'}",
-    ] if config.get('cloud', {}).get('provider') else []) + [
+    ]
+    if mode == 1:
+        summary.extend([
+            f"  CPU threads: {config['local']['threads']} ({config['local']['threads']*100//os.cpu_count()}%)",
+            f"  Context: {config['local']['context']} tokens",
+        ])
+    if config.get('cloud', {}).get('provider'):
+        summary.extend([
+            f"  Cloud: {config['cloud']['provider']}",
+            f"  Model: {config['cloud']['model']}",
+            f"  API Key: {'saved' if config['cloud'].get('api_key') else 'not configured'}",
+        ])
+    summary += [
         "",
         f"  Saved to: {CONFIG_FILE}",
         "",
         "  Ready! Run 'python3 chat.py' to start.",
         "",
-    ])
+    ]
+    print_box("SETUP COMPLETE", summary)
 
 
 if __name__ == "__main__":
