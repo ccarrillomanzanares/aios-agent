@@ -53,9 +53,8 @@ def print_box(title, lines):
 
 
 def input_key(label):
-    """Read API key once, hidden input."""
-    import getpass
-    k = getpass.getpass(f"  {label}: ").strip()
+    """Read API key once (visible input for paste compatibility)."""
+    k = input(f"  {label}: ").strip()
     return k if k else None
 
 
