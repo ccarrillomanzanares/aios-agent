@@ -1,10 +1,16 @@
-"""Agente SRE ligero — function calling con Qwen3-8B."""
 import json
+import os
 import re
 from pathlib import Path
 import requests
 
-LLAMA_SERVER = "http://localhost:8083/v1/chat/completions"
+# Config from environment (set by chat.py)
+LLAMA_SERVER = os.environ.get("AIOS_LLAMA_SERVER", "http://localhost:8083/v1/chat/completions")
+API_KEY = os.environ.get("AIOS_API_KEY", "")
+AIOS_MODE = os.environ.get("AIOS_MODE", "local")
+CLOUD_MODEL = os.environ.get("AIOS_CLOUD_MODEL", "")
+CLOUD_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
 MAX_TURNS = 10
@@ -58,6 +64,7 @@ class Agent:
             LLAMA_SERVER,
             json={"messages": [{"role": "user", "content": f"/no_think {prompt}"}],
                   "max_tokens": tokens, "temperature": temp},
+            headers=CLOUD_HEADERS,
             timeout=15
         )
         data = resp.json()
@@ -141,7 +148,7 @@ class Agent:
             }
 
             try:
-                resp = requests.post(LLAMA_SERVER, json=payload, timeout=120)
+                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120)
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
