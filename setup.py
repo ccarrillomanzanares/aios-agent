@@ -301,7 +301,7 @@ def main():
                 print("\n  No API key provided. Defaulting to LOCAL mode.\n")
                 config["mode"] = "local"
             else:
-                config["cloud"]["provider_env"] = {
+                env_var = {
                     "DeepSeek": "DEEPSEEK_API_KEY",
                     "OpenAI": "OPENAI_API_KEY",
                     "Anthropic": "ANTHROPIC_API_KEY",
@@ -310,6 +310,20 @@ def main():
                     "Ollama Cloud": "OLLAMA_CLOUD_API_KEY",
                     "OpenRouter": "OPENROUTER_API_KEY",
                 }.get(prov_data["name"], "API_KEY")
+                # Save to .env instead of config.yaml
+                env_path = CONFIG_DIR / ".env"
+                # Load existing env vars, update or add the new one
+                env_lines = []
+                if env_path.exists():
+                    with open(env_path) as f:
+                        for line in f:
+                            if not line.startswith(f"{env_var}="):
+                                env_lines.append(line)
+                env_lines.append(f"{env_var}={key}\n")
+                with open(env_path, "w") as f:
+                    f.writelines(env_lines)
+                print(f"  API key saved to {env_path}")
+                del config["cloud"]["api_key"]  # remove from yaml
         else:
             # User went back, fallback to local
             config["mode"] = "local"

@@ -4,3 +4,4 @@ skills_memory.json
 *.log
 
 gcc*
+.env

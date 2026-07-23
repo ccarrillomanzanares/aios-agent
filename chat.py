@@ -21,6 +21,16 @@ CLOUD_ENDPOINTS = {
     "OpenRouter": "https://openrouter.ai/api/v1/chat/completions",
 }
 
+CLOUD_ENV_VARS = {
+    "DeepSeek": "DEEPSEEK_API_KEY",
+    "OpenAI": "OPENAI_API_KEY",
+    "Anthropic": "ANTHROPIC_API_KEY",
+    "Google Gemini": "GOOGLE_API_KEY",
+    "Kimi / Moonshot": "KIMI_API_KEY",
+    "Ollama Cloud": "OLLAMA_CLOUD_API_KEY",
+    "OpenRouter": "OPENROUTER_API_KEY",
+}
+
 
 def load_or_setup():
     """Load config or run first-run setup."""
@@ -32,7 +42,19 @@ def load_or_setup():
 
     import yaml
     with open(CONFIG_FILE) as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+
+    # Load API keys from .env if it exists
+    env_file = Path.home() / ".aios" / ".env"
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    os.environ[k.strip()] = v.strip()
+
+    return config
 
 
 def main():
@@ -56,24 +78,20 @@ def main():
         os.environ["AIOS_MODE"] = "cloud"
         provider = config.get("cloud", {}).get("provider")
         model = config.get("cloud", {}).get("model")
-        api_key = config.get("cloud", {}).get("api_key")
         ctx = config.get("cloud", {}).get("context_limit", 128000)
+        api_key = os.environ.get("AIOS_API_KEY", os.environ.get(CLOUD_ENV_VARS.get(provider, ""), ""))
         endpoint = CLOUD_ENDPOINTS.get(provider, "https://api.deepseek.com/v1")
         os.environ["AIOS_LLAMA_SERVER"] = endpoint
-        os.environ["AIOS_API_KEY"] = api_key or ""
+        os.environ["AIOS_API_KEY"] = api_key
         os.environ["AIOS_CLOUD_MODEL"] = model or "deepseek-chat"
         os.environ["AIOS_CLOUD_CONTEXT"] = str(ctx)
-        # Set provider-specific env var
-        env_var = config.get("cloud", {}).get("provider_env", "")
-        if env_var and api_key:
-            os.environ[env_var] = api_key
     elif mode == "hybrid":
         os.environ["AIOS_MODE"] = "hybrid"
         os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1/chat/completions"
         provider = config.get("cloud", {}).get("provider")
         model = config.get("cloud", {}).get("model")
-        api_key = config.get("cloud", {}).get("api_key")
         ctx = config.get("cloud", {}).get("context_limit", 128000)
+        api_key = os.environ.get("AIOS_API_KEY", os.environ.get(CLOUD_ENV_VARS.get(provider, ""), ""))
         if provider and api_key:
             os.environ["AIOS_CLOUD_PROVIDER"] = provider
             os.environ["AIOS_CLOUD_MODEL"] = model or "deepseek-chat"
