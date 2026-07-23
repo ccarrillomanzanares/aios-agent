@@ -90,7 +90,7 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
         remaining = max(0.1, timeout - elapsed)
         try:
             r = subprocess.run(current_command, shell=True, capture_output=True, text=True, timeout=remaining)
-            stdout = r.stdout.strip()[:2000]
+            stdout = r.stdout.strip()[:5000]
             stderr = r.stderr.strip()[:2000]
 
             if retry and r.returncode != 0 and ("apt" in current_command or "apt-get" in current_command):

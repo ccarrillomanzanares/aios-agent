@@ -24,7 +24,7 @@ CLOUD_ENDPOINTS = {
 def load_or_setup():
     """Load config or run first-run setup."""
     if not CONFIG_FILE.exists():
-        print("\n  [Primera ejecución] Ejecutando configuración inicial...\n")
+        print("\n  [First run] Running initial setup wizard...\n")
         import setup
         setup.main()
         print()

@@ -87,18 +87,18 @@ def select_provider_and_model():
 
     while True:
         clear()
-        print_box("PROVEEDOR CLOUD", [
+        print_box("PROVIDER", [
             "",
         ] + [
             f"  {i+1}) {p['name']}"
             for i, p in enumerate(providers)
         ] + [
             "",
-            "  7) Volver",
+            "  7) Back",
             "",
         ])
         try:
-            opt = int(input("  Selecciona (1-7): "))
+            opt = int(input("  Select (1-7): "))
         except ValueError:
             continue
 
@@ -112,16 +112,16 @@ def select_provider_and_model():
         # OpenRouter: free input
         if prov["name"] == "OpenRouter":
             clear()
-            print_box("OPENROUTER", ["", "  Introduce el nombre del modelo:", "  ej: openai/gpt-4o, anthropic/claude-sonnet-4", ""])
-            model = input("  Modelo: ").strip()
+            print_box("OPENROUTER", ["", "  Enter the model name:", "  e.g. openai/gpt-4o, anthropic/claude-sonnet-4", ""])
+            model = input("  Model: ").strip()
             if not model:
                 continue
             return prov["name"], model
 
         # Other providers: select model
         clear()
-        print_box(prov["name"], [""] + [f"  {chr(97+i)}) {m[1]}" for i, m in enumerate(prov["models"])] + ["", "  q) Volver", ""])
-        opt2 = input("  Selecciona (a-b, q): ").strip().lower()
+        print_box(prov["name"], [""] + [f"  {chr(97+i)}) {m[1]}" for i, m in enumerate(prov["models"])] + ["", "  q) Back", ""])
+        opt2 = input("  Select (a-b, q): ").strip().lower()
 
         if opt2 == "q":
             continue
@@ -143,25 +143,25 @@ def main():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     clear()
-    print_box("AIOS AGENT - CONFIGURACIÓN INICIAL", [
+    print_box("AIOS AGENT - INITIAL SETUP", [
         "",
-        "  Elige cómo quieres usar el agente:",
+        "  Choose how to use the agent:",
         "",
-        "  1) LOCAL (sin internet) [RECOMENDADO]",
-        "     Qwen2.5-7B-Incluido en la ISO",
+        "  1) LOCAL (no internet) [RECOMMENDED]",
+        "     Qwen2.5-7B-Incluided in ISO",
         "     CPU: x86_64, 4+ cores",
-        "     RAM: 8 GB mínimo, 12 GB recomendado",
-        "     Disco: 5 GB libres",
-        "     Funciona 100% offline",
+        "     RAM: 8 GB minimum, 12 GB recommended",
+        "     Disk: 5 GB free",
+        "     Works 100% offline",
         "",
-        "  2) CLOUD (solo internet)",
-        "     El agente usa un modelo externo vía API",
-        "     Necesitas API key del proveedor",
+        "  2) CLOUD (internet required)",
+        "     Uses an external model via API",
+        "     Requires an API key from a provider",
         "",
-        "  3) HÍBRIDO (local + cloud)",
-        "     Simple -> modelo local",
-        "     Complejo -> modelo cloud",
-        "     Necesitas API key del proveedor",
+        "  3) HYBRID (local + cloud)",
+        "     Simple tasks -> local model",
+        "     Complex tasks -> cloud model",
+        "     Requires an API key from a provider",
         "",
     ])
     try:
@@ -170,7 +170,7 @@ def main():
         mode = 0
 
     if mode not in (1, 2, 3):
-        print("\n  Opción inválida. Usando modo LOCAL por defecto.")
+        print("\n  Invalid option. Defaulting to LOCAL mode.")
         mode = 1
 
     config = {
@@ -194,9 +194,12 @@ def main():
             config["cloud"]["provider"] = prov
             config["cloud"]["model"] = model
             clear()
-            print_box("API KEY", ["", "  Introduce tu clave de API.", ""])
+            print_box("API KEY", ["", "  Enter your API key.", ""])
             key = input_key("  API Key")
             config["cloud"]["api_key"] = key
+            if not key:
+                print("\n  No API key provided. Defaulting to LOCAL mode.\n")
+                config["mode"] = "local"
             config["cloud"]["provider_env"] = {
                 "DeepSeek": "DEEPSEEK_API_KEY",
                 "OpenAI": "OPENAI_API_KEY",
@@ -215,20 +218,20 @@ def main():
         yaml.dump(config, f, default_flow_style=False)
 
     clear()
-    print_box("CONFIGURACIÓN COMPLETA", [
+    print_box("SETUP COMPLETE", [
         "",
-        f"  Modo: {config['mode']}",
-        f"  CPUs: {config['local']['threads']} threads ({detect_cpu()*100//os.cpu_count()}%)",
-        f"  Contexto: {config['local']['context']} tokens",
+        f"  Mode: {config['mode']}",
+        f"  CPU threads: {config['local']['threads']} ({config['local']['threads']*100//os.cpu_count()}%)",
+        f"  Context: {config['local']['context']} tokens",
     ] + ([
         f"  Cloud: {config['cloud']['provider']}",
-        f"  Modelo: {config['cloud']['model']}",
-        f"  API Key: {'✓ guardada' if config['cloud'].get('api_key') else '✗ no configurada'}",
+        f"  Model: {config['cloud']['model']}",
+        f"  API Key: {'saved' if config['cloud'].get('api_key') else 'not configured'}",
     ] if config.get('cloud', {}).get('provider') else []) + [
         "",
-        f"  Guardado en: {CONFIG_FILE}",
+        f"  Saved to: {CONFIG_FILE}",
         "",
-        "  ¡Listo! Ejecuta 'python3 chat.py' para empezar.",
+        "  Ready! Run 'python3 chat.py' to start.",
         "",
     ])
 
