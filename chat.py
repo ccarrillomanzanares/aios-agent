@@ -89,7 +89,10 @@ def main():
     agent = Agent()
     mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HIBRIDO"}.get(mode, "LOCAL")
     if mode == "local":
-        print(f"  [{mode_label}] Qwen2.5-7B-Instruct (~20 tok/s, {config['local']['threads']}/{os.cpu_count()} cores)")
+        model_name = config.get("local", {}).get("model_name", "Qwen3-8B-Instruct")
+        threads = config.get("local", {}).get("threads", 14)
+        cores = os.cpu_count() or 16
+        print(f"  [{mode_label}] {model_name} (~20 tok/s, {threads}/{cores} cores)")
     elif mode == "cloud":
         prov = config.get("cloud", {}).get("provider", "?")
         mod = config.get("cloud", {}).get("model", "?")

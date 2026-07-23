@@ -211,9 +211,63 @@ def main():
     except ValueError:
         mode = 0
 
+    LOCAL_MODELS = [
+        {
+            "name": "Qwen3-8B-Instruct",
+            "file": "Qwen_Qwen3-8B-Q4_K_M.gguf",
+            "repo": "bartowski/Qwen_Qwen3-8B-GGUF",
+            "size": "4.7 GB",
+            "speed": "17 tok/s",
+            "desc": "más fiable",
+            "default": True,
+        },
+        {
+            "name": "Qwen2.5-7B-Instruct",
+            "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+            "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+            "size": "4.4 GB",
+            "speed": "20 tok/s",
+            "desc": "más rápido",
+            "default": False,
+        },
+    ]
+
+
     if mode not in (1, 2, 3):
         print("\n  Invalid option. Defaulting to LOCAL mode.")
         mode = 1
+
+    selected = LOCAL_MODELS[0]  # default, may be overridden for local
+    if mode == 1:
+        clear()
+        print_box("LOCAL MODEL", [
+            "",
+        ] + [
+            f"  {i+1}) {m['name']} ({m['size']}, {m['speed']}) - {m['desc']}" + (" [DEFAULT]" if m["default"] else "")
+            for i, m in enumerate(LOCAL_MODELS)
+        ] + [
+            "",
+            f"  Default: 1) {LOCAL_MODELS[0]['name']}",
+            "",
+        ])
+        try:
+            model_opt = int(input("  Select (1-2): "))
+        except ValueError:
+            model_opt = 1
+        if model_opt < 1 or model_opt > 2:
+            model_opt = 1
+        selected = LOCAL_MODELS[model_opt - 1]
+        model_path = Path(f"/home/ccmai/models/{selected['file']}")
+        if not model_path.exists():
+            print(f"\n  Model {selected['file']} not found locally.")
+            dl = input("  Download from HuggingFace? (Y/n): ").strip().lower()
+            if dl != "n":
+                print(f"  Downloading {selected['name']} ({selected['size']})...")
+                from huggingface_hub import hf_hub_download
+                hf_hub_download(selected["repo"], selected["file"], local_dir="/home/ccmai/models/")
+                print("  Download complete.")
+        else:
+            print(f"\n  Model found at {model_path}")
 
     ram_gb = detect_ram_gb()
     ctx = auto_context(ram_gb)
@@ -221,7 +275,8 @@ def main():
     config = {
         "mode": {1: "local", 2: "cloud", 3: "hybrid"}[mode],
         "local": {
-            "model": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+            "model": selected["file"] if mode == 1 and selected else "Qwen_Qwen3-8B-Q4_K_M.gguf",
+            "model_name": selected["name"] if mode == 1 and selected else "Qwen3-8B-Instruct",
             "threads": detect_cpu(),
             "context": ctx,
         },
@@ -269,6 +324,8 @@ def main():
         "",
         f"  Mode: {config['mode']}",
     ]
+    if mode == 1:
+        summary.append(f"  Model: {selected['name']} ({selected['size']}, {selected['speed']})")
     if mode == 1:
         summary.extend([
             f"  CPU threads: {config['local']['threads']} ({config['local']['threads']*100//os.cpu_count()}%)",
