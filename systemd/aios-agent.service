@@ -1,0 +1,19 @@
+[Unit]
+Description=AIOS Agent - SRE assistant
+Documentation=https://github.com/ccarrillomanzanares/aios-agent
+After=aios-llama.service
+Requires=aios-llama.service
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/usr/local/bin/aios-agent
+Environment=TERM=xterm-256color
+ExecStartPre=/usr/bin/bash -c 'while ! curl -s http://127.0.0.1:8083/health >/dev/null 2>&1; do sleep 2; done'
+ExecStart=/usr/bin/python3 chat.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

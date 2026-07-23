@@ -1,0 +1,17 @@
+[Unit]
+Description=AIOS Agent - llama.cpp model server
+Documentation=https://github.com/ccarrillomanzanares/aios-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+ExecStart=/usr/local/bin/aios-agent/scripts/launch_llama.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
