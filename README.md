@@ -1,4 +1,4 @@
-# aios-agent v2.1 — SRE Agent with native function calling
+# aios-agent v2.2 — SRE Agent with native function calling
 
 **⚠️ DISCLAIMER**
 This software is provided as is, without warranty of any kind, express or implied.
@@ -22,12 +22,11 @@ By using this software, you accept these terms and assume all risk.
 
 ---
 
-
-A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen2.5-7B-Instruct** model (served by llama.cpp). It can run Linux commands, read configuration/log files, write controlled changes, search the web, run playbooks, manage interactive processes, and interact with Git — all through a conversation in Spanish.
+A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen** model (served by llama.cpp). It can run Linux commands, read configuration/log files, write controlled changes, search the web, run playbooks, manage interactive processes, and interact with Git — all through a conversation.
 
 ## What does it do?
 
-- Answers sysadmin questions in Spanish.
+- Answers sysadmin questions in English, Spanish or Chinese.
 - Executes shell commands on the local machine (`run_command`).
 - Reads configuration files and logs (`read_file`).
 - Writes files to allowed paths, blocking system directories (`write_file`).
@@ -67,7 +66,7 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
                                            │
                                            ▼
                                   ┌──────────────────┐
-                                  │ Qwen2.5-7B-Instruct via     │
+                                  │ Qwen3-8B / Qwen2.5-7B-Instruct via     │
                                   │ llama.cpp :8083  │
                                   └──────────────────┘
 ```
@@ -79,6 +78,10 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 - `memory.py`: Skill-Pro procedural memory.
 - `playbook.py`: YAML playbook runner.
 - `process.py`: interactive process management with PTY.
+- `scripts/launch_llama.py`: systemd-compatible launcher for llama-server.
+- `scripts/firstboot.sh`: one-time ISO first-boot setup wizard.
+- `systemd/aios-llama.service`: systemd unit that keeps the model server alive.
+- `systemd/aios-agent.service`: systemd unit that starts the chat UI after the model server is ready.
 
 ## Setup Wizard
 
@@ -86,15 +89,19 @@ The first time the agent starts, `setup.py` presents a text-menu installer that 
 
 ### Available modes
 
-1. **LOCAL** — Uses the bundled **Qwen2.5-7B-Instruct** model served by llama.cpp on `http://localhost:8083`. Requires at least 8 GB RAM. This is the default for an offline ISO deployment.
+1. **LOCAL** — Uses the bundled **Qwen** model served by llama.cpp on `http://localhost:8083`. Requires at least 8 GB RAM. This is the default for an offline ISO deployment.
 2. **CLOUD** — Select a provider (DeepSeek, OpenAI, Anthropic, Google Gemini, Moonshot/Kimi, Ollama Cloud, OpenRouter) and enter the API key. The agent will route all LLM calls to the chosen cloud endpoint.
 3. **HYBRID** — The local model acts as the orchestrator; complex or multi-step reasoning is offloaded to the configured cloud provider through the dedicated `cloud_reasoning` tool.
 
 ### What the wizard configures
 
 - Operating mode (`local`, `cloud`, or `hybrid`).
-- Cloud provider and model (only for cloud/hybrid modes). Provider-specific `context_limit` is stored in `data/config.yaml`.
-- API key, entered once with hidden input (`getpass`).
+- Cloud provider and model (only for cloud/hybrid modes). Provider-specific `context_limit` is stored in `~/.aios/config.yaml`.
+- API key stored in `~/.aios/.env`. `~/.aios/.env` is never committed to Git (`.gitignore`).
+- Local model selection from the menu:
+  - **Qwen3-8B (default)** — most reliable for function calling.
+  - **Qwen2.5-7B-Instruct** — faster alternative.
+  - The selected GGUF is downloaded automatically from HuggingFace if it is not present in `~/models`.
 - CPU auto-allocation: reserves one core for the OS and assigns the rest to llama.cpp (e.g. 14/16 cores, 87.5% utilization); the menu shows actual cores used (`N/16 cores`) rather than a percentage.
 - RAM auto-detection from `/proc/meminfo` and auto-scaled local context:
   - ≤8 GB RAM → 8K context
@@ -102,15 +109,64 @@ The first time the agent starts, `setup.py` presents a text-menu installer that 
   - >16 GB RAM → 64K context
 - Detection banner shown during setup: `Detected: 14 CPU threads, 62 GB RAM -> 64K context`.
 
-Configuration is written to `data/config.json` and read automatically on subsequent runs. Run `python3 setup.py` again at any time to reconfigure.
+Configuration is written to `~/.aios/config.yaml` and read automatically on subsequent runs. Run `python3 setup.py` again at any time to reconfigure.
+
+## ISO Integration
+
+The repository includes systemd units and a first-boot script so the agent can be shipped as a bootable ISO image that starts automatically on power-on.
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `systemd/aios-llama.service` | Starts `llama-server` for the configured local model via `scripts/launch_llama.py`. |
+| `systemd/aios-agent.service` | Waits until `http://127.0.0.1:8083/health` responds and then launches `chat.py`. |
+| `scripts/launch_llama.py` | Reads `~/.aios/config.yaml`, resolves the model path, builds the `llama-server` command line and `exec`s it. |
+| `scripts/firstboot.sh` | One-time first-boot wizard. Runs `setup.py`, enables the systemd units and starts them if the model is already downloaded. |
+
+### Service behavior
+
+- `aios-llama.service` is ordered **after** `network-online.target` and restarts on failure.
+- `aios-agent.service` **requires** `aios-llama.service`; it blocks with a `curl` health check loop until the local model server is ready.
+- Both services run as the `aios` user and expect the code to be installed at `/usr/local/bin/aios-agent`.
+- The UI, prompts and exit messages are all in English so the ISO behaves consistently regardless of the host locale.
+
+### Install for ISO
+
+```bash
+sudo cp systemd/aios-llama.service /etc/systemd/system/
+sudo cp systemd/aios-agent.service  /etc/systemd/system/
+sudo cp scripts/firstboot.sh        /usr/local/bin/aios-firstboot
+sudo chmod +x /usr/local/bin/aios-firstboot
+sudo systemctl daemon-reload
+# firstboot.sh is run once during the first boot
+```
+
+## API Keys
+
+Cloud and hybrid modes need an API key. Since commit `a2d989d` keys are no longer stored inside `config.yaml`:
+
+- `setup.py` writes the key to `~/.aios/.env`.
+- `.env` is listed in `.gitignore` so it is never committed.
+- `chat.py` loads `.env` automatically on startup and exposes it to `agent.py`/`tools.py` through environment variables.
+- The mapping between provider and environment variable is kept in `chat.py` (`CLOUD_ENV_VARS`).
+- The key prompt in the wizard is visible (not hidden with `getpass`) so it works when pasted via clipboard inside a terminal.
+- If the user leaves the API key empty in cloud/hybrid mode the agent falls back gracefully to local mode.
 
 ## Model
 
-The definitive model is **Qwen2.5-7B-Instruct** served by llama.cpp.
+The default local model is **Qwen3-8B** because it is the most reliable option evaluated for native function calling. **Qwen2.5-7B-Instruct** remains available as a faster alternative.
 
-- Production service points to `:8083` and loads **Qwen2.5-7B-Instruct Q4_K_M**.
+- Production service points to `:8083`.
 - Native function calling is the core mechanism of the agent; reliability is more important than raw speed.
 - Models smaller than 7B were evaluated and discarded because they could not produce valid tool calls consistently for sysadmin tasks.
+
+### Model selection
+
+| Model | Default | Characteristics |
+|-------|---------|-----------------|
+| Qwen3-8B Q4_K_M | ✅ Yes | Most reliable native tool calls; auto-downloaded from HuggingFace. |
+| Qwen2.5-7B-Instruct Q4_K_M | Optional | Faster; use when speed matters more than absolute tool-call reliability. |
 
 ### Model quantization
 
@@ -135,7 +191,7 @@ We tested several smaller and alternative models looking for a reliable <8B opti
 | Llama-3.2-3B | 1.9 GB | 37 | Fails | Discarded — hallucinates tool calls with fake paths |
 | Gemma-3-4B-IT | 2.4 GB | 16 | Fails | Discarded — hallucinates tool calls |
 
-Conclusion: **models <7B are not reliable for function calling in sysadmin tasks.** Qwen2.5-7B-Instruct is the CPU sweet spot for this agent.
+Conclusion: **models <7B are not reliable for function calling in sysadmin tasks.** Qwen3-8B and Qwen2.5-7B-Instruct are the CPU sweet spots for this agent.
 
 ## Readline history and Ctrl+C
 
@@ -154,7 +210,7 @@ Each operating mode keeps its own session and procedural-memory cache, so contex
 - Sessions: `data/session_local.json`, `data/session_cloud.json`, `data/session_hybrid.json`
 - Skill-Pro cache: `data/skills_memory_local.json`, `data/skills_memory_cloud.json`, `data/skills_memory_hybrid.json`
 
-On startup the chat prints: *"Sesión independiente por modo (no se comparte contexto entre modos)"*.
+On startup the chat prints: *"Independent session (context not shared across modes)"*.
 
 ### Context compression by mode
 
@@ -166,9 +222,19 @@ On startup the chat prints: *"Sesión independiente por modo (no se comparte con
 
 Session files are separated by mode (`data/session_local.json`, `data/session_cloud.json`, `data/session_hybrid.json`) and procedural-memory caches likewise (`data/skills_memory_local.json`, `data/skills_memory_cloud.json`, `data/skills_memory_hybrid.json`).
 
+## Recent fixes
+
+- `get_context_usage`: removed an undefined reference to `MAX_HISTORY_TOKENS`.
+- Empty API key in cloud/hybrid mode now falls back to local mode gracefully.
+- Anti-loop detection: if the same tool with the same arguments is invoked ≥3 times consecutively the agent asks whether to abort.
+- Language support note updated: EN, ZH and ES are tested; other languages are not guaranteed.
+- RAM auto-detect with context scaling now works correctly during the wizard.
+- Setup wizard is fully in English for consistent ISO behavior.
+- Visible API-key input for paste compatibility (no `getpass`).
+
 ## Roadmap
 
-Features implemented in v2.1 (all completed):
+Features implemented in v2.2 (all completed):
 
 - ✅ Native function calling over llama.cpp server (`/v1/chat/completions`)
 - ✅ 13 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`, `get_context_usage`
@@ -180,9 +246,11 @@ Features implemented in v2.1 (all completed):
 - ✅ Persistent session across restarts (`data/session.json`)
 - ✅ Readline history and cursor navigation in the CLI
 - ✅ Ctrl+C to interrupt the current turn without exiting
-- ✅ Setup wizard: local / cloud / hybrid mode, provider selection, API key, CPU auto-allocation
+- ✅ Setup wizard: local / cloud / hybrid mode, provider selection, API key, CPU auto-allocation, model selection, auto-download
 - ✅ Security (OWASP AI Agent cheat sheet): tool allowlist, human-in-the-loop for destructive commands, input validation, audit log (`audit.jsonl`)
-- ✅ Complete README.md with architecture, usage, security, and model evaluation
+- ✅ ISO integration: systemd units + firstboot + launch wrapper
+- ✅ API-key isolation in `~/.aios/.env`
+- ✅ Complete README.md with architecture, usage, security, ISO integration, and model evaluation
 - ✅ Executive documentation in PDF (`docs/ejecutivo.pdf`)
 
 ## Multi-step planning
@@ -213,7 +281,7 @@ The agent executes each step via `run_command`, receives the output, and advance
 
 `cloud_reasoning` (tool #12) is only used in hybrid mode. When the local orchestrator decides a query needs deeper reasoning, it sends the user prompt plus the last 10 messages of local context to the configured cloud endpoint.
 
-- Environment: `AIOS_CLOUD_ENDPOINT` and `AIOS_API_KEY` (set by the setup wizard).
+- Environment: `AIOS_CLOUD_ENDPOINT` and `AIOS_API_KEY` (set by the setup wizard via `~/.aios/.env`).
 - Timeout: 120 seconds.
 - Temperature: 0.3.
 - Use case: complex multi-step plans, code review, or analysis that exceeds the local 7B model's capacity.
@@ -224,7 +292,8 @@ The agent executes each step via `run_command`, receives the output, and advance
 
 - Python 3.10+
 - `requests` (`pip install requests`)
-- llama.cpp server running Qwen2.5-7B-Instruct at `http://localhost:8083/v1/chat/completions` (local / hybrid mode)
+- `pyyaml` (`pip install pyyaml`)
+- llama.cpp server running a supported Qwen model at `http://localhost:8083/v1/chat/completions` (local / hybrid mode)
 - Cloud API key (cloud / hybrid mode)
 
 ## Usage
@@ -250,7 +319,7 @@ Example queries:
 > restart nginx
 ```
 
-Type `salir`, `exit`, or `quit` to finish.
+Type `exit`, `quit` or `salir` to finish.
 
 ## Security
 
@@ -264,15 +333,20 @@ Type `salir`, `exit`, or `quit` to finish.
 ## Files
 
 - `setup.py` — first-run configuration wizard.
+- `chat.py` — terminal chat interface with readline history and slash commands.
 - `agent.py` — function-calling orchestrator and procedural memory.
 - `tools.py` — shell, file, web, git, MCP, playbook, and process tools.
-- `chat.py` — terminal chat interface with readline history and slash commands.
 - `memory.py` — Skill-Pro procedural memory cache.
 - `playbook.py` — YAML playbook runner.
 - `process.py` — interactive process management with PTY.
+- `scripts/launch_llama.py` — systemd-compatible llama-server launcher.
+- `scripts/firstboot.sh` — ISO first-boot setup wizard.
+- `systemd/aios-llama.service` — systemd unit for the model server.
+- `systemd/aios-agent.service` — systemd unit for the chat UI.
 - `README.md` — this document.
 - `CHANGELOG.md` — change history.
 - `SECURITY.md` — OWASP security analysis.
+- `docs/ejecutivo.md` — executive summary in Markdown.
 - `docs/ejecutivo.pdf` — executive summary in PDF.
 
 ## Project history
@@ -292,7 +366,7 @@ Type `salir`, `exit`, or `quit` to finish.
 - Downloaded **Qwen3-8B** (bartowski instruct GGUF).
 - Built an agent in 3 files (~200 lines) with native function calling.
 - Initial tools: `run_command`, `read_file`, `write_file`.
-- The agent worked in Spanish at **17 tok/s**.
+- The agent worked at **17 tok/s**.
 
 ### Week 3 — Feature layers
 
@@ -325,18 +399,47 @@ Type `salir`, `exit`, or `quit` to finish.
 - Added `setup.py` wizard: local/cloud/hybrid mode, provider selection, API key, CPU auto-allocation.
 - Added Ctrl+C interrupt for the current turn.
 
+### Week 5 — ISO integration and reliability fixes
+
+- Added `systemd/` units (`aios-llama.service`, `aios-agent.service`).
+- Added `scripts/launch_llama.py` wrapper that reads `~/.aios/config.yaml` and execs `llama-server`.
+- Added `scripts/firstboot.sh` one-time ISO setup wizard.
+- Moved API keys out of `config.yaml` into `~/.aios/.env` (`.gitignore`).
+- Added local model selection (Qwen3-8B default, Qwen2.5-7B optional) with HuggingFace auto-download.
+- Fixed `get_context_usage` undefined `MAX_HISTORY_TOKENS` reference.
+- Empty API key now falls back to local mode gracefully.
+- Added anti-loop guard (≥3 repeated tool calls).
+- Updated language support note (EN/ZH/ES tested).
+- Setup wizard fully in English for consistent ISO UI.
+- Visible API-key input for paste compatibility.
+
 ## Final state
 
-- Model: **Qwen2.5-7B-Instruct Q4_K_M** (bartowski)
+- Model: **Qwen3-8B Q4_K_M** (default) or **Qwen2.5-7B-Instruct Q4_K_M** (optional)
 - Server: llama.cpp at `:8083`, `--jinja`, `-c 8192`, `-t 14`
 - Speed: **57/20 tok/s** prompt/gen
-- Tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`
+- Tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`, `get_context_usage`
 - Memory: procedural Skill-Pro cache
 - Modes: local / cloud / hybrid (configured by `setup.py`)
+- ISO: systemd units + firstboot + launch wrapper
 - Security: OWASP tool allowlist, human-in-the-loop, input validation, audit log
 - Repo: [github.com/ccarrillomanzanares/aios-agent](https://github.com/ccarrillomanzanares/aios-agent)
 
 ## Version history
+
+### v2.2 — SRE Agent with ISO integration and Qwen3-8B default
+
+- Default local model changed to **Qwen3-8B** with auto-download from HuggingFace; Qwen2.5-7B-Instruct remains available.
+- API keys moved from `config.yaml` to `~/.aios/.env` (`.gitignore`); `chat.py` loads `.env` automatically.
+- Visible API-key input for paste compatibility.
+- ISO integration: `systemd/aios-llama.service`, `systemd/aios-agent.service`, `scripts/launch_llama.py`, `scripts/firstboot.sh`.
+- `launch_llama.py` reads `~/.aios/config.yaml` and launches llama-server with the correct model, context, threads and `--jinja`.
+- `aios-agent.service` waits for `http://127.0.0.1:8083/health` before starting the chat UI.
+- Setup wizard fully in English; language support note updated to EN/ZH/ES tested.
+- Anti-loop guard: abort prompt after ≥3 repeated identical tool calls.
+- Graceful fallback to local mode when API key is empty.
+- Fixed `get_context_usage` undefined `MAX_HISTORY_TOKENS` reference.
+- README.md and `docs/ejecutivo.pdf` regenerated.
 
 ### v2.1 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
