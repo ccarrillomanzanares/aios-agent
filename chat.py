@@ -97,6 +97,7 @@ def main():
         prov = config.get("cloud", {}).get("provider", "?")
         mod = config.get("cloud", {}).get("model", "?")
         print(f"  [{mode_label}] Local + {prov}: {mod}")
+    print(f"  [{mode_label}] Sesión independiente por modo (no se comparte contexto entre modos)")
     print("  Escribe tu consulta o 'salir'.\n")
 
     while True:
