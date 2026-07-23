@@ -207,7 +207,7 @@ def main():
         "",
     ])
     try:
-        mode = int(input("  Selecciona (1-3): "))
+        mode = int(input("  Select (1-3): "))
     except ValueError:
         mode = 0
 
@@ -218,7 +218,7 @@ def main():
             "repo": "bartowski/Qwen_Qwen3-8B-GGUF",
             "size": "4.7 GB",
             "speed": "17 tok/s",
-            "desc": "más fiable",
+            "desc": "most reliable",
             "default": True,
         },
         {
@@ -227,7 +227,7 @@ def main():
             "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
             "size": "4.4 GB",
             "speed": "20 tok/s",
-            "desc": "más rápido",
+            "desc": "faster",
             "default": False,
         },
     ]
