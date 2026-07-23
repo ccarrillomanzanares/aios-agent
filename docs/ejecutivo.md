@@ -9,14 +9,14 @@ aios-agent es un agente ligero de SRE que utiliza **function calling nativo** so
 La primera ejecución ejecuta `setup.py`, un instalador en modo texto que permite elegir:
 
 1. **LOCAL** — Usa Qwen2.5-7B-Instruct incluido en la ISO. Mínimo 8 GB RAM.
-2. **CLOUD** — Seleccionar proveedor (DeepSeek, OpenAI, Anthropic, Google Gemini, Moonshot/Kimi, OpenRouter) e introducir API key.
-3. **HÍBRIDO** — Consultas simples → local; consultas complejas → cloud.
+2. **CLOUD** — Seleccionar proveedor (DeepSeek, OpenAI, Anthropic, Google Gemini, Moonshot/Kimi, Ollama Cloud, OpenRouter) e introducir API key (entrada oculta, sin doble verificación).
+3. **HÍBRIDO** — El modelo local actúa como orquestador; consultas complejas se delegan al cloud mediante la tool `cloud_reasoning`.
 
-El wizard también ajusta automáticamente los cores de CPU para llama.cpp, reservando ~20% para el sistema (por ejemplo, 14 threads en un VPS de 16 cores).
+El wizard guarda el `context_limit` específico de cada proveedor en `data/config.yaml`. También ajusta automáticamente los cores de CPU para llama.cpp, reservando un core para el sistema (por ejemplo, 14/16 cores, 87.5%).
 
 ## Modelo definitivo
 
-- **Qwen2.5-7B-Instruct-Q4_K_M** en `http://localhost:8083/v1/chat/completions`, con ventana de contexto de 8K y `MAX_HISTORY_TOKENS=6000`.
+- **Qwen2.5-7B-Instruct-Q4_K_M** en `http://localhost:8083/v1/chat/completions`, con ventana de contexto de 8K y compresión al 95% (~7782 tokens de historial).
 - Servidor llama.cpp con `--jinja` y `-t 14` sobre 16 cores.
 - Qwen2.5-7B-Instruct emite `tool_calls` válidos de forma consistente y completa planes multi-paso.
 
@@ -48,7 +48,7 @@ Conclusión: **modelos <7B no son fiables para function calling en sysadmin.** Q
 | Funcionalidad | Estado |
 |---------------|--------|
 | Function calling nativo vía llama.cpp | [OK] |
-| 11 tools: run_command, read_file, write_file, web_search, git_operation, mcp_call, run_playbook, process_start, process_send, process_close, process_list | [OK] |
+| 12 tools: run_command, read_file, write_file, web_search, git_operation, mcp_call, run_playbook, process_start, process_send, process_close, process_list, cloud_reasoning | [OK] |
 | Bucle conversacional con hasta 10 turnos tool→LLM | [OK] |
 | Planificación y ejecución multi-paso sin intervención | [OK] |
 | Memoria procedural (Skill-Pro, ICML 2026) | [OK] |
@@ -57,9 +57,44 @@ Conclusión: **modelos <7B no son fiables para function calling en sysadmin.** Q
 | Sesión persistente entre reinicios | [OK] |
 | Historial readline (flechas arriba/abajo, cursor) | [OK] |
 | Ctrl+C interrumpe el turno actual sin salir | [OK] |
-| Setup wizard: local/cloud/hybrid | [OK] |
+| Setup wizard: local/cloud/hybrid con 7 proveedores | [OK] |
+| `cloud_reasoning` para modo híbrido | [OK] |
+| Sesiones y memoria procedural separadas por modo | [OK] |
+| Compresión por modo: 95% de 8K (local/híbrido), 50% del límite cloud | [OK] |
 | Seguridad OWASP: allowlist, confirmación destructiva, validación de input, audit log | [OK] |
 | README.md y PDF ejecutivo actualizados | [OK] |
+
+### Sesiones y cache separadas por modo
+
+Cada modo mantiene su propia sesión y memoria procedural; no se comparte contexto entre modos:
+
+- `data/session_local.json`, `data/session_cloud.json`, `data/session_hybrid.json`
+- `data/skills_memory_local.json`, `data/skills_memory_cloud.json`, `data/skills_memory_hybrid.json`
+
+### Compresión por modo
+
+| Modo | Ventana de contexto | Historial reservado | Compresión |
+|------|---------------------|---------------------|------------|
+| LOCAL | 8192 tokens | ~7782 tokens (95%) | Conteo real de tokens vía `/v1/tokenize` |
+| CLOUD | `context_limit` del proveedor | 50% del `context_limit` | Misma estrategia de conteo |
+| HÍBRIDO | 8192 tokens (local) | ~7782 tokens (95%) | Compresión local; `cloud_reasoning` decide cuándo delegar |
+
+### Tool `cloud_reasoning`
+
+Duodécima tool, disponible solo en modo híbrido. Envía al cloud el prompt del usuario más los últimos 10 mensajes del contexto local:
+
+- Variables de entorno: `AIOS_CLOUD_ENDPOINT` y `AIOS_API_KEY`.
+- Timeout: 120 s.
+- Temperatura: 0.3.
+- Casos de uso: planes multi-paso complejos, revisión de código o análisis que superan la capacidad del modelo local de 7B.
+
+### Correcciones recientes
+
+- Docker `--format` ya no se marca como comando destructivo.
+- Endpoint local corregido a `/v1/chat/completions`.
+- Se muestra 14/16 cores en lugar de porcentaje genérico.
+- DeepSeek actualizado a V4 Flash y V4 Pro.
+- Añadido **Ollama Cloud** como proveedor cloud.
 
 ## Arquitectura
 
@@ -164,7 +199,7 @@ Escribe `salir`, `exit` o `quit` para terminar. Ctrl+C durante un turno lo inter
 - Modelo: **Qwen2.5-7B-Instruct Q4_K_M** (bartowski)
 - Servidor: llama.cpp en `:8083`, `--jinja`, `-c 8192`, `-t 14`
 - Velocidad: **57/20 tok/s** prompt/gen
-- 11 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- 12 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`
 - Memoria: cache procedural Skill-Pro
 - Modos: local / cloud / híbrido (configurados por `setup.py`)
 - Seguridad: allowlist OWASP, confirmación destructiva, validación de input, audit log

@@ -47,7 +47,7 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
                                   └──────────────────┘
 ```
 
-- `setup.py`: first-run configuration wizard (local / cloud / hybrid).
+- `setup.py`: first-run configuration wizard (local / cloud / hybrid) with per-mode sessions and memory.
 - `chat.py`: interactive loop with readline history and slash commands.
 - `agent.py`: manages messages, calls the LLM, executes tool calls, and maintains procedural memory.
 - `tools.py`: tool definitions and handlers.
@@ -62,15 +62,15 @@ The first time the agent starts, `setup.py` presents a text-menu installer that 
 ### Available modes
 
 1. **LOCAL** — Uses the bundled **Qwen2.5-7B-Instruct** model served by llama.cpp on `http://localhost:8083`. Requires at least 8 GB RAM. This is the default for an offline ISO deployment.
-2. **CLOUD** — Select a provider (DeepSeek, OpenAI, Anthropic, Google Gemini, Moonshot/Kimi, OpenRouter) and enter the API key. The agent will route all LLM calls to the chosen cloud endpoint.
-3. **HYBRID** — The local model handles simple queries; complex or multi-step reasoning is offloaded to the configured cloud provider through a dedicated `cloud_reasoning` tool.
+2. **CLOUD** — Select a provider (DeepSeek, OpenAI, Anthropic, Google Gemini, Moonshot/Kimi, Ollama Cloud, OpenRouter) and enter the API key. The agent will route all LLM calls to the chosen cloud endpoint.
+3. **HYBRID** — The local model acts as the orchestrator; complex or multi-step reasoning is offloaded to the configured cloud provider through the dedicated `cloud_reasoning` tool.
 
 ### What the wizard configures
 
 - Operating mode (`local`, `cloud`, or `hybrid`).
-- Cloud provider and model (only for cloud/hybrid modes).
-- API key, with double-entry verification.
-- CPU auto-allocation: reserves ~20% of cores for the OS and assigns the rest to llama.cpp (e.g. 14 threads on a 16-core VPS).
+- Cloud provider and model (only for cloud/hybrid modes). Provider-specific `context_limit` is stored in `data/config.yaml`.
+- API key, entered once with hidden input (`getpass`).
+- CPU auto-allocation: reserves one core for the OS and assigns the rest to llama.cpp (e.g. 14/16 cores, 87.5% utilization).
 
 Configuration is written to `data/config.json` and read automatically on subsequent runs. Run `python3 setup.py` again at any time to reconfigure.
 
@@ -90,7 +90,7 @@ The deployed instance uses a single quantization that balances tool-calling qual
 |--------------|---------------|----------|------------------|----------|
 | Q4_K_M       | 57 prompt / 20 gen | 4.7 GB   | Reference        | Production server with enough memory |
 
-The current deployed instance uses **Qwen2.5-7B-Instruct-Q4_K_M** at `:8083` with an 8K context window (`-c 8192`) and `MAX_HISTORY_TOKENS=6000`. The server is started with `--jinja` for correct chat-template handling and `-t 14` on a 16-core host. To avoid silent context overflow, `agent.py` counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
+The current deployed instance uses **Qwen2.5-7B-Instruct-Q4_K_M** at `:8083` with an 8K context window (`-c 8192`) and keeps ~95% of it for history (~7782 tokens). The server is started with `--jinja` for correct chat-template handling and `-t 14` on a 16-core host. To avoid silent context overflow, `agent.py` counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
 
 ### Evaluated and discarded models
 
@@ -117,12 +117,29 @@ The interactive CLI uses Python's `readline` module for standard terminal line e
 - **Ctrl+C during a turn**: cancels the current LLM/tool-call turn and returns to the `> ` prompt without exiting the chat. This is handled with a `try/except KeyboardInterrupt` around `agent.run()` rather than a global signal handler.
 - Ctrl+C at the main `input()` prompt still exits the chat as before.
 
+## Per-mode sessions and memory
+
+Each operating mode keeps its own session and procedural-memory cache, so context is never shared between local, cloud, and hybrid runs:
+
+- Sessions: `data/session_local.json`, `data/session_cloud.json`, `data/session_hybrid.json`
+- Skill-Pro cache: `data/skills_memory_local.json`, `data/skills_memory_cloud.json`, `data/skills_memory_hybrid.json`
+
+On startup the chat prints: *"Sesión independiente por modo (no se comparte contexto entre modos)"*.
+
+### Context compression by mode
+
+| Mode | Context window | History kept | Compression |
+|------|----------------|--------------|-------------|
+| LOCAL | 8192 tokens | ~7782 tokens (95%) | Sliding-window + token-counting via `/v1/tokenize` |
+| CLOUD | Provider `context_limit` | 50% of `context_limit` | Same token-counting strategy |
+| HYBRID | 8192 tokens (local) | ~7782 tokens (95%) | Local compression; `cloud_reasoning` decides when to offload |
+
 ## Roadmap
 
 Features implemented in v2.1 (all completed):
 
 - ✅ Native function calling over llama.cpp server (`/v1/chat/completions`)
-- ✅ 11 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- ✅ 12 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`
 - ✅ Conversational loop with up to 10 tool→LLM turns and persistent session context
 - ✅ Multi-step planning and execution without intermediate human intervention
 - ✅ Procedural memory / Skill-Pro pattern for repeated queries
@@ -159,6 +176,15 @@ Step 4: Show final container and exposed port status.
 ```
 
 The agent executes each step via `run_command`, receives the output, and advances automatically. At the end it responds with a summary of what was done.
+
+## Cloud reasoning tool
+
+`cloud_reasoning` is the twelfth tool and is only used in hybrid mode. When the local orchestrator decides a query needs deeper reasoning, it sends the user prompt plus the last 10 messages of local context to the configured cloud endpoint.
+
+- Environment: `AIOS_CLOUD_ENDPOINT` and `AIOS_API_KEY` (set by the setup wizard).
+- Timeout: 120 seconds.
+- Temperature: 0.3.
+- Use case: complex multi-step plans, code review, or analysis that exceeds the local 7B model's capacity.
 
 ## Requirements
 
@@ -270,7 +296,7 @@ Type `salir`, `exit`, or `quit` to finish.
 - Model: **Qwen2.5-7B-Instruct Q4_K_M** (bartowski)
 - Server: llama.cpp at `:8083`, `--jinja`, `-c 8192`, `-t 14`
 - Speed: **57/20 tok/s** prompt/gen
-- Tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- Tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`
 - Memory: procedural Skill-Pro cache
 - Modes: local / cloud / hybrid (configured by `setup.py`)
 - Security: OWASP tool allowlist, human-in-the-loop, input validation, audit log
@@ -284,7 +310,10 @@ Type `salir`, `exit`, or `quit` to finish.
 - 11 tools implemented: shell, file, web, git, MCP, playbook, and interactive process management.
 - Procedural memory (Skill-Pro), real token-counting compression, persistent session, and error recovery.
 - Readline history, cursor navigation, and Ctrl+C turn interrupt in the interactive CLI (`chat.py`).
-- Setup wizard (`setup.py`) for local/cloud/hybrid mode.
+- Setup wizard (`setup.py`) for local/cloud/hybrid mode with 7 providers (DeepSeek V4 Flash/Pro, OpenAI, Anthropic, Google, Kimi, Ollama Cloud, OpenRouter), per-mode sessions, per-mode memory, and provider-specific `context_limit` stored in `data/config.yaml`.
+- 12th tool `cloud_reasoning` for hybrid mode, calling the cloud endpoint with the prompt + last 10 local messages.
+- Context compression tuned per mode: 95% of 8K for local/hybrid, 50% of provider limit for cloud.
+- Corrections: Docker `--format` no longer flagged as destructive, local endpoint fixed to `/v1/chat/completions`, CPU display shows actual cores (e.g. 14/16), DeepSeek models updated to V4 Flash and V4 Pro, Ollama Cloud added as provider.
 - OWASP-aligned security: tool allowlist, human-in-the-loop, input validation, audit log.
 - README updated with setup wizard, model evaluation table, and final state.
 - Executive PDF regenerated.
