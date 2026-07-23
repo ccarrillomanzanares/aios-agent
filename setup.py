@@ -301,15 +301,16 @@ def main():
             if not key:
                 print("\n  No API key provided. Defaulting to LOCAL mode.\n")
                 config["mode"] = "local"
-            config["cloud"]["provider_env"] = {
-                "DeepSeek": "DEEPSEEK_API_KEY",
-                "OpenAI": "OPENAI_API_KEY",
-                "Anthropic": "ANTHROPIC_API_KEY",
-                "Google Gemini": "GOOGLE_API_KEY",
-                "Kimi / Moonshot": "KIMI_API_KEY",
-                "Ollama Cloud": "OLLAMA_CLOUD_API_KEY",
-                "OpenRouter": "OPENROUTER_API_KEY",
-            }.get(prov, "API_KEY")
+            else:
+                config["cloud"]["provider_env"] = {
+                    "DeepSeek": "DEEPSEEK_API_KEY",
+                    "OpenAI": "OPENAI_API_KEY",
+                    "Anthropic": "ANTHROPIC_API_KEY",
+                    "Google Gemini": "GOOGLE_API_KEY",
+                    "Kimi / Moonshot": "KIMI_API_KEY",
+                    "Ollama Cloud": "OLLAMA_CLOUD_API_KEY",
+                    "OpenRouter": "OPENROUTER_API_KEY",
+                }.get(prov_data["name"], "API_KEY")
         else:
             # User went back, fallback to local
             config["mode"] = "local"
