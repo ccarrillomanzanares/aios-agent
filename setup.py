@@ -30,16 +30,9 @@ def print_box(title, lines):
 
 
 def input_key(label):
-    """Read API key with double verification."""
-    while True:
-        k1 = input(f"  {label}: ").strip()
-        if not k1:
-            print("  [!] La clave no puede estar vacía.")
-            continue
-        k2 = input(f"  Confirma: ").strip()
-        if k1 == k2:
-            return k1
-        print("  [!] Las claves no coinciden. Intenta de nuevo.")
+    """Read API key once."""
+    k = input(f"  {label}: ").strip()
+    return k if k else None
 
 
 def select_provider_and_model():
@@ -201,7 +194,7 @@ def main():
             config["cloud"]["provider"] = prov
             config["cloud"]["model"] = model
             clear()
-            print_box("API KEY", ["", "  Introduce tu clave de API.", "  Se verificará dos veces.", ""])
+            print_box("API KEY", ["", "  Introduce tu clave de API.", ""])
             key = input_key("  API Key")
             config["cloud"]["api_key"] = key
             config["cloud"]["provider_env"] = {
