@@ -50,7 +50,7 @@ def main():
     # Configure agent based on mode
     if mode == "local":
         os.environ["AIOS_MODE"] = "local"
-        os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1"
+        os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1/chat/completions"
     elif mode == "cloud":
         os.environ["AIOS_MODE"] = "cloud"
         provider = config.get("cloud", {}).get("provider")
@@ -68,7 +68,7 @@ def main():
             os.environ[env_var] = api_key
     elif mode == "hybrid":
         os.environ["AIOS_MODE"] = "hybrid"
-        os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1"
+        os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1/chat/completions"
         provider = config.get("cloud", {}).get("provider")
         model = config.get("cloud", {}).get("model")
         api_key = config.get("cloud", {}).get("api_key")
