@@ -18,7 +18,7 @@ MAX_TURNS = 10
 _LOCAL_CONTEXT = 8192
 _cloud_context = int(os.environ.get("AIOS_CLOUD_CONTEXT", "128000"))
 MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") == "local" else int(_cloud_context * 0.50)
-SESSION_FILE = Path("data/session.json")
+SESSION_FILE = Path("data") / f"session_{os.environ.get('AIOS_MODE', 'local')}.json"
 
 
 def _estimate_tokens(text: str) -> int:
