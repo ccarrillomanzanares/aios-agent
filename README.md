@@ -1,6 +1,6 @@
 # aios-agent v2.1 — SRE Agent with native function calling
 
-A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen2.5-7B-Instruct** model (served by llama.cpp). It can run Linux commands, read configuration/log files, and write controlled changes, all through a conversation in Spanish.
+A lightweight Site Reliability Engineering (SRE) agent that uses **native function calling** on top of the local **Qwen2.5-7B-Instruct** model (served by llama.cpp). It can run Linux commands, read configuration/log files, write controlled changes, search the web, run playbooks, manage interactive processes, and interact with Git — all through a conversation in Spanish.
 
 ## What does it do?
 
@@ -8,8 +8,14 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 - Executes shell commands on the local machine (`run_command`).
 - Reads configuration files and logs (`read_file`).
 - Writes files to allowed paths, blocking system directories (`write_file`).
-- Maintains conversational context and performs up to 5 reasoning turns of tool→LLM.
+- Searches the web via local Firecrawl (`web_search`).
+- Interacts with Git repositories (`git_operation`).
+- Calls external tools through MCP (`mcp_call`).
+- Runs YAML playbooks sequentially (`run_playbook`).
+- Starts, sends input to, and closes interactive processes (`process_start`, `process_send`, `process_close`, `process_list`).
+- Maintains conversational context and performs up to 10 reasoning turns of tool→LLM.
 - Plans and executes multi-step tasks without intermediate human intervention.
+- Learns from repeated procedural queries through lightweight procedural memory (Skill-Pro pattern).
 
 ## Architecture
 
@@ -17,7 +23,8 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
 ┌─────────────┐     HTTP JSON     ┌──────────────────┐
 │  chat.py    │ ────────────────▶ │   agent.py       │
 │ (CLI loop)  │                   │  orchestrator    │
-└─────────────┘                   │  function calls  │
+│  + setup.py │                   │  function calls  │
+└─────────────┘                   │  + memory        │
                                   └────────┬─────────┘
                                            │ tools schema
                                            ▼
@@ -26,30 +33,54 @@ A lightweight Site Reliability Engineering (SRE) agent that uses **native functi
                                   │ run_command      │
                                   │ read_file        │
                                   │ write_file       │
+                                  │ web_search       │
+                                  │ git_operation    │
+                                  │ mcp_call         │
+                                  │ run_playbook     │
+                                  │ process_*        │
                                   └──────────────────┘
                                            │
                                            ▼
                                   ┌──────────────────┐
-                                  │  Qwen2.5-7B-Instruct via    │
+                                  │ Qwen2.5-7B-Instruct via     │
                                   │ llama.cpp :8083  │
                                   └──────────────────┘
 ```
 
-- `chat.py`: interactive loop.
-- `agent.py`: manages messages, calls the LLM, executes tool calls, and returns responses.
+- `setup.py`: first-run configuration wizard (local / cloud / hybrid).
+- `chat.py`: interactive loop with readline history and slash commands.
+- `agent.py`: manages messages, calls the LLM, executes tool calls, and maintains procedural memory.
 - `tools.py`: tool definitions and handlers.
+- `memory.py`: Skill-Pro procedural memory.
+- `playbook.py`: YAML playbook runner.
+- `process.py`: interactive process management with PTY.
+
+## Setup Wizard
+
+The first time the agent starts, `setup.py` presents a text-menu installer that lets you choose the operating mode without editing configuration files by hand.
+
+### Available modes
+
+1. **LOCAL** — Uses the bundled **Qwen2.5-7B-Instruct** model served by llama.cpp on `http://localhost:8083`. Requires at least 8 GB RAM. This is the default for an offline ISO deployment.
+2. **CLOUD** — Select a provider (DeepSeek, OpenAI, Anthropic, Google Gemini, Moonshot/Kimi, OpenRouter) and enter the API key. The agent will route all LLM calls to the chosen cloud endpoint.
+3. **HYBRID** — The local model handles simple queries; complex or multi-step reasoning is offloaded to the configured cloud provider through a dedicated `cloud_reasoning` tool.
+
+### What the wizard configures
+
+- Operating mode (`local`, `cloud`, or `hybrid`).
+- Cloud provider and model (only for cloud/hybrid modes).
+- API key, with double-entry verification.
+- CPU auto-allocation: reserves ~20% of cores for the OS and assigns the rest to llama.cpp (e.g. 14 threads on a 16-core VPS).
+
+Configuration is written to `data/config.json` and read automatically on subsequent runs. Run `python3 setup.py` again at any time to reconfigure.
 
 ## Model
 
 The definitive model is **Qwen2.5-7B-Instruct** served by llama.cpp.
 
-During development we evaluated **Qwen2.5-Coder-3B**, but it was discarded because its function calling was inconsistent: it produced malformed tool calls, invented non-existent functions, and ignored the JSON schema. Since native function calling is the core mechanism of the agent, Qwen2.5-Coder-3B was not reliable enough for unattended, multi-step SRE tasks.
-
-Qwen2.5-7B-Instruct was chosen because it consistently emits valid `tool_calls` payloads, respects the declared schema, and completes multi-step plans correctly, while keeping acceptable latency on modest hardware.
-
-- Production service points to `:8083` and loads **Qwen2.5-7B-Instruct**.
-- Qwen2.5-Coder-3B has been removed from the server and is no longer available.
-- All documentation, tests, and examples assume Qwen2.5-7B-Instruct as the backing model.
+- Production service points to `:8083` and loads **Qwen2.5-7B-Instruct Q4_K_M**.
+- Native function calling is the core mechanism of the agent; reliability is more important than raw speed.
+- Models smaller than 7B were evaluated and discarded because they could not produce valid tool calls consistently for sysadmin tasks.
 
 ### Model quantization
 
@@ -59,33 +90,50 @@ The deployed instance uses a single quantization that balances tool-calling qual
 |--------------|---------------|----------|------------------|----------|
 | Q4_K_M       | 57 prompt / 20 gen | 4.7 GB   | Reference        | Production server with enough memory |
 
-The current deployed instance uses **Qwen2.5-7B-Instruct-Q4_K_M** at :8083 with an 8K context window and `MAX_HISTORY_TOKENS=6000`. Older Qwen3-family and smaller Qwen2.5-Coder-3B models have been removed from the server. To avoid silent context overflow, `agent.py` now counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
+The current deployed instance uses **Qwen2.5-7B-Instruct-Q4_K_M** at `:8083` with an 8K context window (`-c 8192`) and `MAX_HISTORY_TOKENS=6000`. The server is started with `--jinja` for correct chat-template handling and `-t 14` on a 16-core host. To avoid silent context overflow, `agent.py` counts tokens with the real `/v1/tokenize` endpoint before compressing or truncating history, rather than estimating with a fixed chars-per-token ratio.
 
-## Readline history
+### Evaluated and discarded models
 
-The interactive CLI now supports standard terminal line editing through Python's `readline` module:
+We tested several smaller and alternative models looking for a reliable <8B option. None matched the function-calling reliability of Qwen2.5-7B-Instruct.
+
+| Model | Size | tok/s | Function calling | Verdict |
+|-------|------|-------|------------------|---------|
+| Qwen3-8B Q3_K_M | 3.9 GB | 14.9 | Works | Discarded — slower than Qwen2.5-7B Q4_K_M |
+| Qwen3-4B (+jinja) | 2.4 GB | 42 | Inconsistent | Discarded — responds from memory, skips tools |
+| Qwen2.5-Coder-3B | 1.8 GB | ~33 | Fails | Discarded — responds from memory, does not use tools |
+| Phi-4-Mini 3.8B | 2.4 GB | 46 | Fails | Discarded — refuses to execute commands, aligned for safety |
+| Llama-3.2-3B | 1.9 GB | 37 | Fails | Discarded — hallucinates tool calls with fake paths |
+| Gemma-3-4B-IT | 2.4 GB | 16 | Fails | Discarded — hallucinates tool calls |
+
+Conclusion: **models <7B are not reliable for function calling in sysadmin tasks.** Qwen2.5-7B-Instruct is the CPU sweet spot for this agent.
+
+## Readline history and Ctrl+C
+
+The interactive CLI uses Python's `readline` module for standard terminal line editing:
 
 - **Up / Down arrows**: browse previous commands entered in the current session and across sessions.
 - **Left / Right arrows**: move the cursor to edit the current line.
 - **Persistent history**: commands are saved to `data/.chat_history` and reloaded on startup (up to 500 entries).
-- This works in any standard terminal on Linux, macOS, and in Windows terminals using a readline-compatible shell.
-
-Session context (files read/written and tool results) is still managed by the agent; the readline history only stores the user's input lines.
+- **Ctrl+C during a turn**: cancels the current LLM/tool-call turn and returns to the `> ` prompt without exiting the chat. This is handled with a `try/except KeyboardInterrupt` around `agent.run()` rather than a global signal handler.
+- Ctrl+C at the main `input()` prompt still exits the chat as before.
 
 ## Roadmap
 
 Features implemented in v2.1 (all completed):
 
 - ✅ Native function calling over llama.cpp server (`/v1/chat/completions`)
-- ✅ Tool `run_command`: execute shell commands with timeout, capturing stdout/stderr/exit_code/elapsed
-- ✅ Tool `read_file`: read files with permission checks and size limits
-- ✅ Tool `write_file`: write files, blocking critical system paths
-- ✅ Conversational loop with up to 5 tool→LLM turns and persistent per-session context
+- ✅ 11 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- ✅ Conversational loop with up to 10 tool→LLM turns and persistent session context
 - ✅ Multi-step planning and execution without intermediate human intervention
-- ✅ Basic security: warning before destructive commands and protection of `/etc`, `/boot`, `/sys`, `/proc`, `/dev`
-- ✅ Interactive CLI in Spanish (`chat.py`) with commands `salir`/`exit`/`quit`
+- ✅ Procedural memory / Skill-Pro pattern for repeated queries
+- ✅ Real token-counting context compression via `/v1/tokenize`
+- ✅ Error recovery: retries with `apt-get` when `apt` fails, handles apt locks
+- ✅ Persistent session across restarts (`data/session.json`)
 - ✅ Readline history and cursor navigation in the CLI
-- ✅ Complete README.md with architecture, usage, and roadmap
+- ✅ Ctrl+C to interrupt the current turn without exiting
+- ✅ Setup wizard: local / cloud / hybrid mode, provider selection, API key, CPU auto-allocation
+- ✅ Security (OWASP AI Agent cheat sheet): tool allowlist, human-in-the-loop for destructive commands, input validation, audit log (`audit.jsonl`)
+- ✅ Complete README.md with architecture, usage, security, and model evaluation
 - ✅ Executive documentation in PDF (`docs/ejecutivo.pdf`)
 
 ## Multi-step planning
@@ -95,9 +143,9 @@ For complex tasks the agent does not perform a single function call: it first **
 ### How it works
 
 1. **Planning prompt**: the system prompt instructs the LLM to generate a numbered plan of steps and keep executing it with the instruction `EJECUTA without explaining`.
-2. **`MAX_TURNS=5`**: the function-calling loop allows up to 5 turns, enough for several-step tasks without falling short.
+2. **`MAX_TURNS=10`**: the function-calling loop allows up to 10 turns, enough for multi-step tasks.
 3. **Sequential execution**: each tool call is performed, its result is injected into context, and the LLM decides the next step until the task finishes or the turn budget runs out.
-4. **No intermediate human intervention**: the model executes directly; the user only receives the final summarized result.
+4. **No intermediate human intervention**: the model executes directly; the user only receives the final summarized result. If the model detects a destructive or critical step, it asks for confirmation before continuing.
 
 ### Example execution
 
@@ -112,19 +160,22 @@ Step 4: Show final container and exposed port status.
 
 The agent executes each step via `run_command`, receives the output, and advances automatically. At the end it responds with a summary of what was done.
 
-### Benefits
-
-- Resolves composite tasks without fragmenting the user's query.
-- Leverages the LLM's reasoning to order dependencies (`first MariaDB, then WordPress`).
-- Keeps the loop under control: it can ask for confirmation if it detects a destructive or critical step.
-
 ## Requirements
 
 - Python 3.10+
 - `requests` (`pip install requests`)
-- llama.cpp server running Qwen2.5-7B-Instruct at `http://localhost:8083/v1/chat/completions`
+- llama.cpp server running Qwen2.5-7B-Instruct at `http://localhost:8083/v1/chat/completions` (local / hybrid mode)
+- Cloud API key (cloud / hybrid mode)
 
 ## Usage
+
+First run (or reconfiguration):
+
+```bash
+python3 setup.py
+```
+
+Interactive chat:
 
 ```bash
 python3 chat.py
@@ -143,17 +194,25 @@ Type `salir`, `exit`, or `quit` to finish.
 
 ## Security
 
-- Before destructive commands the model warns and asks for confirmation.
-- `write_file` blocks system paths (`/etc`, `/boot`, `/sys`, `/proc`, `/dev`).
-- The agent does not persist conversational history across sessions (only readline input history is kept).
+- **Tool allowlist**: commands such as `rm -rf /`, `dd` to block devices, `mkfs.*`, `fdisk`, and `chmod 000` are rejected.
+- **Human-in-the-loop**: destructive commands (`rm`, `sudo rm`, `> /dev/sd*`, `format`, `dd`) require explicit confirmation (default N, 10-second timeout).
+- **Input validation**: control characters sanitized, 1000-character limit, system-prompt injection detected; rejected inputs are logged to `audit.jsonl`.
+- **Path protection**: `write_file` blocks `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
+- **Audit log**: every tool invocation and rejection is recorded in `audit.jsonl`.
+- Full analysis in `SECURITY.md`.
 
 ## Files
 
-- `agent.py` — function-calling orchestrator.
-- `tools.py` — shell, read, and write tools.
-- `chat.py` — terminal chat interface with readline history.
+- `setup.py` — first-run configuration wizard.
+- `agent.py` — function-calling orchestrator and procedural memory.
+- `tools.py` — shell, file, web, git, MCP, playbook, and process tools.
+- `chat.py` — terminal chat interface with readline history and slash commands.
+- `memory.py` — Skill-Pro procedural memory cache.
+- `playbook.py` — YAML playbook runner.
+- `process.py` — interactive process management with PTY.
 - `README.md` — this document.
 - `CHANGELOG.md` — change history.
+- `SECURITY.md` — OWASP security analysis.
 - `docs/ejecutivo.pdf` — executive summary in PDF.
 
 ## Project history
@@ -180,9 +239,9 @@ Type `salir`, `exit`, or `quit` to finish.
 - Procedural memory (Skill-Pro, ICML 2026): JSON cache for repetitive responses.
 - Multi-step planning: prompt with `EJECUTA without explaining`.
 - Context compression: real token counting via `/v1/tokenize`.
-- Error recovery: retries with `apt-get` when `apt` fails.
+- Error recovery: retries with `apt-get` when `apt` fails and handles apt locks.
+- Persistent session (`data/session.json`) + readline history (`data/.chat_history`).
 - Audit log (`audit.jsonl`).
-- Persistent session + readline history (up/down arrows).
 
 ### Week 3 — Advanced tools
 
@@ -199,35 +258,35 @@ Type `salir`, `exit`, or `quit` to finish.
 - Input validation: sanitized input, 1000 char limit, anti-injection.
 - Created `SECURITY.md` with a full OWASP analysis.
 
-### Week 4 — Model evaluation
+### Week 4 — Model evaluation and setup wizard
 
-We tested 5 model configurations looking for a reliable <8B model:
-
-1. **Qwen3-8B Q3_K_M (3.9 GB)**: 14.9 tok/s. Reliable FC but slower. Discarded.
-2. **Qwen3-4B with `--jinja` (42 tok/s)**: Inconsistent FC. Responded from memory.
-3. **Qwen3-4B without `--jinja` (30 tok/s)**: FC failed without jinja template.
-4. **Qwen2.5-Coder-3B (25 tok/s)**: Responded from memory, did not use tools.
-5. **Qwen2.5-7B-Instruct Q4_K_M (4.4 GB, 20 tok/s)**: Reliable FC, correct Spanish.
-   **→ CHOSEN AS CURRENT MODEL**
-
-Conclusion: models <7B are not reliable for function calling in sysadmin tasks.  
-**Qwen2.5-7B-Instruct** is the CPU sweet spot.
+- Tested several models <8B. All failed to produce reliable function calls for sysadmin tasks.
+- **Qwen2.5-7B-Instruct Q4_K_M** chosen as the definitive model.
+- Added `setup.py` wizard: local/cloud/hybrid mode, provider selection, API key, CPU auto-allocation.
+- Added Ctrl+C interrupt for the current turn.
 
 ## Final state
 
 - Model: **Qwen2.5-7B-Instruct Q4_K_M** (bartowski)
+- Server: llama.cpp at `:8083`, `--jinja`, `-c 8192`, `-t 14`
 - Speed: **57/20 tok/s** prompt/gen
 - Tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`
+- Memory: procedural Skill-Pro cache
+- Modes: local / cloud / hybrid (configured by `setup.py`)
+- Security: OWASP tool allowlist, human-in-the-loop, input validation, audit log
 - Repo: [github.com/ccarrillomanzanares/aios-agent](https://github.com/ccarrillomanzanares/aios-agent)
 
 ## Version history
 
 ### v2.1 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
-- Definitive model set to Qwen2.5-7B-Instruct; Qwen2.5-Coder-3B evaluated and discarded due to inconsistent function calling.
-- Readline history and cursor navigation in the interactive CLI (`chat.py`).
-- Session context persisted across restarts.
-- README updated with final model choice and readline section.
+- Definitive model set to Qwen2.5-7B-Instruct; Qwen2.5-Coder-3B and other <7B models evaluated and discarded due to unreliable function calling.
+- 11 tools implemented: shell, file, web, git, MCP, playbook, and interactive process management.
+- Procedural memory (Skill-Pro), real token-counting compression, persistent session, and error recovery.
+- Readline history, cursor navigation, and Ctrl+C turn interrupt in the interactive CLI (`chat.py`).
+- Setup wizard (`setup.py`) for local/cloud/hybrid mode.
+- OWASP-aligned security: tool allowlist, human-in-the-loop, input validation, audit log.
+- README updated with setup wizard, model evaluation table, and final state.
 - Executive PDF regenerated.
 
 ### v2.0 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
