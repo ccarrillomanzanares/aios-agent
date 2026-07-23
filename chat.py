@@ -12,12 +12,12 @@ CONFIG_FILE = Path.home() / ".aios" / "config.yaml"
 
 # Provider → API endpoint mapping
 CLOUD_ENDPOINTS = {
-    "DeepSeek": "https://api.deepseek.com/v1",
-    "OpenAI": "https://api.openai.com/v1",
-    "Anthropic": "https://api.anthropic.com/v1",
+    "DeepSeek": "https://api.deepseek.com/v1/chat/completions",
+    "OpenAI": "https://api.openai.com/v1/chat/completions",
+    "Anthropic": "https://api.anthropic.com/v1/chat/completions",
     "Google Gemini": "https://generativelanguage.googleapis.com/v1beta",
-    "Kimi / Moonshot": "https://api.moonshot.cn/v1",
-    "OpenRouter": "https://openrouter.ai/api/v1",
+    "Kimi / Moonshot": "https://api.moonshot.cn/v1/chat/completions",
+    "OpenRouter": "https://openrouter.ai/api/v1/chat/completions",
 }
 
 

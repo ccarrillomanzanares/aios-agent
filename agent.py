@@ -146,6 +146,8 @@ class Agent:
                 "temperature": TEMPERATURE,
                 "max_tokens": MAX_TOKENS,
             }
+            if AIOS_MODE in ("cloud", "hybrid") and CLOUD_MODEL:
+                payload["model"] = CLOUD_MODEL
 
             try:
                 resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120)
