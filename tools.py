@@ -468,7 +468,7 @@ def cloud_reasoning(args: dict, context=None) -> str:
 
 def get_context_usage(args: dict, context=None) -> str:
     """Return context usage stats (tokens used / max)."""
-    max_tokens = int(os.environ.get("AIOS_CONTEXT_MAX", str(MAX_HISTORY_TOKENS)))
+    max_tokens = int(os.environ.get("AIOS_CONTEXT_MAX", "8192"))
     if context:
         total = sum(len(m.get("content", "")) // 4 for m in context)
         pct = min(100, int(total * 100 / max_tokens))
