@@ -1,0 +1,18 @@
+#!/bin/bash
+# AIOS Session: setup wizard (si no hay config) + startx
+LOG="/home/aios/startx.log"
+
+if [ ! -f "$HOME/.aios/config.yaml" ]; then
+    echo ""
+    echo "  ╔══════════════════════════════════════════════╗"
+    echo "  ║  AIOS AGENT - First Run Setup                ║"
+    echo "  ╚══════════════════════════════════════════════╝"
+    echo ""
+    cd /usr/local/bin/aios-agent
+    python3 setup.py
+    echo ""
+    echo "  Setup complete. Starting desktop..."
+    echo ""
+fi
+
+exec /usr/bin/startx "$@" > "$LOG" 2>&1
