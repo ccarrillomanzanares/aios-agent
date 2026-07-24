@@ -187,6 +187,42 @@ except Exception as e:
     sys.exit(1)
 ```
 
+## Configuración final del sistema en ISO AIOS LFS
+
+Estas notas describen el estado de configuración del sistema base sobre el que se ejecuta el agente en la ISO live y en la instalación a disco.
+
+### Dependencias del sistema
+
+La imagen AIOS LFS mantiene la configuración estándar de BLFS/LFS para los subsistemas de autenticación y resolución de nombres:
+
+- **`nsswitch.conf`** — archivo de configuración de GNU libc estándar (`/etc/nsswitch.conf`).
+  - Orden de resolución de usuarios/grupos: `files` primero, luego servicios opcionales como `systemd` o `ldap` si se habilitan.
+  - DNS: `hosts: files dns` por defecto.
+  - No se requieren modificaciones especiales para el agente.
+
+- **PAM (Pluggable Authentication Modules)** — configuración BLFS estándar en `/etc/pam.d/`.
+  - `login`, `su`, `sudo`, `passwd` y otros gestores de sesión usan módulos PAM habituales (`pam_unix.so`, `pam_wheel.so`, etc.).
+  - La política por defecto requiere autenticación con contraseña para acciones privilegiadas.
+
+### sudo
+
+En la **ISO live**, el usuario `aios` pertenece al grupo `wheel` y `sudo` se configura con **NOPASSWD** para el grupo `wheel`:
+
+```sudoers
+%wheel ALL=(ALL:ALL) NOPASSWD: ALL
+```
+
+Esto permite que el agente y los scripts del sistema (`setup.py`, `aios-install`) ejecuten comandos privilegiados sin interacción del usuario.
+
+> **Instalación a disco:** una vez copiado el sistema al disco duro con `aios-install`, se recomienda revisar esta política. En un sistema instalado se puede restringir a comandos específicos o exigir contraseña según la política de seguridad deseada.
+
+### Sin modelo en ISO
+
+La imagen ISO **no incluye ningún modelo GGUF** por defecto. Esto reduce el tamaño de la ISO y evita problemas de licenciamiento/descarga masiva.
+
+- **Modo cloud:** funciona inmediatamente si se proporciona la configuración de API externa.
+- **Modo local/híbrido:** el usuario debe descargar manualmente un modelo GGUF (por ejemplo, `Qwen_Qwen3-8B-Q4_K_M.gguf`) y colocarlo en `/usr/local/share/aios/models/`, o en la ruta indicada en `~/.aios/config.yaml`.
+
 ## Systemd (integración ISO)
 
 ```
