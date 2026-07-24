@@ -333,6 +333,13 @@ def main():
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
+    # Enable llama service if local or hybrid mode
+    import subprocess as _sp
+    if config.get("mode") in ("local", "hybrid"):
+        _sp.run(["systemctl", "enable", "aios-llama.service"], capture_output=True)
+        _sp.run(["systemctl", "start", "aios-llama.service"], capture_output=True)
+        print("  [Service] aios-llama.service enabled and started")
+
     clear()
     summary = [
         "",
