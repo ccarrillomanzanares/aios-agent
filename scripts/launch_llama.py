@@ -1,53 +1,84 @@
 #!/usr/bin/env python3
-"""Launch llama-server with parameters from ~/.aios/config.yaml."""
+"""Launch llama-server. Creates default config if none exists (live ISO)."""
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
-CONFIG_FILE = Path.home() / ".aios" / "config.yaml"
-LLAMA_BIN = Path.home() / "llama.cpp" / "build" / "bin" / "llama-server"
-MODELS_DIR = Path.home() / "models"
+os.environ["LD_LIBRARY_PATH"] = "/usr/local/lib/llama:" + os.environ.get("LD_LIBRARY_PATH", "")
 
+CONFIG_FILE = Path.home() / ".aios" / "config.yaml"
+LLAMA_BIN = "/usr/local/bin/llama-server"
+MODELS_DIR = Path("/usr/local/share/aios/models")
+FALLBACK_DIRS = [Path.home() / "models"]
+
+def _cpu():
+    return max(1, int((os.cpu_count() or 4) * 0.875))
+
+def _ram():
+    try:
+        with open("/proc/meminfo") as f:
+            for l in f:
+                if l.startswith("MemTotal:"):
+                    return round(int(l.split()[1]) / 1024 / 1024)
+    except: pass
+    return 12
+
+def _ctx(ram):
+    if ram <= 8: return 8192
+    if ram <= 16: return 32768
+    return 65536
+
+def _model():
+    if MODELS_DIR.exists():
+        for f in MODELS_DIR.glob("*.gguf"):
+            return f
+    for d in FALLBACK_DIRS:
+        if d.exists():
+            for f in d.glob("*.gguf"):
+                return f
+    return MODELS_DIR / "Qwen_Qwen3-8B-Q4_K_M.gguf"
+
+def _gen_config():
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    import yaml
+    mp = _model()
+    with open(CONFIG_FILE, "w") as f:
+        yaml.dump({
+            "mode": "local",
+            "local": {
+                "model": mp.name,
+                "model_name": "Qwen3-8B-Instruct",
+                "threads": _cpu(), "context": _ctx(_ram()),
+            },
+            "cloud": {"provider": None, "model": None},
+        }, f, default_flow_style=False)
+    print(f"[aios-llama] Config created ({_ctx(_ram())//1024}K ctx, {_cpu()} thr)", flush=True)
 
 def main():
-    # Wait for config to exist (firstboot may still be running)
-    for _ in range(30):
-        if CONFIG_FILE.exists():
-            break
-        time.sleep(2)
-    else:
-        print("[aios-llama] No config.yaml found after 60s. Exiting.", flush=True)
-        sys.exit(1)
-
+    if not CONFIG_FILE.exists():
+        _gen_config()
     import yaml
     with open(CONFIG_FILE) as f:
-        config = yaml.safe_load(f)
-
-    local = config.get("local", {})
-    model_file = local.get("model", "Qwen_Qwen3-8B-Q4_K_M.gguf")
-    context = local.get("context", 32768)
-    threads = local.get("threads", os.cpu_count() or 4)
-
-    model_path = MODELS_DIR / model_file
-    if not model_path.exists():
-        print(f"[aios-llama] Model not found: {model_path}", flush=True)
+        cfg = yaml.safe_load(f)
+    local = cfg.get("local", {})
+    mn = local.get("model", "Qwen_Qwen3-8B-Q4_K_M.gguf")
+    # Prefer system dir, then fallback
+    mp = MODELS_DIR / mn
+    if not mp.exists():
+        for d in FALLBACK_DIRS:
+            p = d / mn
+            if p.exists():
+                mp = p; break
+    if not mp.exists():
+        print(f"[aios-llama] Model not found: {mp}", flush=True)
         sys.exit(1)
-
-    cmd = [
-        str(LLAMA_BIN),
-        "-m", str(model_path),
-        "--host", "127.0.0.1",
-        "--port", "8083",
-        "-c", str(context),
-        "-t", str(threads),
-        "--jinja",
-    ]
-
-    print(f"[aios-llama] Starting: {' '.join(cmd)}", flush=True)
-    os.execvp(str(LLAMA_BIN), cmd)
-
+    ctx = local.get("context", _ctx(_ram()))
+    thr = local.get("threads", _cpu())
+    cmd = [LLAMA_BIN, "-m", str(mp), "--host", "127.0.0.1", "--port", "8083",
+           "-c", str(ctx), "-t", str(thr), "--jinja"]
+    print(f"[aios-llama] Starting {mp.name} ({mp.stat().st_size//(1024**3)} GB, {ctx} ctx)", flush=True)
+    os.execvp(LLAMA_BIN, cmd)
 
 if __name__ == "__main__":
     main()
