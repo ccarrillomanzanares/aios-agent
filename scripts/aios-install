@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+"""AIOS Agent - Disk installer for AIOS LFS ISO.
+Installs the running live system to a target disk with full persistence.
+Run from the AIOS LFS live environment."""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+VERSION = "1.0.0"
+CONFIG_SRC = Path.home() / ".aios" / "config.yaml"
+MODEL_SRC = Path.home() / "models"
+AGENT_SRC = Path("/usr/local/bin/aios-agent")
+
+# ─── Helpers ─────────────────────────────────────────────────────────────
+
+def run(cmd: list[str], check=True, capture=True):
+    """Run command and return CompletedProcess."""
+    try:
+        return subprocess.run(cmd, capture_output=capture, text=True, check=check)
+    except subprocess.CalledProcessError as e:
+        print(f"  ERROR: {' '.join(cmd)}")
+        print(f"  {e.stderr.strip()}")
+        sys.exit(1)
+
+def run_capture(cmd: list[str]) -> str:
+    """Run and return stdout."""
+    r = run(cmd)
+    return r.stdout.strip()
+
+def ask(question: str, default: str = "") -> str:
+    """Prompt user."""
+    suffix = f" [{default}]" if default else ""
+    try:
+        return input(f"  {question}{suffix}: ").strip() or default
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+
+def confirm(question: str) -> bool:
+    """Yes/no confirmation."""
+    r = ask(f"{question} (y/N)", "n")
+    return r.lower() in ("y", "yes")
+
+def print_box(title: str, lines: list[str]):
+    """Print a bordered box."""
+    width = max(len(l) for l in lines + [title]) + 4
+    print("╔" + "═" * (width - 2) + "╗")
+    print(f"║  {title}{' ' * (width - 4 - len(title))}║")
+    print("╠" + "═" * (width - 2) + "╣")
+    for l in lines:
+        print(f"║  {l}{' ' * (width - 4 - len(l))}║")
+    print("╚" + "═" * (width - 2) + "╝")
+
+def clear():
+    os.system("clear" if os.name == "posix" else "cls")
+
+# ─── Disk operations ──────────────────────────────────────────────────────
+
+def list_disks() -> list[dict]:
+    """List available block devices (exclude loop, ram, rom, dm)."""
+    out = run_capture(["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MODEL,MOUNTPOINT"])
+    data = json.loads(out)
+    disks = []
+    for dev in data.get("blockdevices", []):
+        if dev["type"] == "disk" and not any(dev["name"].startswith(p) for p in ("loop", "ram", "zram")):
+            disks.append(dev)
+    return disks
+
+def select_disk(disks: list[dict]) -> dict:
+    """Show disk menu and return selected."""
+    while True:
+        clear()
+        print_box("SELECT TARGET DISK", [
+            "",
+            f"  {'DEVICE':<10} {'SIZE':<8} {'MODEL'}",
+            f"  {'──────':<10} {'────':<8} {'─────'}",
+        ] + [
+            f"  {d['name']:<10} {d['size']:<8} {d.get('model','')}"
+            for d in disks
+        ] + [
+            "",
+            "  WARNING: All data on the selected disk will be destroyed.",
+            "",
+        ])
+        choice = ask("Select disk (e.g. sda, nvme0n1)", "")
+        if not choice:
+            print("\n  Aborted.")
+            sys.exit(0)
+        for d in disks:
+            if d["name"] == choice:
+                return d
+        print(f"\n  Disk '{choice}' not found. Try again.")
+
+def partition_and_format(disk: str):
+    """Create single ext4 partition with boot flag."""
+    dev = f"/dev/{disk}"
+    part1 = f"{dev}1" if not disk.startswith("nvme") else f"{dev}p1"
+
+    print(f"\n  Partitioning {dev}...")
+    run(["parted", "-s", dev, "mklabel", "gpt"])
+    run(["parted", "-s", dev, "mkpart", "primary", "ext4", "0%", "100%"])
+    # Wait for kernel to re-read partition table
+    subprocess.run(["udevadm", "settle"], capture_output=True)
+    # Boot flag
+    run(["parted", "-s", dev, "set", "1", "boot", "on"])
+
+    print(f"  Formatting {part1} as ext4...")
+    run(["mkfs.ext4", "-F", "-L", "AIOS", part1])
+
+    return part1
+
+# ─── Filesystem copy ─────────────────────────────────────────────────────
+
+def copy_system(target: str):
+    """Copy live filesystem to target, excluding virtual and temporary dirs."""
+    print("\n  Copying system to target (this may take a while)...")
+    excludes = [
+        "--exclude=/proc/*", "--exclude=/sys/*", "--exclude=/dev/*",
+        "--exclude=/run/*", "--exclude=/tmp/*", "--exclude=/mnt/*",
+        "--exclude=/media/*", "--exclude=/lost+found",
+        "--exclude=/swapfile",
+    ]
+    run(["rsync", "-aHAX"] + excludes + ["/", target])
+
+def setup_chroot(target: str):
+    """Prepare and enter chroot for bootloader and final setup."""
+    for d in ["dev", "proc", "sys", "run"]:
+        Path(f"{target}/{d}").mkdir(parents=True, exist_ok=True)
+    run(["mount", "--bind", "/dev", f"{target}/dev"])
+    run(["mount", "--bind", "/proc", f"{target}/proc"])
+    run(["mount", "--bind", "/sys", f"{target}/sys"])
+    run(["mount", "--bind", "/run", f"{target}/run"])
+
+def cleanup_chroot(target: str):
+    """Unmount chroot filesystems."""
+    for d in ["run", "sys", "proc", "dev"]:
+        subprocess.run(["umount", "-l", f"{target}/{d}"], capture_output=True)
+
+def install_grub(target: str, disk: str):
+    """Install GRUB to the target disk."""
+    print(f"  Installing GRUB on /dev/{disk}...")
+    run(["chroot", target, "grub-install", f"/dev/{disk}"])
+    run(["chroot", target, "grub-mkconfig", "-o", "/boot/grub/grub.cfg"])
+
+def generate_fstab(target: str, root_part: str):
+    """Generate /etc/fstab from current mount."""
+    uuid = run_capture(["blkid", "-s", "UUID", "-o", "value", root_part])
+    fstab = f"""# /etc/fstab: static file system information
+UUID={uuid} / ext4 defaults,noatime 0 1
+proc /proc proc nosuid,noexec,nodev 0 0
+sys /sys sysfs nosuid,noexec,nodev 0 0
+dev /dev devtmpfs mode=0755,nosuid 0 0
+"""
+    with open(f"{target}/etc/fstab", "w") as f:
+        f.write(fstab)
+    print(f"  fstab generated (UUID={uuid})")
+
+def enable_services(target: str):
+    """Enable systemd services in the installed system."""
+    print("  Enabling systemd services...")
+    for svc in ["aios-llama.service"]:
+        run(["chroot", target, "systemctl", "enable", svc])
+
+def configure_system(target: str):
+    """Set hostname, passwords, etc."""
+    # Hostname
+    print("\n  Configuring system...")
+    hostname = ask("Hostname for installed system", "aios")
+    with open(f"{target}/etc/hostname", "w") as f:
+        f.write(f"{hostname}\n")
+    with open(f"{target}/etc/hosts", "w") as f:
+        f.write(f"""127.0.0.1 localhost
+127.0.1.1 {hostname}
+::1 localhost ip6-localhost ip6-loopback
+""")
+
+# ─── AIOS agent config ────────────────────────────────────────────────────
+
+def setup_aios_config(target: str):
+    """Copy or generate ~/.aios/config.yaml for the installed system."""
+    aios_home = Path(target) / "home" / "aios" / ".aios"
+    aios_home.mkdir(parents=True, exist_ok=True)
+
+    # Look for model file(s)
+    models = list(Path(target + str(MODEL_SRC)).glob("*.gguf"))
+    model_name = models[0].name if models else "Qwen_Qwen3-8B-Q4_K_M.gguf"
+
+    config = {
+        "mode": "local",
+        "local": {
+            "model": model_name,
+            "model_name": model_name.replace(".gguf", "").replace("Qwen_", "").replace("Instruct-", ""),
+            "threads": 14,
+            "context": 32768,
+        },
+        "cloud": {
+            "provider": None,
+            "model": None,
+        },
+    }
+    import yaml
+    with open(aios_home / "config.yaml", "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
+    # Fix ownership
+    uid = os.stat(Path(target) / "home" / "aios").st_uid
+    gid = os.stat(Path(target) / "home" / "aios").st_gid
+    for f in aios_home.iterdir():
+        os.chown(f, uid, gid)
+    print("  ~/.aios/config.yaml created")
+
+# ─── Main ─────────────────────────────────────────────────────────────────
+
+def main():
+    clear()
+    print_box("AIOS LFS INSTALLER v" + VERSION, [
+        "",
+        "  This will install the AIOS LFS live system to a disk.",
+        "  All data on the target disk will be destroyed.",
+        "",
+    ])
+
+    if not confirm("Continue"):
+        print("\n  Installation aborted.\n")
+        return
+
+    # 1. Select disk
+    disks = list_disks()
+    if not disks:
+        print("\n  No disks found. Aborting.\n")
+        return
+    disk = select_disk(disks)
+    print(f"\n  Selected: /dev/{disk['name']} ({disk['size']})")
+
+    if not confirm("WARNING: This will DESTROY all data on this disk"):
+        print("\n  Installation aborted.\n")
+        return
+
+    # 2. Partition
+    root_part = partition_and_format(disk["name"])
+
+    # 3. Mount
+    target = "/mnt/target"
+    Path(target).mkdir(parents=True, exist_ok=True)
+    run(["mount", root_part, target])
+
+    # 4. Copy system
+    copy_system(target)
+
+    # 5. Chroot setup
+    setup_chroot(target)
+
+    # 6. GRUB
+    install_grub(target, disk["name"])
+
+    # 7. fstab
+    generate_fstab(target, root_part)
+
+    # 8. Services
+    enable_services(target)
+
+    # 9. Hostname
+    configure_system(target)
+
+    # 10. AIOS config
+    setup_aios_config(target)
+
+    # 11. Cleanup
+    cleanup_chroot(target)
+    run(["umount", target])
+
+    clear()
+    print_box("INSTALLATION COMPLETE", [
+        "",
+        f"  AIOS LFS installed to /dev/{disk['name']}",
+        "",
+        "  Remove the installation media and reboot.",
+        "",
+        "  Login: aios / aios  or  root / root",
+        "",
+    ])
+
+if __name__ == "__main__":
+    main()
