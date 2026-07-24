@@ -41,9 +41,22 @@ python3 chat.py
 
 El agente está preinstalado en la ISO AIOS LFS live. Ver [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs) para la ISO que incluye este agente.
 
+## Boot flow en la ISO AIOS LFS
+
+El arranque gráfico del agente sigue este flujo secuencial:
+
+1. **login** — autenticación del usuario de la sesión.
+2. **aios-session** — script de arranque de sesión (`scripts/aios-session`) que:
+   - lanza el setup inicial si no existe `~/.aios/config.yaml`;
+   - una vez configurado, inicia el entorno gráfico con `startx`;
+   - `i3` arranca como gestor de ventanas;
+   - `i3` lanza un `xterm` que ejecuta el agente (`aios` / `chat.py`).
+
+El servicio de modelo (`aios-llama.service`) no arranca por defecto en boot; se activa durante el setup cuando se elige modo `local` o `hybrid`.
+
 ## Configuración
 
-Primer arranque: `chat.py` ejecuta el wizard de setup automáticamente.
+Primer arranque: `scripts/aios-session` ejecuta el wizard de setup automáticamente si falta `~/.aios/config.yaml`.
 
 Fichero de configuración: `~/.aios/config.yaml`
 
@@ -85,6 +98,7 @@ cloud:
 
 | Script | Descripción |
 |---|---|
+| `scripts/aios-session` | Arranque de sesión gráfica en la ISO: detecta si existe `~/.aios/config.yaml`, ejecuta setup en caso contrario, luego lanza `startx` → `i3` → `xterm` con el agente |
 | `scripts/launch_llama.py` | Lanza llama-server si existe config y `mode` es `local`/`hybrid`. No crea config por defecto; sale limpio si falta o `mode=cloud` |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
 | `scripts/aios-install` | Instala ISO AIOS LFS a disco duro |
@@ -99,6 +113,7 @@ cloud:
 
 - `aios-llama.service` se desactiva en la ISO (`systemctl disable aios-llama.service`) y solo se habilita/arranca cuando setup.py elige `local` o `hybrid`.
 - `sshd` está deshabilitado en la ISO, sin host keys fijas; si se necesita, se arranca manualmente (`/etc/rc.d/init.d/sshd start`) y se regeneran las keys al primer uso.
+- Firefox se ha eliminado del autostart gráfico; no se abre automáticamente al iniciar sesión.
 
 ## Rutas en ISO
 
@@ -110,6 +125,10 @@ cloud:
 | Modelo | `/usr/local/share/aios/models/` |
 | Instalador | `/usr/local/bin/aios-install` |
 | Wrapper | `/usr/local/bin/aios` |
+
+## Referencia cruzada a la ISO
+
+Para construir o personalizar la imagen live que contiene este agente, consulta el repositorio [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs).
 
 ## Dependencias
 
