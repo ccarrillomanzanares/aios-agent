@@ -200,13 +200,14 @@ def main():
         "     Requires an API key from a provider",
         "",
         "  3) HYBRID (local + cloud)",
+        "  4) INSTALL TO DISK",
         "     Simple tasks -> local model",
         "     Complex tasks -> cloud model",
         "     Requires an API key from a provider",
         "",
     ])
     try:
-        mode = int(input("  Select (1-3): "))
+        mode = int(input("  Select (1-4): "))
     except ValueError:
         mode = 0
 
@@ -232,7 +233,7 @@ def main():
     ]
 
 
-    if mode not in (1, 2, 3):
+    if mode not in (1, 2, 3, 4):
         print("\n  Invalid option. Defaulting to LOCAL mode.")
         mode = 1
 
@@ -345,9 +346,17 @@ def main():
         "",
         f"  Mode: {config['mode']}",
     ]
+    if mode == 4:
+        import subprocess as _sp
+        _sp.run(["sudo", "aios-install"])
+        print()
+        again = input("  Reboot now? (y/N): ").strip().lower()
+        if again == "y":
+            _sp.run(["sudo", "reboot"])
+        return
+
     if mode == 1:
         summary.append(f"  Model: {selected['name']} ({selected['size']}, {selected['speed']})")
-    if mode == 1:
         summary.extend([
             f"  CPU threads: {config['local']['threads']} ({config['local']['threads']*100//os.cpu_count()}%)",
             f"  Context: {config['local']['context']} tokens",
