@@ -1,4 +1,4 @@
-# Resumen Ejecutivo — aios-agent v2.3
+# Resumen Ejecutivo — aios-agent v2.4
 
 ## Propósito
 
@@ -15,12 +15,12 @@
 | `process.py` | Gestión de procesos interactivos vía PTY. |
 | `setup.py` | Asistente de configuración inicial (local/cloud/híbrido). |
 | `scripts/aios-install` | Instalador de la ISO AIOS LFS a disco duro. |
-| `scripts/launch_llama.py` | Lanzador de llama-server con configuración por defecto. |
+| `scripts/launch_llama.py` | Lanzador de llama-server; no crea config, arranca solo en local/híbrido. |
 | `scripts/firstboot.sh` | Configuración de primer arranque. |
-| `systemd/aios-llama.service` | Servicio systemd del servidor de modelos. |
-| `systemd/aios-agent.service` | Servicio systemd del agente interactivo. |
+| `systemd/aios-llama.service` | Servicio systemd del servidor de modelos (deshabilitado en boot). |
+| `systemd/aios-agent.service` | Servicio systemd del agente interactivo (deshabilitado). |
 
-## Novedades de la v2.3
+## Novedades de la v2.4
 
 1. **Rutas estándar de sistema**
    - Servidor: `/usr/local/bin/llama-server`
@@ -32,18 +32,20 @@
 2. **Instalador a disco duro (`scripts/aios-install`)**
    - Particiona GPT, formatea ext4 y copia el sistema live.
    - Instala GRUB, genera `/etc/fstab` por UUID.
-   - Habilita `aios-llama.service`.
    - Genera `~/.aios/config.yaml` para el usuario `aios`.
 
-3. **Configuración por defecto**
-   - `launch_llama.py` crea `~/.aios/config.yaml` automáticamente si no existe, con modelo, threads y contexto adaptados al hardware.
-
-4. **Wrapper `aios`**
-   - Comando `/usr/local/bin/aios` inicia el chat interactivo sin recordar la ruta completa.
-
-5. **Systemd refinado**
-   - `aios-llama.service`: habilitado para inicio automático.
+3. **Systemd refinado (lazy start)**
+   - `aios-llama.service`: deshabilitado en boot; `setup.py` lo habilita y arranca solo si el modo elegido es `local` o `hybrid`.
    - `aios-agent.service`: deshabilitado por defecto porque requiere terminal interactiva.
+   - `sshd`: deshabilitado en la ISO, sin host keys fijas; se arranca manualmente si se requiere acceso remoto.
+
+4. **launch_llama.py pasivo**
+   - No crea `~/.aios/config.yaml` por defecto.
+   - Sale limpio con código 0 si no existe config o si el modo es `cloud`.
+   - Arranca el servidor solo cuando `mode` es `local` o `hybrid`.
+
+5. **Referencia a AIOS LFS**
+   - Este agente se incluye en la ISO `aios-lfs`: https://github.com/ccarrillomanzanares/aios-lfs.
 
 ## Seguridad
 
@@ -60,7 +62,7 @@
 
 ## Estado del proyecto
 
-- Versión actual: **v2.3**
+- Versión actual: **v2.4**
 - Rama: `main`
 - Última actualización: 24 de julio de 2026
 - Repositorio: https://github.com/ccarrillomanzanares/aios-agent

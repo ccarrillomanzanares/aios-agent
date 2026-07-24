@@ -39,7 +39,7 @@ python3 chat.py
 
 ### ISO AIOS LFS
 
-El agente está preinstalado en la ISO AIOS LFS live. Ver [aios-lfs-docs](https://github.com/ccarrillomanzanares/aios-lfs).
+El agente está preinstalado en la ISO AIOS LFS live. Ver [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs) para la ISO que incluye este agente.
 
 ## Configuración
 
@@ -85,7 +85,7 @@ cloud:
 
 | Script | Descripción |
 |---|---|
-| `scripts/launch_llama.py` | Lanza llama-server con parámetros del config (crea config por defecto si no existe) |
+| `scripts/launch_llama.py` | Lanza llama-server si existe config y `mode` es `local`/`hybrid`. No crea config por defecto; sale limpio si falta o `mode=cloud` |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
 | `scripts/aios-install` | Instala ISO AIOS LFS a disco duro |
 
@@ -93,9 +93,12 @@ cloud:
 
 ```
 /usr/lib/systemd/system/
-├── aios-llama.service    # llama-server (enabled)
+├── aios-llama.service    # llama-server (disabled at boot, se activa en setup si local/híbrido)
 └── aios-agent.service    # chat.py interactivo (disabled, lo lanza i3)
 ```
+
+- `aios-llama.service` se desactiva en la ISO (`systemctl disable aios-llama.service`) y solo se habilita/arranca cuando setup.py elige `local` o `hybrid`.
+- `sshd` está deshabilitado en la ISO, sin host keys fijas; si se necesita, se arranca manualmente (`/etc/rc.d/init.d/sshd start`) y se regeneran las keys al primer uso.
 
 ## Rutas en ISO
 
