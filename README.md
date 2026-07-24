@@ -7,7 +7,8 @@ Agente SRE semiautónomo con function calling, diseñado para ejecutarse en loca
 ```
 ┌──────────────────────────────────────────────────┐
 │                    chat.py                        │
-│  (CLI interactivo con readline + history)         │
+│  (CLI interactivo con readline + history,         │
+│   wrapper robusto ante EOF/errores)               │
 ├──────────────────────────────────────────────────┤
 │                    agent.py                       │
 │  (bucle de function calling: llama.cpp API +      │
@@ -40,6 +41,8 @@ python3 chat.py
 ### ISO AIOS LFS
 
 El agente está preinstalado en la ISO AIOS LFS live. Ver [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs) para la ISO que incluye este agente.
+
+> **Modelo en la ISO:** la imagen ISO no incluye ningún modelo GGUF por defecto. El modo **cloud** funciona out-of-the-box siempre que haya configuración de API. El modo **local** requiere descargar manualmente un modelo GGUF y apuntar `config.yaml` a él.
 
 ### Instalación a disco desde la ISO AIOS LFS
 
@@ -74,6 +77,21 @@ El arranque gráfico del agente sigue este flujo secuencial:
    - `i3` lanza un `xterm` que ejecuta el agente (`aios` / `chat.py`).
 
 El servicio de modelo (`aios-llama.service`) no arranca por defecto en boot; se activa durante el setup cuando se elige modo `local` o `hybrid`.
+
+## Permisos
+
+El directorio del agente debe pertenecer al grupo `wheel` y tener el propietario `aios` para que `chat.py` pueda escribir el directorio `data/` (logs, memoria y caché):
+
+```bash
+sudo chown -R aios:wheel /usr/local/bin/aios-agent
+sudo chmod -R g+w /usr/local/bin/aios-agent/data
+```
+
+Si el usuario que ejecuta el agente no está en el grupo `wheel`, añadirlo antes de iniciar la sesión:
+
+```bash
+sudo usermod -aG wheel "$USER"
+```
 
 ## Configuración
 
@@ -149,6 +167,25 @@ Opción: 4
 ```
 
 > **Nota:** La opción 4 requiere privilegios de root para escribir en el disco de destino. Se recomienda ejecutar `setup.py` con `sudo` cuando se vaya a usar.
+
+### chat.py — Manejo robusto de errores
+
+`chat.py` envuelve el bucle principal en un wrapper que captura `EOFError` y excepciones genéricas, permitiendo:
+
+- Detectar desconexiones de stdin (EOF) sin dejar el terminal colgado.
+- Registrar el stack trace en `data/chat.log` en lugar de mostrarlo crudo al usuario.
+- Volver al prompt o salir limpiamente según la severidad del error.
+
+```python
+try:
+    main_loop()
+except EOFError:
+    logger.info("stdin closed (EOF)")
+    sys.exit(0)
+except Exception as e:
+    logger.exception("chat.py crashed: %s", e)
+    sys.exit(1)
+```
 
 ## Systemd (integración ISO)
 
