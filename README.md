@@ -41,6 +41,27 @@ python3 chat.py
 
 El agente está preinstalado en la ISO AIOS LFS live. Ver [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs) para la ISO que incluye este agente.
 
+### Instalación a disco desde la ISO AIOS LFS
+
+La ISO live incluye el instalador `aios-install` para escribir el sistema en disco duro. `setup.py` expone la opción **4: INSTALL TO DISK**:
+
+1. Iniciar la ISO AIOS LFS y abrir una terminal.
+2. Ejecutar `setup.py` y elegir la opción **`4) INSTALL TO DISK`**.
+3. El setup lanza el instalador `aios-install`.
+4. Al terminar la instalación, el setup pregunta si se desea reiniciar (`reboot`).
+
+**Flujo de setup.py:**
+
+```text
+1) Configure AIOS
+2) Start AIOS (local)
+3) Exit
+4) INSTALL TO DISK   <-- nueva opción
+```
+
+- Seleccionar `4` ejecuta `/usr/local/bin/aios-install`.
+- Tras completar la instalación, setup solicita confirmación para reiniciar el sistema.
+
 ## Boot flow en la ISO AIOS LFS
 
 El arranque gráfico del agente sigue este flujo secuencial:
@@ -102,6 +123,32 @@ cloud:
 | `scripts/launch_llama.py` | Lanza llama-server si existe config y `mode` es `local`/`hybrid`. No crea config por defecto; sale limpio si falta o `mode=cloud` |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
 | `scripts/aios-install` | Instala ISO AIOS LFS a disco duro |
+| `setup.py` | Wizard de instalación y arranque en la ISO. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK` |
+
+### setup.py — Opción 4: INSTALL TO DISK
+
+`setup.py` coordina la configuración inicial y el lanzamiento del agente desde la ISO AIOS LFS. Su menú incluye ahora la opción **`4) INSTALL TO DISK`**:
+
+- Al elegir `4`, `setup.py` ejecuta el instalador `aios-install`.
+- Una vez que `aios-install` finaliza, `setup.py` pregunta al usuario si desea reiniciar el equipo.
+- El reinicio permite arrancar desde el disco recién instalado.
+
+Ejemplo de interacción:
+
+```text
+$ sudo setup.py
+Seleccione una opción:
+  1) Configure AIOS
+  2) Start AIOS (local)
+  3) Exit
+  4) INSTALL TO DISK
+Opción: 4
+[aios-install] Instalando AIOS LFS al disco...
+[aios-install] Instalación completada.
+¿Desea reiniciar ahora? [s/N]:
+```
+
+> **Nota:** La opción 4 requiere privilegios de root para escribir en el disco de destino. Se recomienda ejecutar `setup.py` con `sudo` cuando se vaya a usar.
 
 ## Systemd (integración ISO)
 
