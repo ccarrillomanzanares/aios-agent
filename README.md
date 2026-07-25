@@ -191,6 +191,15 @@ except Exception as e:
 
 Estas notas describen el estado de configuración del sistema base sobre el que se ejecuta el agente en la ISO live y en la instalación a disco.
 
+### Fuente consola
+
+La consola virtual (TTY) de la ISO AIOS LFS usa la fuente **Terminus 12px** (`ter-112n`) para mejorar la legibilidad en alta resolución:
+
+```bash
+# /etc/vconsole.conf
+FONT=ter-112n
+```
+
 ### Dependencias del sistema
 
 La imagen AIOS LFS mantiene la configuración estándar de BLFS/LFS para los subsistemas de autenticación y resolución de nombres:
@@ -203,6 +212,24 @@ La imagen AIOS LFS mantiene la configuración estándar de BLFS/LFS para los sub
 - **PAM (Pluggable Authentication Modules)** — configuración BLFS estándar en `/etc/pam.d/`.
   - `login`, `su`, `sudo`, `passwd` y otros gestores de sesión usan módulos PAM habituales (`pam_unix.so`, `pam_wheel.so`, etc.).
   - La política por defecto requiere autenticación con contraseña para acciones privilegiadas.
+
+### Instalador a disco
+
+El instalador `aios-install` v1.0.1 incluye los siguientes ajustes de robustez:
+
+- **Formateo con rutas completas:** usa `/usr/sbin/mke2fs -t ext4` en lugar del wrapper `mkfs.ext4`, evitando depender de symlinks que puedan faltar en el entorno live.
+- **Instalación de GRUB con rutas completas:** invoca `/usr/sbin/grub-install` directamente, en lugar de confiar en la resolución de `PATH`.
+
+### Paquetes necesarios en la ISO
+
+Para que `aios-install` y el entorno live funcionen correctamente, la ISO debe incluir al menos estos paquetes del sistema base:
+
+| Paquete | Motivo |
+|---|---|
+| `parted` | Particionado del disco de destino en `aios-install` |
+| `rsync` | Copia eficiente del sistema live al disco instalado |
+| `e2fsprogs` | Formateo ext4 (`mke2fs`, `e2label`, etc.) |
+| `terminus-font` | Fuente `ter-112n` configurada en `/etc/vconsole.conf` |
 
 ### sudo
 
