@@ -46,7 +46,7 @@ def clear():
     os.system("clear" if os.name == "posix" else "cls")
 
 def list_disks():
-    out = run_capture(["lsblk", "-J", "-o", "NAME,SIZE,TYPE,MODEL,MOUNTPOINT"])
+    out = run_capture(["/usr/bin/lsblk", "-J", "-o", "NAME,SIZE,TYPE,MODEL,MOUNTPOINT"])
     data = json.loads(out)
     disks = []
     for dev in data.get("blockdevices", []):
@@ -81,15 +81,19 @@ def select_disk(disks):
 def partition_and_format(disk):
     dev = f"/dev/{disk}"
     part1 = f"{dev}1" if not disk.startswith("nvme") else f"{dev}p1"
+    part2 = f"{dev}2" if not disk.startswith("nvme") else f"{dev}p2"
     print(f"\n  Partitioning {dev}...")
-    run(["parted", "-s", dev, "mklabel", "gpt"])
-    run(["parted", "-s", dev, "mkpart", "primary", "ext4", "0%", "100%"])
-    subprocess.run(["udevadm", "settle"], capture_output=True)
-    run(["parted", "-s", dev, "set", "1", "boot", "on"])
-    print(f"  Formatting {part1} as ext4...")
-    run(["mke2fs", "-t", "ext4", "-F", "-L", "AIOS", part1])
-    return part1
-
+    run(["/usr/bin/parted", "-s", dev, "mklabel", "gpt"])
+    # BIOS Boot Partition (1 MiB, no filesystem) for GRUB embedding
+    run(["/usr/bin/parted", "-s", dev, "mkpart", "primary", "1MiB", "2MiB"])
+    run(["/usr/bin/parted", "-s", dev, "set", "1", "bios_grub", "on"])
+    # Main root partition (rest of disk)
+    run(["/usr/bin/parted", "-s", dev, "mkpart", "primary", "ext4", "2MiB", "100%"])
+    subprocess.run(["/usr/bin/udevadm", "settle"], capture_output=True)
+    run(["/usr/bin/parted", "-s", dev, "set", "2", "boot", "on"])
+    print(f"  Formatting {part2} as ext4...")
+    run(["/usr/sbin/mke2fs", "-t", "ext4", "-F", "-L", "AIOS", part2])
+    return part2
 def copy_system(target):
     print("\n  Copying system to target (this may take a while)...")
     excludes = [
@@ -98,27 +102,27 @@ def copy_system(target):
         "--exclude=/media/*", "--exclude=/lost+found",
         "--exclude=/swapfile",
     ]
-    run(["rsync", "-aHAX"] + excludes + ["/", target])
+    run(["/usr/bin/rsync", "-aHAX"] + excludes + ["/", target])
 
 def setup_chroot(target):
     for d in ["dev", "proc", "sys", "run"]:
         Path(f"{target}/{d}").mkdir(parents=True, exist_ok=True)
-    run(["mount", "--bind", "/dev", f"{target}/dev"])
-    run(["mount", "--bind", "/proc", f"{target}/proc"])
-    run(["mount", "--bind", "/sys", f"{target}/sys"])
-    run(["mount", "--bind", "/run", f"{target}/run"])
+    run(["/usr/bin/mount", "--bind", "/dev", f"{target}/dev"])
+    run(["/usr/bin/mount", "--bind", "/proc", f"{target}/proc"])
+    run(["/usr/bin/mount", "--bind", "/sys", f"{target}/sys"])
+    run(["/usr/bin/mount", "--bind", "/run", f"{target}/run"])
 
 def cleanup_chroot(target):
     for d in ["run", "sys", "proc", "dev"]:
-        subprocess.run(["umount", "-l", f"{target}/{d}"], capture_output=True)
+        subprocess.run(["/usr/bin/umount", "-l", f"{target}/{d}"], capture_output=True)
 
 def install_grub(target, disk):
     print(f"  Installing GRUB on /dev/{disk}...")
-    run(["chroot", target, "/usr/sbin/grub-install", f"/dev/{disk}"])
-    run(["chroot", target, "/usr/sbin/grub-mkconfig", "-o", "/boot/grub/grub.cfg"])
+    run(["/usr/sbin/chroot", target, "/usr/sbin/grub-install", "--force", f"/dev/{disk}"])
+    run(["/usr/sbin/chroot", target, "/usr/sbin/grub-mkconfig", "-o", "/boot/grub/grub.cfg"])
 
 def generate_fstab(target, root_part):
-    uuid = run_capture(["blkid", "-s", "UUID", "-o", "value", root_part])
+    uuid = run_capture(["/usr/sbin/blkid", "-s", "UUID", "-o", "value", root_part])
     fstab = f"""# /etc/fstab: static file system information
 UUID={uuid} / ext4 defaults,noatime 0 1
 proc /proc proc nosuid,noexec,nodev 0 0
@@ -132,7 +136,7 @@ dev /dev devtmpfs mode=0755,nosuid 0 0
 def enable_services(target):
     print("  Enabling systemd services...")
     for svc in ["aios-llama.service"]:
-        run(["chroot", target, "systemctl", "enable", svc])
+        run(["/usr/sbin/chroot", target, "systemctl", "enable", svc])
 
 def configure_system(target):
     print("\n  Configuring system...")
@@ -192,7 +196,7 @@ def main():
     root_part = partition_and_format(disk["name"])
     target = "/mnt/target"
     Path(target).mkdir(parents=True, exist_ok=True)
-    run(["mount", root_part, target])
+    run(["/usr/bin/mount", root_part, target])
     copy_system(target)
     setup_chroot(target)
     install_grub(target, disk["name"])
@@ -201,7 +205,7 @@ def main():
     configure_system(target)
     setup_aios_config(target)
     cleanup_chroot(target)
-    run(["umount", target])
+    run(["/usr/bin/umount", target])
     clear()
     print_box("INSTALLATION COMPLETE", [
         "",

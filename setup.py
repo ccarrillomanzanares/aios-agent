@@ -235,6 +235,16 @@ def main():
 
     if mode not in (1, 2, 3, 4):
         print("\n  Invalid option. Defaulting to LOCAL mode.")
+
+    if mode == 4:
+        import subprocess as _sp
+        _sp.run(["sudo", "aios-install"])
+        print()
+        again = input("  Reboot now? (y/N): ").strip().lower()
+        if again == "y":
+            _sp.run(["sudo", "reboot"])
+        return
+
         mode = 1
 
     selected = LOCAL_MODELS[0]  # default, may be overridden for local
@@ -273,7 +283,7 @@ def main():
     ctx = auto_context(ram_gb)
 
     config = {
-        "mode": {1: "local", 2: "cloud", 3: "hybrid"}[mode],
+        "mode": {1: "local", 2: "cloud", 3: "hybrid", 4: "install"}[mode],
         "local": {
             "model": selected["file"] if mode == 1 and selected else "Qwen_Qwen3-8B-Q4_K_M.gguf",
             "model_name": selected["name"] if mode == 1 and selected else "Qwen3-8B-Instruct",
@@ -346,14 +356,6 @@ def main():
         "",
         f"  Mode: {config['mode']}",
     ]
-    if mode == 4:
-        import subprocess as _sp
-        _sp.run(["sudo", "aios-install"])
-        print()
-        again = input("  Reboot now? (y/N): ").strip().lower()
-        if again == "y":
-            _sp.run(["sudo", "reboot"])
-        return
 
     if mode == 1:
         summary.append(f"  Model: {selected['name']} ({selected['size']}, {selected['speed']})")

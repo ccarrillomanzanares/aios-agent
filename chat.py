@@ -147,5 +147,19 @@ def main():
             continue
 
 
+
+# ─── Error wrapper ────────────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except EOFError:
+        pass  # stdin cerrado (pipe)
+    except Exception as e:
+        import sys, traceback
+        print(f"\n  ERROR: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        try:
+            input("\n  Presiona Enter para cerrar...")
+        except:
+            pass
+        sys.exit(1)
