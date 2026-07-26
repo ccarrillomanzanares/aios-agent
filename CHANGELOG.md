@@ -1,4 +1,17 @@
 # Changelog
+
+## v2.7.1 — Fix del bootloader GRUB en instalaciones a disco (VirtualBox)
+
+- `scripts/aios-install`: se reemplaza la generación dinámica del menú GRUB (`grub-mkconfig`) por un `grub.cfg` fijo en modo texto.
+- Motivación: `grub-mkconfig` generaba un menú gráfico (`load_video`, `insmod all_video`, `gfxpayload=keep`, `terminal_output gfxterm`, `menuentry "Arch GNU/Linux"`) que colgaba en VirtualBox mostrando `Cargando Linux 6.18.10-lfs ...`.
+- Nuevo `grub.cfg` generado por `install_grub()`:
+  - `set default=0`
+  - `set timeout=5`
+  - `menuentry "AIOS LFS" { linux /boot/vmlinuz-6.18.10-lfs root=/dev/sda2 rw nokaslr console=tty0 loglevel=6 }`
+- Se mantiene `grub-install` para escribir el bootloader en el disco destino.
+- Se eliminan UUID y referencias a "Arch Linux" del menú de arranque.
+- README.md actualizado con sección "Fix v7: GRUB gráfico cuelga en VirtualBox tras instalación a disco".
+
 ## v2.1 — SRE Agent con function calling nativo sobre Qwen2.5-7B-Instruct
 
 - Modelo definitivo fijado en Qwen2.5-7B-Instruct; descartados Qwen2.5-Coder-3B y otros modelos <7B por function calling poco fiable.

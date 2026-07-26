@@ -57,7 +57,7 @@ La ISO live incluye el instalador `aios-install` para escribir el sistema en dis
 3. El setup lanza el instalador `aios-install`.
 4. Al terminar la instalación, el setup pregunta si se desea reiniciar (`reboot`).
 
-**Flujo de setup.py:**
+|**Flujo de setup.py:**|
 
 ```text
 1) Configure AIOS
@@ -68,6 +68,26 @@ La ISO live incluye el instalador `aios-install` para escribir el sistema en dis
 
 - Seleccionar `4` ejecuta `/usr/local/bin/aios-install`.
 - Tras completar la instalación, setup solicita confirmación para reiniciar el sistema.
+
+#### Fix v7: GRUB gráfico cuelga en VirtualBox tras instalación a disco
+
+> **Problema:** en instalaciones a disco sobre VirtualBox, el primer arranque se colgaba mostrando `Cargando Linux 6.18.10-lfs ...` después de que la instalación terminara correctamente.
+>
+> **Causa raíz:** `aios-install` generaba el menú GRUB mediante `grub-mkconfig` dentro del chroot. El `grub.cfg` resultante incluía `load_video`, `insmod all_video`, `gfxpayload=keep` y `terminal_output gfxterm`, que bloquean el boot en VirtualBox.
+>
+> **Solución:** `aios-install` ya no ejecuta `grub-mkconfig`. En su lugar escribe un `grub.cfg` fijo en modo texto, simple, sin UUID y sin referencias a "Arch Linux":
+>
+> ```cfg
+> set default=0
+> set timeout=5
+> menuentry "AIOS LFS" {
+>     linux /boot/vmlinuz-6.18.10-lfs root=/dev/sda2 rw nokaslr console=tty0 loglevel=6
+> }
+> ```
+>
+> La ISO live seguía arrancando correctamente porque `grub-mkrescue` del host Ubuntu genera un menú minimalista en modo texto. El fallo solo afectaba al `grub.cfg` generado por `grub-mkconfig` en el sistema instalado.
+>
+> Ver detalles completos en la documentación de la ISO: `README-aios-lfs-v7.md`.
 
 ## Boot flow en la ISO AIOS LFS
 
@@ -172,6 +192,8 @@ Opción: 4
 ```
 
 > **Nota:** La opción 4 requiere privilegios de root para escribir en el disco de destino. Se recomienda ejecutar `setup.py` con `sudo` cuando se vaya a usar.
+>
+> **Fix v7 (GRUB):** el instalador `aios-install` escribe ahora un `grub.cfg` fijo en modo texto, reemplazando la generación con `grub-mkconfig` que colgaba en VirtualBox. Ver sección [Fix v7: GRUB gráfico cuelga en VirtualBox tras instalación a disco](#fix-v7-grub-gráfico-cuelga-en-virtualbox-tras-instalación-a-disco) y el README de la ISO.
 
 ### chat.py — Manejo robusto de errores
 
