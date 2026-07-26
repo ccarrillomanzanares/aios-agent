@@ -220,6 +220,31 @@ El instalador `aios-install` v1.0.1 incluye los siguientes ajustes de robustez:
 - **Formateo con rutas completas:** usa `/usr/sbin/mke2fs -t ext4` en lugar del wrapper `mkfs.ext4`, evitando depender de symlinks que puedan faltar en el entorno live.
 - **Instalación de GRUB con rutas completas:** invoca `/usr/sbin/grub-install` directamente, en lugar de confiar en la resolución de `PATH`.
 
+### GRUB compilado desde LFS 13.0-systemd
+
+La ISO AIOS LFS y la instalación a disco usan un **GRUB 2.12 compilado desde fuentes en LFS 13.0-systemd**, no el GRUB de una distribución binaria. Esto garantiza que el bootloader está alineado con el toolchain y la configuración del sistema.
+
+**Build con fix de linker (entry point `0x9000`)**
+
+Durante la compilación de GRUB en LFS 13.0-systemd, el linker `ld` del toolchain produce un binario cuyo entry point se desplaza a `0x9000`, causando un fallo crítico al intentar generar la imagen de arranque (`grub-mkrescue`, `grub-install` o el build del paquete fallan con un error de entry point inesperado).
+
+El fix aplicado consiste en forzar el entry point adecuado del bootloader al enlazar la imagen principal:
+
+```bash
+# Después de ejecutar ./configure con las opciones habituales de LFS 13.0-systemd,
+# forzar el entry point esperado por GRUB al enlazar el loader:
+make CFLAGS="$CFLAGS -Wl,-e,0x9000" LDFLAGS="$LDFLAGS -Wl,-e,0x9000" \
+     grub_image_LDFLAGS="-Wl,-e,0x9000"
+```
+
+> **Nota:** la variable exacta depende de la versión del Makefile de GRUB; en el build de LFS 13.0-systemd el entry point que resuelve el error es `0x9000`. Si el build sigue fallando, verificar la sección **Errors** del manual de GRUB y comprobar qué símbolo de entry point espera el linker (`start`, `_start`, `0x9000`, etc.).
+
+Aplicando este fix:
+
+- `grub-mkrescue` genera correctamente la imagen ISO híbrida.
+- `grub-install` (invocado como `/usr/sbin/grub-install` en `aios-install`) instala el bootloader en el disco de destino sin fallos de stage1/stage2.
+- El sistema arranca tanto en modo BIOS/Legacy como en modo UEFI cuando se añaden las rutas de módulos EFI correspondientes.
+
 ### Paquetes necesarios en la ISO
 
 Para que `aios-install` y el entorno live funcionen correctamente, la ISO debe incluir al menos estos paquetes del sistema base:
