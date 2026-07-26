@@ -1,21 +1,25 @@
-# AIOS Agent
+# AIOS Agent v3.2
 
-Agente SRE semiautónomo con function calling, diseñado para ejecutarse en local (CPU) o cloud.
+Agente SRE semiautónomo con function calling, diseñado para ejecutarse en local (CPU), cloud o dentro de la ISO AIOS LFS live.
 
 ## Arquitectura
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                    chat.py                        │
-│  (CLI interactivo con readline + history,         │
-│   wrapper robusto ante EOF/errores)               │
+│                    setup.py                        │
+│  (wizard de primer uso, validación de API key,     │
+│   bucle de reintento, opción INSTALL TO DISK)      │
 ├──────────────────────────────────────────────────┤
-│                    agent.py                       │
-│  (bucle de function calling: llama.cpp API +      │
-│   tools + memoria procedural + compresión)        │
+│                    chat.py                         │
+│  (CLI interactivo con readline + history,          │
+│   fix de backspace, wrapper robusto EOF/errores)   │
 ├──────────────────────────────────────────────────┤
-│  tools.py     memory.py    process.py  playbook.py│
-│  (11 tools)   (caché)      (PTY)       (YAML)    │
+│                    agent.py                        │
+│  (bucle de function calling: llama.cpp API +       │
+│   tools + memoria procedural + compresión)         │
+├──────────────────────────────────────────────────┤
+│  tools.py     memory.py    process.py  playbook.py │
+│  (11 tools)   (caché)      (PTY)       (YAML)     │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -72,11 +76,15 @@ El arranque gráfico del agente sigue este flujo secuencial:
 1. **login** — autenticación del usuario de la sesión.
 2. **aios-session** — script de arranque de sesión (`scripts/aios-session`) que:
    - lanza el setup inicial si no existe `~/.aios/config.yaml`;
-   - una vez configurado, inicia el entorno gráfico con `startx`;
-   - `i3` arranca como gestor de ventanas;
+   - una vez configurado, inicia **Xorg primero**, luego **i3** con `exec` condicional;
    - `i3` lanza un `xterm` que ejecuta el agente (`aios` / `chat.py`).
 
 El servicio de modelo (`aios-llama.service`) no arranca por defecto en boot; se activa durante el setup cuando se elige modo `local` o `hybrid`.
+
+### Cambios v3.2 en `aios-session`
+
+- Se inicia **Xorg antes que i3**, con `exec` condicional para evitar doble inicio.
+- `setup.py` solo se ejecuta si falta `~/.aios/config.yaml` o se fuerza.
 
 ## Permisos
 
@@ -141,17 +149,14 @@ cloud:
 | `scripts/launch_llama.py` | Lanza llama-server si existe config y `mode` es `local`/`hybrid`. No crea config por defecto; sale limpio si falta o `mode=cloud` |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
 | `scripts/aios-install` | Instala ISO AIOS LFS a disco duro |
-| `setup.py` | Wizard de instalación y arranque en la ISO. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK` |
+| `setup.py` | Wizard de instalación y arranque en la ISO. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK`. Incluye validación de API key, reintentos y fix de backspace en readline |
 
-### setup.py — Opción 4: INSTALL TO DISK
+### setup.py — Cambios v3.2
 
-`setup.py` coordina la configuración inicial y el lanzamiento del agente desde la ISO AIOS LFS. Su menú incluye ahora la opción **`4) INSTALL TO DISK`**:
-
-- Al elegir `4`, `setup.py` ejecuta el instalador `aios-install`.
-- Una vez que `aios-install` finaliza, `setup.py` pregunta al usuario si desea reiniciar el equipo.
-- El reinicio permite arrancar desde el disco recién instalado.
-
-Ejemplo de interacción:
+- **Validación de API key:** detecta si la clave introducida está vacía, tiene formato inválido o ha caducado, y solicita reintroducirla.
+- **Bucle de reintento:** ante fallo de conectividad con el proveedor cloud, permite reintentar antes de abortar.
+- **Fix de backspace en readline:** corrige el comportamiento de la tecla Backspace en terminales con locales UTF-8.
+- **Opción 4: INSTALL TO DISK** sigue presente y lanza `aios-install`.
 
 ```text
 $ sudo setup.py
@@ -213,37 +218,56 @@ La imagen AIOS LFS mantiene la configuración estándar de BLFS/LFS para los sub
   - `login`, `su`, `sudo`, `passwd` y otros gestores de sesión usan módulos PAM habituales (`pam_unix.so`, `pam_wheel.so`, etc.).
   - La política por defecto requiere autenticación con contraseña para acciones privilegiadas.
 
+### PATH + secure_path
+
+En la ISO y tras instalación a disco, `PATH` incluye explícitamente:
+
+```bash
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+```
+
+`sudoers` usa `secure_path` con `/usr/sbin:/sbin:/bin` para que `aios-install` y otros scripts de mantenimiento encuentren `grub-install`, `mke2fs`, `parted`, etc.
+
 ### Instalador a disco
 
-El instalador `aios-install` v1.0.1 incluye los siguientes ajustes de robustez:
+El instalador `aios-install` v1.1 (commit `48a72cb`) incluye los siguientes ajustes de robustez:
 
 - **Formateo con rutas completas:** usa `/usr/sbin/mke2fs -t ext4` en lugar del wrapper `mkfs.ext4`, evitando depender de symlinks que puedan faltar en el entorno live.
-- **Instalación de GRUB con rutas completas:** invoca `/usr/sbin/grub-install` directamente, en lugar de confiar en la resolución de `PATH`.
+- **Instalación de GRUB con rutas completas:** invoca `/usr/sbin/grub-install` directamente, **sin `--force`**.
+- **GRUB entry point 0x9000:** `grub-install` funciona sin `--force` porque el GRUB de la ISO está compilado con el fix de linker (ver sección GRUB más abajo).
 
 ### GRUB compilado desde LFS 13.0-systemd
 
-La ISO AIOS LFS y la instalación a disco usan un **GRUB 2.12 compilado desde fuentes en LFS 13.0-systemd**, no el GRUB de una distribución binaria. Esto garantiza que el bootloader está alineado con el toolchain y la configuración del sistema.
+La ISO AIOS LFS y la instalación a disco usan un **GRUB 2.12/2.14 compilado desde fuentes en LFS 13.0-systemd**, no el GRUB de una distribución binaria. Esto garantiza que el bootloader está alineado con el toolchain y la configuración del sistema.
 
 **Build con fix de linker (entry point `0x9000`)**
 
-Durante la compilación de GRUB en LFS 13.0-systemd, el linker `ld` del toolchain produce un binario cuyo entry point se desplaza a `0x9000`, causando un fallo crítico al intentar generar la imagen de arranque (`grub-mkrescue`, `grub-install` o el build del paquete fallan con un error de entry point inesperado).
+Durante la compilación de GRUB en LFS 13.0-systemd, el linker del toolchain puede producir un binario cuyo entry point se desplace de `0x9000`, causando un fallo crítico al intentar generar la imagen de arranque (`grub-mkrescue`, `grub-install` o el build del paquete fallan con un error de entry point inesperado).
 
-El fix aplicado consiste en forzar el entry point adecuado del bootloader al enlazar la imagen principal:
+El fix aplicado consiste en neutralizar la opción `--image-base` del linker durante `configure`, forzando el entry point esperado:
 
 ```bash
-# Después de ejecutar ./configure con las opciones habituales de LFS 13.0-systemd,
-# forzar el entry point esperado por GRUB al enlazar el loader:
-make CFLAGS="$CFLAGS -Wl,-e,0x9000" LDFLAGS="$LDFLAGS -Wl,-e,0x9000" \
-     grub_image_LDFLAGS="-Wl,-e,0x9000"
+cd grub-2.14
+sed 's/--image-base/--nonexist-linker-option/' -i configure
+./configure --prefix=/usr --sysconfdir=/etc --disable-efiemu --disable-werror
+make -j$(nproc)
+make install
 ```
 
-> **Nota:** la variable exacta depende de la versión del Makefile de GRUB; en el build de LFS 13.0-systemd el entry point que resuelve el error es `0x9000`. Si el build sigue fallando, verificar la sección **Errors** del manual de GRUB y comprobar qué símbolo de entry point espera el linker (`start`, `_start`, `0x9000`, etc.).
+Verificación:
 
-Aplicando este fix:
+```bash
+readelf -h /usr/lib/grub/i386-pc/kernel.img | grep Entry
+# Entry point address: 0x9000
+```
+
+Resultado:
 
 - `grub-mkrescue` genera correctamente la imagen ISO híbrida.
-- `grub-install` (invocado como `/usr/sbin/grub-install` en `aios-install`) instala el bootloader en el disco de destino sin fallos de stage1/stage2.
+- `grub-install` (invocado como `/usr/sbin/grub-install` en `aios-install`) instala el bootloader en el disco de destino sin `--force` y sin fallos de stage1/stage2.
 - El sistema arranca tanto en modo BIOS/Legacy como en modo UEFI cuando se añaden las rutas de módulos EFI correspondientes.
+
+> **Nota:** para generar la ISO final se utiliza `grub-mkrescue` del **host** (por ejemplo Ubuntu), no directamente `xorriso`. `grub-mkrescue` requiere los módulos EFI y `mtools` (`apt install mtools` o instalar con Sven). Ver detalles en [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs).
 
 ### Paquetes necesarios en la ISO
 
@@ -255,6 +279,25 @@ Para que `aios-install` y el entorno live funcionen correctamente, la ISO debe i
 | `rsync` | Copia eficiente del sistema live al disco instalado |
 | `e2fsprogs` | Formateo ext4 (`mke2fs`, `e2label`, etc.) |
 | `terminus-font` | Fuente `ter-112n` configurada en `/etc/vconsole.conf` |
+| `mtools` | Requerido por `grub-mkrescue` del host para ISO híbrida |
+| `grub` (compilado LFS) | Bootloader con entry point 0x9000 |
+
+### Servicios systemd en la ISO
+
+```
+/usr/lib/systemd/system/
+├── aios-llama.service    # llama-server (disabled at boot, se activa en setup si local/híbrido)
+├── aios-agent.service    # chat.py interactivo (disabled, lo lanza i3)
+├── dbus.service          # D-Bus activado en live e instalación
+└── ldconfig.service      # masked en live para evitar regenerar caché en cada boot
+```
+
+Cambios v3.2:
+
+- **dbus.service creado y habilitado:** permite que aplicaciones gráficas y servicios como el agente se comuniquen a través de D-Bus.
+- **ldconfig.service masked para live:** evita que systemd ejecute `ldconfig` en cada arranque de la ISO, ahorrando tiempo de boot.
+- `sshd` está deshabilitado en la ISO, sin host keys fijas; si se necesita, se arranca manualmente (`/etc/rc.d/init.d/sshd start`) y se regeneran las keys al primer uso.
+- Firefox se ha eliminado del autostart gráfico; no se abre automáticamente al iniciar sesión.
 
 ### sudo
 
@@ -275,18 +318,6 @@ La imagen ISO **no incluye ningún modelo GGUF** por defecto. Esto reduce el tam
 - **Modo cloud:** funciona inmediatamente si se proporciona la configuración de API externa.
 - **Modo local/híbrido:** el usuario debe descargar manualmente un modelo GGUF (por ejemplo, `Qwen_Qwen3-8B-Q4_K_M.gguf`) y colocarlo en `/usr/local/share/aios/models/`, o en la ruta indicada en `~/.aios/config.yaml`.
 
-## Systemd (integración ISO)
-
-```
-/usr/lib/systemd/system/
-├── aios-llama.service    # llama-server (disabled at boot, se activa en setup si local/híbrido)
-└── aios-agent.service    # chat.py interactivo (disabled, lo lanza i3)
-```
-
-- `aios-llama.service` se desactiva en la ISO (`systemctl disable aios-llama.service`) y solo se habilita/arranca cuando setup.py elige `local` o `hybrid`.
-- `sshd` está deshabilitado en la ISO, sin host keys fijas; si se necesita, se arranca manualmente (`/etc/rc.d/init.d/sshd start`) y se regeneran las keys al primer uso.
-- Firefox se ha eliminado del autostart gráfico; no se abre automáticamente al iniciar sesión.
-
 ## Rutas en ISO
 
 | Componente | Ruta |
@@ -297,6 +328,7 @@ La imagen ISO **no incluye ningún modelo GGUF** por defecto. Esto reduce el tam
 | Modelo | `/usr/local/share/aios/models/` |
 | Instalador | `/usr/local/bin/aios-install` |
 | Wrapper | `/usr/local/bin/aios` |
+| D-Bus | `/usr/bin/dbus-daemon` (`dbus.service`) |
 
 ## Referencia cruzada a la ISO
 
@@ -308,6 +340,14 @@ Para construir o personalizar la imagen live que contiene este agente, consulta 
 - `requests`, `pyyaml`
 - llama.cpp compilado (`llama-server`)
 - Modelo GGUF (Qwen3-8B, Qwen2.5-7B, etc.)
+
+## Historial de versiones
+
+| Versión | Fecha | Cambios principales |
+|---|---|---|
+| v3.2 | 2026-07-26 | setup.py: validación API key, bucle de reintento, fix backspace readline; aios-session: X primero, i3 con exec condicional; dbus.service; ldconfig.service masked; PATH+secure_path; aios-install sin `--force` (GRUB 0x9000) |
+| v3.1 | 2026-07-24 | GRUB compilado desde LFS 13.0-systemd con fix de linker entry point 0x9000; ISO build con `grub-mkrescue` del host |
+| v3.0 | 2026-07-21 | Wizard setup.py con opción INSTALL TO DISK; aios-install v1.0; chat.py wrapper EOF/errores |
 
 ## Licencia
 
