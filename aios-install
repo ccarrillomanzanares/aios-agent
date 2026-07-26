@@ -118,7 +118,7 @@ def cleanup_chroot(target):
 
 def install_grub(target, disk):
     print(f"  Installing GRUB on /dev/{disk}...")
-    run(["/usr/sbin/chroot", target, "/usr/sbin/grub-install", "--force", f"/dev/{disk}"])
+    run(["/usr/sbin/chroot", target, "/usr/sbin/grub-install", f"/dev/{disk}"])
     run(["/usr/sbin/chroot", target, "/usr/sbin/grub-mkconfig", "-o", "/boot/grub/grub.cfg"])
 
 def generate_fstab(target, root_part):
