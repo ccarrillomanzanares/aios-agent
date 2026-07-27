@@ -1,6 +1,52 @@
+import readline
+readline.parse_and_bind('"\\d": backward-delete-char')
 """AIOS Agent - Configuration setup (first-run wizard)."""
 import json
 import os
+import urllib.request as url_req
+
+CLOUD_ENDPOINTS = {
+    "DeepSeek": "https://api.deepseek.com/v1",
+    "OpenAI": "https://api.openai.com/v1",
+    "Anthropic": "https://api.anthropic.com/v1",
+    "Google Gemini": "https://generativelanguage.googleapis.com/v1beta",
+    "Kimi / Moonshot": "https://api.moonshot.cn/v1",
+    "Ollama Cloud": "https://api.ollama.cloud/v1",
+    "OpenRouter": "https://openrouter.ai/api/v1",
+}
+
+def validate_api_key(provider, api_key):
+    """Test the API key with a lightweight request."""
+    base_url = CLOUD_ENDPOINTS.get(provider, "")
+    if not base_url:
+        return True  # Unknown provider, skip validation
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "AIOS-Setup/1.0"
+    }
+    
+    try:
+        if provider == "Google Gemini":
+            req = url_req.Request(f"{base_url}/models?key={api_key}", method="GET")
+        elif provider == "Anthropic":
+            req = url_req.Request(f"{base_url}/messages", method="POST",
+                                data=b'{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}',
+                                headers={**headers, "Content-Type": "application/json", "anthropic-version": "2023-06-01"})
+        else:
+            req = url_req.Request(f"{base_url}/models", headers=headers, method="GET")
+        
+        with url_req.urlopen(req, timeout=5) as resp:
+            if resp.status < 400:
+                return True
+            return False
+    except url_req.HTTPError as e:
+        if e.code in (401, 403):
+            return False
+        # Other errors (network, etc.) - let user decide
+        return None
+    except Exception:
+        return None
 import platform
 from pathlib import Path
 
@@ -138,12 +184,12 @@ def select_provider_and_model():
         try:
             opt = int(input("  Select (1-8): "))
         except ValueError:
-            continue
+            return
 
         if opt == 8:
             return None, None
         if opt < 1 or opt > 7:
-            continue
+            return
 
         prov = providers[opt - 1]
 
@@ -153,7 +199,7 @@ def select_provider_and_model():
             print_box("OPENROUTER", ["", "  Enter the model name:", "  e.g. deepseek/deepseek-v4-flash, openai/gpt-4o", ""])
             model = input("  Model: ").strip()
             if not model:
-                continue
+                return
             return prov, model
 
         # Other providers: select model
@@ -162,11 +208,11 @@ def select_provider_and_model():
         opt2 = input("  Select (a-b, q): ").strip().lower()
 
         if opt2 == "q":
-            continue
+            return
 
         idx = ord(opt2) - 97
         if idx < 0 or idx >= len(prov["models"]):
-            continue
+            return
 
         return prov, prov["models"][idx][0]
 
@@ -215,20 +261,10 @@ def main():
         {
             "name": "Qwen3-8B-Instruct",
             "file": "Qwen_Qwen3-8B-Q4_K_M.gguf",
-            "repo": "bartowski/Qwen_Qwen3-8B-GGUF",
             "size": "4.7 GB",
             "speed": "17 tok/s",
             "desc": "most reliable",
             "default": True,
-        },
-        {
-            "name": "Qwen2.5-7B-Instruct",
-            "file": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-            "repo": "bartowski/Qwen2.5-7B-Instruct-GGUF",
-            "size": "4.4 GB",
-            "speed": "20 tok/s",
-            "desc": "faster",
-            "default": False,
         },
     ]
 
@@ -238,7 +274,11 @@ def main():
 
     if mode == 4:
         import subprocess as _sp
-        _sp.run(["sudo", "aios-install"])
+        ret = _sp.run(["sudo", "aios-install"])
+        if ret.returncode != 0:
+            print("\n  Installation aborted or failed.")
+            input("  Press Enter to return to menu...")
+            return
         print()
         again = input("  Reboot now? (y/N): ").strip().lower()
         if again == "y":
@@ -249,35 +289,15 @@ def main():
 
     selected = LOCAL_MODELS[0]  # default, may be overridden for local
     if mode == 1:
-        clear()
-        print_box("LOCAL MODEL", [
-            "",
-        ] + [
-            f"  {i+1}) {m['name']} ({m['size']}, {m['speed']}) - {m['desc']}" + (" [DEFAULT]" if m["default"] else "")
-            for i, m in enumerate(LOCAL_MODELS)
-        ] + [
-            "",
-            f"  Default: 1) {LOCAL_MODELS[0]['name']}",
-            "",
-        ])
-        try:
-            model_opt = int(input("  Select (1-2): "))
-        except ValueError:
-            model_opt = 1
-        if model_opt < 1 or model_opt > 2:
-            model_opt = 1
-        selected = LOCAL_MODELS[model_opt - 1]
-        model_path = Path(f"/home/ccmai/models/{selected['file']}")
+        selected = LOCAL_MODELS[0]
+        model_path = Path(f"/home/aios/.aios/models/{selected['file']}")
         if not model_path.exists():
-            print(f"\n  Model {selected['file']} not found locally.")
-            dl = input("  Download from HuggingFace? (Y/n): ").strip().lower()
-            if dl != "n":
-                print(f"  Downloading {selected['name']} ({selected['size']})...")
-                from huggingface_hub import hf_hub_download
-                hf_hub_download(selected["repo"], selected["file"], local_dir="/home/ccmai/models/")
-                print("  Download complete.")
+            print(f"\n  Model {selected['file']} not found.")
+            print("  Add it to the ISO or place it at {model_path}")
+            print("  Continuing with cloud mode fallback.\n")
+            return  # back to main menu
         else:
-            print(f"\n  Model found at {model_path}")
+            print(f"\n  Model: {selected['name']} ({selected['size']})")
 
     ram_gb = detect_ram_gb()
     ctx = auto_context(ram_gb)
@@ -304,14 +324,31 @@ def main():
             config["cloud"]["provider"] = prov_data["name"]
             config["cloud"]["model"] = model
             config["cloud"]["context_limit"] = prov_data.get("context_limit", 128000)
-            clear()
-            print_box("API KEY", ["", "  Enter your API key.", ""])
-            key = input_key("  API Key")
-            config["cloud"]["api_key"] = key
+            while True:
+                clear()
+                print_box("API KEY", ["", "  Enter your API key (or leave empty to cancel).", ""])
+                key = input_key("  API Key")
+                if not key:
+                    print("\n  No API key provided. Defaulting to LOCAL mode.\n")
+                    config["mode"] = "local"
+                    break
+                config["cloud"]["api_key"] = key
+                print("  Testing API key...")
+                valid = validate_api_key(prov_data["name"], key)
+                if valid is True:
+                    print("  API key is valid.")
+                    break
+                elif valid is False:
+                    print("\n  Invalid API key. Check and try again.\n")
+                    input("  Press Enter to retry...")
+                    continue
+                else:
+                    # Could not verify (network issue)
+                    retry = input("  (Could not verify API key. Use anyway? (Y/n): ").strip().lower()
+                    if retry != "n":
+                        break
+                    continue
             if not key:
-                print("\n  No API key provided. Defaulting to LOCAL mode.\n")
-                config["mode"] = "local"
-            else:
                 env_var = {
                     "DeepSeek": "DEEPSEEK_API_KEY",
                     "OpenAI": "OPENAI_API_KEY",
@@ -380,4 +417,24 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    while True:
+        try:
+            main()
+            # If we get here and config exists, setup was successful
+            if CONFIG_FILE.exists():
+                break
+            # main() returned early (download failed, etc.)
+            retry = input("\n  Back to main menu? (Y/n): ").strip().lower()
+            if retry == "n":
+                break
+            import sys
+            print("\033[2J\033[H", end="")
+        except KeyboardInterrupt:
+            print("\n  Exiting.")
+            break
+        except Exception as e:
+            print(f"\n  Error: {e}")
+            retry = input("  Try again? (Y/n): ").strip().lower()
+            if retry == "n":
+                break
+            print("\033[2J\033[H", end="")

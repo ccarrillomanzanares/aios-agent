@@ -57,6 +57,52 @@ def load_or_setup():
     return config
 
 
+def _start_local_model(config):
+    """Start llama-server if not already running (local/hybrid mode)."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect(("127.0.0.1", 8083))
+        s.close()
+        return  # Already running
+    except:
+        pass
+
+    model_path = Path.home() / ".aios" / "models" / config["local"]["model"]
+    if not model_path.exists():
+        print(f"  Model not found at {model_path}. Use the LLM ISO or place it manually.")
+        return
+
+    ctx = config["local"]["context"]
+    threads = config["local"]["threads"]
+    env = os.environ.copy()
+    env["LD_LIBRARY_PATH"] = "/usr/local/lib/llama"
+    port = 8083
+
+    print(f"  Starting local model ({config['local']['model_name']}, CTX={ctx}, T={threads})...")
+    import subprocess
+    subprocess.Popen(
+        ["llama-server", "-m", str(model_path),
+         "--host", "127.0.0.1", "--port", str(port),
+         "--ctx-size", str(ctx), "-t", str(threads)],
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+    # Wait up to 30s for the server to respond
+    import urllib.request
+    for _ in range(30):
+        try:
+            resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
+            if resp.status == 200:
+                print("  Local model ready.")
+                return
+        except:
+            pass
+        import time
+        time.sleep(1)
+    print("  Warning: local model may not have started in time.")
+
+
 def main():
     config = load_or_setup()
     mode = config.get("mode", "local")
@@ -103,6 +149,10 @@ def main():
                 os.environ[env_var] = api_key
 
     from agent import Agent
+
+    # Start local model server if needed
+    if mode in ("local", "hybrid"):
+        _start_local_model(config)
 
     agent = Agent()
     mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HIBRIDO"}.get(mode, "LOCAL")
