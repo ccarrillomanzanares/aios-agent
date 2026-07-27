@@ -1,4 +1,4 @@
-# AIOS Agent v3.2
+# AIOS Agent v3.3
 
 Agente SRE semiautónomo con function calling, diseñado para ejecutarse en local (CPU), cloud o dentro de la ISO AIOS LFS live.
 
@@ -7,12 +7,12 @@ Agente SRE semiautónomo con function calling, diseñado para ejecutarse en loca
 ```
 ┌──────────────────────────────────────────────────┐
 │                    setup.py                        │
-│  (wizard de primer uso, validación de API key,     │
-│   bucle de reintento, opción INSTALL TO DISK)      │
+│  (wizard de primer uso, modo local fijado,         │
+│   opción INSTALL TO DISK)                          │
 ├──────────────────────────────────────────────────┤
 │                    chat.py                         │
-│  (CLI interactivo con readline + history,          │
-│   fix de backspace, wrapper robusto EOF/errores)   │
+│  (CLI interactivo, auto-arranque de llama-server,  │
+│   wrapper EOF/errores)                             │
 ├──────────────────────────────────────────────────┤
 │                    agent.py                        │
 │  (bucle de function calling: llama.cpp API +       │
@@ -32,19 +32,18 @@ git clone https://github.com/ccarrillomanzanares/aios-agent
 cd aios-agent
 pip install -r requirements.txt
 
-# Descargar modelo
-python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(bartowski/Qwen_Qwen3-8B-GGUF, Qwen_Qwen3-8B-Q4_K_M.gguf, local_dir=models/)"
+# Descargar modelo (manual, antes del primer arranque)
+python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('bartowski/Qwen_Qwen3-8B-GGUF', 'Qwen_Qwen3-8B-Q4_K_M.gguf', local_dir='models/')"
 
-# Iniciar servidor llama.cpp
-/path/to/llama-server -m models/Qwen_Qwen3-8B-Q4_K_M.gguf --host 127.0.0.1 --port 8083 -c 32768 -t 14 --jinja
-
-# Ejecutar agente
+# Ejecutar agente — chat.py levanta llama-server automáticamente
 python3 chat.py
 ```
 
+> **Novedad v3.3:** ya no hace falta iniciar `llama-server` a mano. `chat.py` detecta si el servidor local está corriendo y, en caso contrario, lo arranca él mismo con `LD_LIBRARY_PATH` apuntando a `/usr/local/lib/llama`, esperando hasta 30 segundos a que responda.
+
 ### ISO AIOS LFS
 
-El agente está preinstalado en la ISO AIOS LFS live. Ver [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs) para la ISO que incluye este agente.
+El agente está preinstalado en la ISO AIOS LFS live. Ver `README-aios-lfs-v8.md` para la ISO que incluye este agente.
 
 > **Modelo en la ISO:** la imagen ISO no incluye ningún modelo GGUF por defecto. El modo **cloud** funciona out-of-the-box siempre que haya configuración de API. El modo **local** requiere descargar manualmente un modelo GGUF y apuntar `config.yaml` a él.
 
@@ -63,19 +62,19 @@ La ISO live incluye el instalador `aios-install` para escribir el sistema en dis
 1) Configure AIOS
 2) Start AIOS (local)
 3) Exit
-4) INSTALL TO DISK   <-- nueva opción
+4) INSTALL TO DISK
 ```
 
 - Seleccionar `4` ejecuta `/usr/local/bin/aios-install`.
 - Tras completar la instalación, setup solicita confirmación para reiniciar el sistema.
 
-#### Fix v7: GRUB gráfico cuelga en VirtualBox tras instalación a disco
+#### Fix v8: GRUB gráfico cuelga en VirtualBox tras instalación a disco
 
 > **Problema:** en instalaciones a disco sobre VirtualBox, el primer arranque se colgaba mostrando `Cargando Linux 6.18.10-lfs ...` después de que la instalación terminara correctamente.
 >
 > **Causa raíz:** `aios-install` generaba el menú GRUB mediante `grub-mkconfig` dentro del chroot. El `grub.cfg` resultante incluía `load_video`, `insmod all_video`, `gfxpayload=keep` y `terminal_output gfxterm`, que bloquean el boot en VirtualBox.
 >
-> **Solución:** `aios-install` ya no ejecuta `grub-mkconfig`. En su lugar escribe un `grub.cfg` fijo en modo texto, simple, sin UUID y sin referencias a "Arch Linux":
+> **Solución v3.3:** `aios-install` ya no ejecuta `grub-mkconfig`. En su lugar escribe un `grub.cfg` fijo en modo texto, simple, sin UUID y sin referencias a "Arch Linux":
 >
 > ```cfg
 > set default=0
@@ -86,8 +85,6 @@ La ISO live incluye el instalador `aios-install` para escribir el sistema en dis
 > ```
 >
 > La ISO live seguía arrancando correctamente porque `grub-mkrescue` del host Ubuntu genera un menú minimalista en modo texto. El fallo solo afectaba al `grub.cfg` generado por `grub-mkconfig` en el sistema instalado.
->
-> Ver detalles completos en la documentación de la ISO: `README-aios-lfs-v7.md`.
 
 ## Boot flow en la ISO AIOS LFS
 
@@ -101,10 +98,17 @@ El arranque gráfico del agente sigue este flujo secuencial:
 
 El servicio de modelo (`aios-llama.service`) no arranca por defecto en boot; se activa durante el setup cuando se elige modo `local` o `hybrid`.
 
-### Cambios v3.2 en `aios-session`
+### Cambios v3.3 en `chat.py` — auto-arranque de llama-server
 
-- Se inicia **Xorg antes que i3**, con `exec` condicional para evitar doble inicio.
-- `setup.py` solo se ejecuta si falta `~/.aios/config.yaml` o se fuerza.
+A partir de v3.3 `chat.py` integra `_start_local_model()` para el modo `local`/`hybrid`:
+
+1. Lee `~/.aios/config.yaml`.
+2. Si `mode` es `local` o `hybrid`, comprueba si `llama-server` ya responde en `http://127.0.0.1:8083`.
+3. Si no responde, lanza `llama-server` con el modelo configurado y `LD_LIBRARY_PATH=/usr/local/lib/llama`.
+4. Espera hasta 30 segundos (poll cada 0.5 s) a que el endpoint `/health` devuelva HTTP 200.
+5. Si el modelo no existe, informa al usuario y vuelve al menú de setup.
+
+Esto elimina el paso manual de arrancar `llama-server` antes de ejecutar `chat.py`.
 
 ## Permisos
 
@@ -166,13 +170,16 @@ cloud:
 | Script | Descripción |
 |---|---|
 | `scripts/aios-session` | Arranque de sesión gráfica en la ISO: detecta si existe `~/.aios/config.yaml`, ejecuta setup en caso contrario, luego lanza `startx` → `i3` → `xterm` con el agente |
-| `scripts/launch_llama.py` | Lanza llama-server si existe config y `mode` es `local`/`hybrid`. No crea config por defecto; sale limpio si falta o `mode=cloud` |
+| `scripts/launch_llama.py` | Lanzador legacy de llama-server; `chat.py` lo auto-arranca en v3.3, por lo que el servicio sigue siendo útil en background/ISO |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
 | `scripts/aios-install` | Instala ISO AIOS LFS a disco duro |
-| `setup.py` | Wizard de instalación y arranque en la ISO. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK`. Incluye validación de API key, reintentos y fix de backspace en readline |
+| `setup.py` | Wizard de instalación y arranque en la ISO. Modo local fijado a Qwen3-8B, sin descarga automática, sin selección de modelo. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK`. |
 
-### setup.py — Cambios v3.2
+### setup.py — Cambios v3.3
 
+- **Modelo único:** solo permite Qwen3-8B (`Qwen_Qwen3-8B-Q4_K_M.gguf`). Se eliminó la selección entre Qwen2.5-7B y Qwen3-8B.
+- **Sin descarga automática:** si el modelo no existe en `/home/ccmai/models/` o `/usr/local/share/aios/models/`, `setup.py` informa del fallo y **vuelve al menú principal** en lugar de intentar descargarlo.
+- **Menú simplificado:** opciones `1-4` claras; `2) Start AIOS (local)` arranca el chat directamente.
 - **Validación de API key:** detecta si la clave introducida está vacía, tiene formato inválido o ha caducado, y solicita reintroducirla.
 - **Bucle de reintento:** ante fallo de conectividad con el proveedor cloud, permite reintentar antes de abortar.
 - **Fix de backspace en readline:** corrige el comportamiento de la tecla Backspace en terminales con locales UTF-8.
@@ -193,26 +200,25 @@ Opción: 4
 
 > **Nota:** La opción 4 requiere privilegios de root para escribir en el disco de destino. Se recomienda ejecutar `setup.py` con `sudo` cuando se vaya a usar.
 >
-> **Fix v7 (GRUB):** el instalador `aios-install` escribe ahora un `grub.cfg` fijo en modo texto, reemplazando la generación con `grub-mkconfig` que colgaba en VirtualBox. Ver sección [Fix v7: GRUB gráfico cuelga en VirtualBox tras instalación a disco](#fix-v7-grub-gráfico-cuelga-en-virtualbox-tras-instalación-a-disco) y el README de la ISO.
+> **Fix v8 (GRUB):** el instalador `aios-install` escribe ahora un `grub.cfg` fijo en modo texto, reemplazando la generación con `grub-mkconfig` que colgaba en VirtualBox. Ver sección [Fix v8: GRUB gráfico cuelga en VirtualBox tras instalación a disco](#fix-v8-grub-gráfico-cuelga-en-virtualbox-tras-instalación-a-disco).
 
-### chat.py — Manejo robusto de errores
+### chat.py — Auto-arranque del modelo local
 
-`chat.py` envuelve el bucle principal en un wrapper que captura `EOFError` y excepciones genéricas, permitiendo:
+La función `_start_local_model()` de `chat.py` automatiza el inicio de `llama-server`:
 
-- Detectar desconexiones de stdin (EOF) sin dejar el terminal colgado.
-- Registrar el stack trace en `data/chat.log` en lugar de mostrarlo crudo al usuario.
-- Volver al prompt o salir limpiamente según la severidad del error.
+1. Comprueba si el endpoint `http://127.0.0.1:8083/health` ya responde.
+2. Si no responde, construye el comando con el modelo configurado:
+   ```bash
+   /usr/local/bin/llama-server -m <modelo> --host 127.0.0.1 --port 8083 \
+     -c <context> -t <threads> --jinja
+   ```
+   y lo lanza con `LD_LIBRARY_PATH=/usr/local/lib/llama`.
+3. Espera activamente hasta 30 s a que `/health` devuelva `HTTP 200`.
+4. Si el modelo no existe, muestra un mensaje claro y retorna al menú principal de `setup.py`.
 
-```python
-try:
-    main_loop()
-except EOFError:
-    logger.info("stdin closed (EOF)")
-    sys.exit(0)
-except Exception as e:
-    logger.exception("chat.py crashed: %s", e)
-    sys.exit(1)
-```
+### launch_llama.py — Lanzador legacy
+
+`scripts/launch_llama.py` sigue siendo el ejecutable usado por `aios-llama.service`. A partir de v3.3, su principal responsabilidad es mantener `LD_LIBRARY_PATH=/usr/local/lib/llama` para que `llama-server` encuentre `libllama-server-impl.so` cuando no haya configurado `ldconfig`.
 
 ## Configuración final del sistema en ISO AIOS LFS
 
@@ -226,6 +232,23 @@ La consola virtual (TTY) de la ISO AIOS LFS usa la fuente **Terminus 12px** (`te
 # /etc/vconsole.conf
 FONT=ter-112n
 ```
+
+### ldconfig / ld.so.conf.d
+
+A partir de v3.3 se configura el directorio de librerías compartidas de llama.cpp para que `llama-server` y `chat.py` no dependan de exportar `LD_LIBRARY_PATH`:
+
+```bash
+# /etc/ld.so.conf.d/llama.conf
+/usr/local/lib/llama
+```
+
+Tras crear el archivo, ejecutar:
+
+```bash
+ldconfig
+```
+
+Esto permite que `llama-server` encuentre `libllama-server-impl.so` sin necesidad de `LD_LIBRARY_PATH`, tanto en la ISO live como en la instalación a disco. `launch_llama.py` y `chat.py` siguen exportando `LD_LIBRARY_PATH` como medida defensiva.
 
 ### Dependencias del sistema
 
@@ -252,11 +275,12 @@ En la ISO y tras instalación a disco, `PATH` incluye explícitamente:
 
 ### Instalador a disco
 
-El instalador `aios-install` v1.1 (commit `48a72cb`) incluye los siguientes ajustes de robustez:
+El instalador `aios-install` v1.0.1 incluye los siguientes ajustes de robustez:
 
 - **Formateo con rutas completas:** usa `/usr/sbin/mke2fs -t ext4` en lugar del wrapper `mkfs.ext4`, evitando depender de symlinks que puedan faltar en el entorno live.
 - **Instalación de GRUB con rutas completas:** invoca `/usr/sbin/grub-install` directamente, **sin `--force`**.
 - **GRUB entry point 0x9000:** `grub-install` funciona sin `--force` porque el GRUB de la ISO está compilado con el fix de linker (ver sección GRUB más abajo).
+- **GRUB.cfg fijo en modo texto:** reemplaza `grub-mkconfig` por un `grub.cfg` simple que evita módulos gráficos problemáticos en VirtualBox.
 
 ### GRUB compilado desde LFS 13.0-systemd
 
@@ -289,7 +313,24 @@ Resultado:
 - `grub-install` (invocado como `/usr/sbin/grub-install` en `aios-install`) instala el bootloader en el disco de destino sin `--force` y sin fallos de stage1/stage2.
 - El sistema arranca tanto en modo BIOS/Legacy como en modo UEFI cuando se añaden las rutas de módulos EFI correspondientes.
 
-> **Nota:** para generar la ISO final se utiliza `grub-mkrescue` del **host** (por ejemplo Ubuntu), no directamente `xorriso`. `grub-mkrescue` requiere los módulos EFI y `mtools` (`apt install mtools` o instalar con Sven). Ver detalles en [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs).
+> **Nota:** para generar la ISO final se utiliza `grub-mkrescue` del **host** (por ejemplo Ubuntu), no directamente `xorriso`. `grub-mkrescue` requiere los módulos EFI y `mtools` (`apt install mtools` o instalar con Sven).
+
+### ISO build con modelos >4 GB — `grub-mkrescue -iso-level 3`
+
+A partir de v3.3, la generación de la ISO distingue dos escenarios:
+
+- **ISO sin modelo GGUF:** se genera con `grub-mkrescue` normal.
+- **ISO con modelo GGUF incluido:** si la imagen supera los ~4 GB, se añade el flag `-iso-level 3` a `grub-mkrescue` para soportar ficheros grandes (>4 GB) y evitar errores de `xorriso` al empaquetar el modelo.
+
+Ejemplo:
+
+```bash
+# Sin modelo (ISO pequeña)
+sudo grub-mkrescue -o aios-lfs.iso /tmp/iso
+
+# Con modelo Qwen3-8B (~4.7 GB)
+sudo grub-mkrescue -iso-level 3 -o aios-lfs-qwen3-8b.iso /tmp/iso
+```
 
 ### Paquetes necesarios en la ISO
 
@@ -313,6 +354,14 @@ Para que `aios-install` y el entorno live funcionen correctamente, la ISO debe i
 ├── dbus.service          # D-Bus activado en live e instalación
 └── ldconfig.service      # masked en live para evitar regenerar caché en cada boot
 ```
+
+Cambios v3.3:
+
+- **`chat.py` auto-arranque:** `chat.py` inicia `llama-server` automáticamente si no está corriendo.
+- **`ld.so.conf.d/llama.conf`:** ldconfig conoce `/usr/local/lib/llama` para `libllama-server-impl.so`.
+- **GRUB fijo en modo texto:** `aios-install` genera `grub.cfg` fijo para evitar cuelgue en VirtualBox.
+- **`setup.py` simplificado:** modo local fijado a Qwen3-8B; sin descarga automática; vuelve al menú si falta el modelo.
+- **ISO build con `-iso-level 3`:** soporta ISOs con modelo >4 GB.
 
 Cambios v3.2:
 
@@ -347,6 +396,7 @@ La imagen ISO **no incluye ningún modelo GGUF** por defecto. Esto reduce el tam
 | Repo agente | `/usr/local/bin/aios-agent/` |
 | llama-server | `/usr/local/bin/llama-server` |
 | Librerías | `/usr/local/lib/llama/` |
+| ld.so.conf.d | `/etc/ld.so.conf.d/llama.conf` |
 | Modelo | `/usr/local/share/aios/models/` |
 | Instalador | `/usr/local/bin/aios-install` |
 | Wrapper | `/usr/local/bin/aios` |
@@ -354,19 +404,20 @@ La imagen ISO **no incluye ningún modelo GGUF** por defecto. Esto reduce el tam
 
 ## Referencia cruzada a la ISO
 
-Para construir o personalizar la imagen live que contiene este agente, consulta el repositorio [aios-lfs](https://github.com/ccarrillomanzanares/aios-lfs).
+Para construir o personalizar la imagen live que contiene este agente, consulta `README-aios-lfs-v8.md`.
 
 ## Dependencias
 
 - Python 3.11+
 - `requests`, `pyyaml`
 - llama.cpp compilado (`llama-server`)
-- Modelo GGUF (Qwen3-8B, Qwen2.5-7B, etc.)
+- Modelo GGUF (Qwen3-8B)
 
 ## Historial de versiones
 
 | Versión | Fecha | Cambios principales |
 |---|---|---|
+| v3.3 | 2026-07-27 | chat.py auto-arranque llama-server; ld.so.conf.d/llama.conf; aios-install grub.cfg fijo en modo texto; setup.py simplificado (solo Qwen3-8B, sin descarga); ISO build con `-iso-level 3` para modelos >4 GB |
 | v3.2 | 2026-07-26 | setup.py: validación API key, bucle de reintento, fix backspace readline; aios-session: X primero, i3 con exec condicional; dbus.service; ldconfig.service masked; PATH+secure_path; aios-install sin `--force` (GRUB 0x9000) |
 | v3.1 | 2026-07-24 | GRUB compilado desde LFS 13.0-systemd con fix de linker entry point 0x9000; ISO build con `grub-mkrescue` del host |
 | v3.0 | 2026-07-21 | Wizard setup.py con opción INSTALL TO DISK; aios-install v1.0; chat.py wrapper EOF/errores |
