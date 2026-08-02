@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.7 - agosto 2026
+
+### hito físico
+
+- Se verificó el arranque completo de AIOS LFS en hardware real (portátil físico con SSD SATA) el 2 Ago 2026.
+- La ISO arranca desde USB cuando se graba con Rufus en modo DD.
+- El instalador copia el sistema al disco SSD y el equipo arranca desde disco con banner AIOS y login.
+- Toda la cadena (live USB → instalación → arranque disco) funciona en hardware físico, no solo en VirtualBox.
+- Se corrigió el init del initrd live para esperar la aparición del dispositivo de arranque durante 30 s, con loop de verificación `[ -b ]` y `break 2`.
+- Se amplió la lista de dispositivos reconocidos en el init: `sdc`, `sdd`, `hd*`, `nvme*`, `mmcblk*`.
+- Se reemplazó el kernel panic silencioso por el mensaje claro `AIOS: boot media not found` más shell de emergencia busybox.
+- Se documentó que Rufus debe usarse en modo DD; el modo ISO crea FAT32 y el init busca iso9660, por lo que falla actualmente.
+
+### próximos pasos
+
+- Soportar Rufus modo ISO/FAT32 en el script init del initrd live.
+- Compilar e integrar kernel #5 con soporte NVMe y UAS.
+
 ## v3.6 - agosto 2026
 
 ### aios-install v1.1.2

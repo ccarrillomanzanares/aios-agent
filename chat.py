@@ -191,11 +191,12 @@ def main():
 
         try:
             response = agent.run(query)
-            print(f"\n{response}\n")
+            # La respuesta ya se imprimió carácter a carácter durante el stream.
+            # Solo añadimos un salto final si el stream no lo dejó ya.
+            print()
         except KeyboardInterrupt:
             print("\n[Interrumpido]")
             continue
-
 
 
 # ─── Error wrapper ────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from pathlib import Path
 import requests
 
@@ -134,10 +135,11 @@ class Agent:
         # Comprimir historial si es necesario
         self._compress()
 
-        # 1. Buscar en caché procedural
-        cached = self.memory.find(query, self._quick_llm)
-        if cached:
-            return f"[cache] {cached}"
+        # 1. Buscar en caché procedural (deshabilitado en modo cloud puro)
+        if AIOS_MODE != "cloud":
+            cached = self.memory.find(query, self._quick_llm)
+            if cached:
+                return f"[cache] {cached}"
 
         self.messages.append({"role": "user", "content": f"/no_think {query}"})
 
@@ -148,20 +150,73 @@ class Agent:
                 "tools": TOOLS,
                 "temperature": TEMPERATURE,
                 "max_tokens": MAX_TOKENS,
+                "stream": True,
             }
             if AIOS_MODE in ("cloud", "hybrid") and CLOUD_MODEL:
                 payload["model"] = CLOUD_MODEL
 
             try:
-                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120)
+                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120, stream=True)
                 resp.raise_for_status()
-                data = resp.json()
             except Exception as e:
                 return f"Error de conexión al LLM: {e}"
 
-            choice = data["choices"][0]
-            msg = choice["message"]
-            finish = choice.get("finish_reason", "")
+            content_chunks = []
+            tool_calls_by_index = {}
+            finish_reason = None
+
+            try:
+                for raw_line in resp.iter_lines():
+                    if not raw_line:
+                        continue
+                    line = raw_line.decode("utf-8")
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    for choice in data.get("choices", []):
+                        delta = choice.get("delta", {})
+                        if choice.get("finish_reason"):
+                            finish_reason = choice["finish_reason"]
+                        # Texto en vivo (typewriter)
+                        if "content" in delta and delta["content"]:
+                            chunk = delta["content"]
+                            content_chunks.append(chunk)
+                            for ch in chunk:
+                                print(ch, end="", flush=True)
+                                time.sleep(0.02)
+                        # Tool calls fragmentadas por índice
+                        if "tool_calls" in delta:
+                            for tc_delta in delta["tool_calls"]:
+                                idx = tc_delta.get("index", 0)
+                                if idx not in tool_calls_by_index:
+                                    tool_calls_by_index[idx] = {
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""},
+                                    }
+                                if tc_delta.get("id"):
+                                    tool_calls_by_index[idx]["id"] = tc_delta["id"]
+                                func_delta = tc_delta.get("function", {})
+                                if func_delta.get("name"):
+                                    tool_calls_by_index[idx]["function"]["name"] += func_delta["name"]
+                                if func_delta.get("arguments"):
+                                    tool_calls_by_index[idx]["function"]["arguments"] += func_delta["arguments"]
+            except Exception as e:
+                return f"Error leyendo stream del LLM: {e}"
+
+            print()  # salto de línea tras el stream
+            content = "".join(content_chunks)
+            msg = {"role": "assistant", "content": content or ""}
+            if tool_calls_by_index:
+                tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index)]
+                msg["tool_calls"] = tool_calls
+            finish = finish_reason or ""
 
             # Tool call → ejecutar y devolver resultado al LLM
             if finish == "tool_calls" or msg.get("tool_calls"):
@@ -177,7 +232,7 @@ class Agent:
                         args = json.loads(func["arguments"])
                     except json.JSONDecodeError:
                         args = {}
-                    
+
                     # Anti-bucle: detect repeated tool calls
                     _last_call = getattr(self, '_last_tool', None)
                     _repeat_count = getattr(self, '_tool_repeat_count', 0)
@@ -186,7 +241,7 @@ class Agent:
                     else:
                         self._tool_repeat_count = 0
                     self._last_tool = {'name': name, 'args': args}
-                    
+
                     if self._tool_repeat_count >= 3:
                         print(f"  ⚠️ Misma llamada {name} repetida {self._tool_repeat_count + 1} veces")
                         print("  ¿Aborto la tarea? (y/N): ", end="", flush=True)
@@ -199,7 +254,7 @@ class Agent:
                                 return "Tarea abortada por el usuario tras detectar bucle."
                         except:
                             pass
-                    
+
                     result = execute_tool(name, args, context=self.messages)
                     print(f"  🔧 {name}({func.get('arguments','')})")
                     if name == "run_command":
