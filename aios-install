@@ -248,10 +248,18 @@ def build_disk_initrd(target, root_part):
             return
         head = init.split(marker)[0]
         tail = """# Disk boot: mount root and switch to the real system
-ROOT=$(/bin/busybox sed -n 's/.*root=\([^ ]*\).*/\1/p' /proc/cmdline)
+ROOT=$(/bin/busybox sed -n 's/.*root=\\([^ ]*\\).*/\\1/p' /proc/cmdline)
 [ -z "$ROOT" ] && ROOT="%s"
+i=0
+while [ ! -b "$ROOT" ] && [ $i -lt 30 ]; do
+    /bin/busybox sleep 1
+    i=$((i+1))
+done
 /bin/busybox mkdir -p /root
-/bin/busybox mount -t ext4 "$ROOT" /root || exec /bin/sh
+if ! /bin/busybox mount -t ext4 "$ROOT" /root; then
+    echo "AIOS: cannot mount $ROOT" > /dev/tty0
+    exec /bin/busybox sh
+fi
 exec /bin/busybox switch_root /root /sbin/init
 """ % root_part
         init_path.write_text(head + tail)
