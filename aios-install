@@ -126,16 +126,17 @@ def cleanup_chroot(target):
     for d in ["run", "sys", "proc", "dev"]:
         subprocess.run(["/usr/bin/umount", "-l", f"{target}/{d}"], capture_output=True)
 
-def install_grub(target, disk):
+def install_grub(target, disk, root_part):
     print(f"  Installing GRUB on /dev/{disk}...")
     run(["/usr/sbin/chroot", target, "/usr/sbin/grub-install", f"/dev/{disk}"])
     # Write fixed grub.cfg (grub-mkconfig generates graphical menu that hangs on VirtualBox)
     grub_cfg = Path(target) / "boot" / "grub" / "grub.cfg"
     grub_cfg.write_text(f"""set default=0
-set timeout=5
+set timeout=0
 
 menuentry "AIOS LFS" {{
-    linux /boot/vmlinuz-6.18.10-lfs root=/dev/sda2 rw console=tty0 loglevel=6 rootwait
+    linux /boot/vmlinuz-6.18.10-lfs root={root_part} rw console=tty0 quiet loglevel=3 systemd.show_status=false vt.global_cursor_default=0
+    initrd /boot/initrd.img
 }}
 """)
 
@@ -228,6 +229,39 @@ def set_passwords(target):
     return True
 
 
+def build_disk_initrd(target, root_part):
+    """Transform the live initrd into a disk-boot initrd (clear + AIOS banner)."""
+    import tempfile, shutil
+    initrd_src = Path(target) / "boot" / "initrd.img"
+    if not initrd_src.exists():
+        print("  WARNING: initrd.img not copied; disk will boot without banner")
+        return
+    workdir = tempfile.mkdtemp(prefix="disk-initrd-")
+    try:
+        run(["/bin/busybox", "sh", "-c",
+             f"cd {workdir} && /bin/busybox zcat {initrd_src} | /bin/busybox cpio -id"])
+        init_path = Path(workdir) / "init"
+        init = init_path.read_text()
+        marker = "for dev in /dev/sr0"
+        if marker not in init:
+            print("  WARNING: initrd has no ISO loop; leaving as-is")
+            return
+        head = init.split(marker)[0]
+        tail = """# Disk boot: mount root and switch to the real system
+ROOT=$(/bin/busybox sed -n 's/.*root=\([^ ]*\).*/\1/p' /proc/cmdline)
+[ -z "$ROOT" ] && ROOT="%s"
+/bin/busybox mkdir -p /root
+/bin/busybox mount -t ext4 "$ROOT" /root || exec /bin/sh
+exec /bin/busybox switch_root /root /sbin/init
+""" % root_part
+        init_path.write_text(head + tail)
+        run(["/bin/busybox", "sh", "-c",
+             f"cd {workdir} && find . | /bin/busybox cpio -H newc -o | /bin/busybox gzip -9 > {initrd_src}"])
+        print("  Disk initrd built (clear + banner + switch_root)")
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 def main():
     clear()
     print_box("AIOS LFS INSTALLER v" + VERSION, [
@@ -254,7 +288,8 @@ def main():
     run(["/usr/bin/mount", root_part, target])
     copy_system(target)
     setup_chroot(target)
-    install_grub(target, disk["name"])
+    install_grub(target, disk["name"], root_part)
+    build_disk_initrd(target, root_part)
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
