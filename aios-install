@@ -125,7 +125,7 @@ def install_grub(target, disk):
 set timeout=5
 
 menuentry "AIOS LFS" {{
-    linux /boot/vmlinuz-6.18.10-lfs root=/dev/sda2 rw nokaslr console=tty0 loglevel=6 rootwait
+    linux /boot/vmlinuz-6.18.10-lfs root=/dev/sda2 rw console=tty0 loglevel=6 rootwait
 }}
 """)
 

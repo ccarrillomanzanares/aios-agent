@@ -16,37 +16,41 @@ CLOUD_ENDPOINTS = {
 }
 
 def validate_api_key(provider, api_key):
-    """Test the API key with a lightweight request."""
+    """Test the API key with a lightweight request (hard timeout, DNS-safe)."""
+    import threading
+
     base_url = CLOUD_ENDPOINTS.get(provider, "")
     if not base_url:
         return True  # Unknown provider, skip validation
-    
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "User-Agent": "AIOS-Setup/1.0"
     }
-    
-    try:
-        if provider == "Google Gemini":
-            req = url_req.Request(f"{base_url}/models?key={api_key}", method="GET")
-        elif provider == "Anthropic":
-            req = url_req.Request(f"{base_url}/messages", method="POST",
-                                data=b'{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}',
-                                headers={**headers, "Content-Type": "application/json", "anthropic-version": "2023-06-01"})
-        else:
-            req = url_req.Request(f"{base_url}/models", headers=headers, method="GET")
-        
-        with url_req.urlopen(req, timeout=5) as resp:
-            if resp.status < 400:
-                return True
-            return False
-    except url_req.HTTPError as e:
-        if e.code in (401, 403):
-            return False
-        # Other errors (network, etc.) - let user decide
-        return None
-    except Exception:
-        return None
+    result = {}
+
+    def _check():
+        try:
+            if provider == "Google Gemini":
+                req = url_req.Request(f"{base_url}/models?key={api_key}", method="GET")
+            elif provider == "Anthropic":
+                req = url_req.Request(f"{base_url}/messages", method="POST",
+                                    data=b'{"model":"claude-3-haiku-20240307","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}',
+                                    headers={**headers, "Content-Type": "application/json", "anthropic-version": "2023-06-01"})
+            else:
+                req = url_req.Request(f"{base_url}/models", headers=headers, method="GET")
+
+            with url_req.urlopen(req, timeout=5) as resp:
+                result["value"] = resp.status < 400
+        except url_req.HTTPError as e:
+            result["value"] = False if e.code in (401, 403) else None
+        except Exception:
+            result["value"] = None
+
+    t = threading.Thread(target=_check, daemon=True)
+    t.start()
+    t.join(timeout=12)  # hard cap: incluye resolución DNS y conexión
+    return result.get("value")
 import platform
 from pathlib import Path
 
@@ -333,10 +337,10 @@ def main():
                     config["mode"] = "local"
                     break
                 config["cloud"]["api_key"] = key
-                print("  Testing API key...")
+                print("  Testing API key...", flush=True)
                 valid = validate_api_key(prov_data["name"], key)
                 if valid is True:
-                    print("  API key is valid.")
+                    print("  API key is valid.", flush=True)
                     break
                 elif valid is False:
                     print("\n  Invalid API key. Check and try again.\n")
@@ -348,7 +352,7 @@ def main():
                     if retry != "n":
                         break
                     continue
-            if not key:
+            if key:
                 env_var = {
                     "DeepSeek": "DEEPSEEK_API_KEY",
                     "OpenAI": "OPENAI_API_KEY",
@@ -370,7 +374,7 @@ def main():
                 env_lines.append(f"{env_var}={key}\n")
                 with open(env_path, "w") as f:
                     f.writelines(env_lines)
-                print(f"  API key saved to {env_path}")
+                print(f"  API key saved to {env_path}", flush=True)
                 del config["cloud"]["api_key"]  # remove from yaml
         else:
             # User went back, fallback to local
@@ -410,7 +414,7 @@ def main():
         "",
         f"  Saved to: {CONFIG_FILE}",
         "",
-        "  Ready! Run 'python3 chat.py' to start.",
+        "  Setup complete. Starting the AIOS agent...",
         "",
     ]
     print_box("SETUP COMPLETE", summary)
@@ -438,3 +442,6 @@ if __name__ == "__main__":
             if retry == "n":
                 break
             print("\033[2J\033[H", end="")
+
+    # Salida forzada: no esperar hilos residuales (p.ej. validación DNS colgada)
+    os._exit(0)
