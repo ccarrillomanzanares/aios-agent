@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 CONFIG_SRC = Path.home() / ".aios" / "config.yaml"
 MODEL_SRC = Path("/usr/local/share/aios/models")
 AGENT_SRC = Path("/usr/local/bin/aios-agent")
@@ -181,6 +181,43 @@ def setup_aios_config(target):
         os.chown(f, uid, gid)
     print("  ~/.aios/config.yaml created")
 
+def set_passwords(target):
+    """Offer to change root/aios passwords in the installed system."""
+    print("\n  The installed system uses factory passwords: root/root, aios/aios.")
+    if not confirm("  Change them now"):
+        return False
+
+    import getpass
+
+    def read_new_password(user):
+        while True:
+            p1 = getpass.getpass(f"  New password for {user}: ")
+            if len(p1) < 8:
+                print("  Too short (min 8 characters).")
+                continue
+            p2 = getpass.getpass(f"  Repeat for {user}: ")
+            if p1 != p2:
+                print("  Passwords do not match.")
+                continue
+            return p1
+
+    root_pass = read_new_password("root")
+    if confirm("  Use the same password for aios"):
+        aios_pass = root_pass
+    else:
+        aios_pass = read_new_password("aios")
+
+    data = f"root:{root_pass}\naios:{aios_pass}\n".encode()
+    try:
+        subprocess.run(["/usr/sbin/chroot", target, "/usr/sbin/chpasswd"],
+                       input=data, check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        print(f"  ERROR setting passwords: {e.stderr.strip()}")
+        return False
+    print("  Passwords updated.")
+    return True
+
+
 def main():
     clear()
     print_box("AIOS LFS INSTALLER v" + VERSION, [
@@ -212,17 +249,18 @@ def main():
     enable_services(target)
     configure_system(target)
     cleanup_chroot(target)
+    passwords_changed = set_passwords(target)
     run(["/usr/bin/umount", target])
     clear()
-    print_box("INSTALLATION COMPLETE", [
+    summary = [
         "",
         f"  AIOS LFS installed to /dev/{disk['name']}",
         "",
-        "  Remove the installation media and reboot.",
-        "",
-        "  Login: aios / aios  or  root / root",
-        "",
-    ])
+    ]
+    if not passwords_changed:
+        summary.append("  Login: aios / aios  or  root / root")
+    summary += ["", "  Remove the installation media and reboot.", ""]
+    print_box("INSTALLATION COMPLETE", summary)
 
 if __name__ == "__main__":
     main()
