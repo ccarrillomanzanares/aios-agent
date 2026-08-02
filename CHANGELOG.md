@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.4 - agosto 2026
+
+### setup.py
+
+- `validate_api_key` ejecuta la petición en un hilo daemon con `join(timeout=12)`; el timeout de `urlopen` no cubre resolución DNS y el menú cloud se colgaba sin límite.
+- Al final de `__main__` se usa `os._exit(0)` para forzar la salida sin esperar a hilos residuales.
+- La API key se guarda correctamente en `~/.aios/.env` (corregido el bug `if not key:` → `if key:`).
+- Menú LOCAL actualizado con el modelo `Qwen3-8B-Instruct` y el texto `"1) LOCAL (no internet) / Simple tasks"`.
+- `print_box` se centra en pantalla usando `os.get_terminal_size`, con padding horizontal y vertical.
+- Mensaje final del setup: `"Setup complete. Starting the AIOS agent..."`, reflejando el paso automático de setup a aios.
+
+## v3.5 - agosto 2026
+
+### aios-install
+
+- **v1.1.0**: permitir cambiar las contraseñas `root` y `aios` durante la instalación. Se usa `getpass`, longitud mínima de 8 caracteres y `chpasswd` vía chroot por stdin. El resumen final omite `"Login: aios/aios"` si se cambiaron las credenciales.
+- **v1.1.1**: silent boot en disco. El `grub.cfg` generado usa `timeout=0`, `quiet`, `systemd.show_status=false`, `initrd /boot/initrd.img` y `root=` real. `build_disk_initrd` transforma el initrd live conservando el banner y reemplazando el bucle ISO por `mount root` + `switch_root /sbin/init`.
+- Se elimina `nokaslr` del `grub.cfg` generado.
+- `print_box` centrado en pantalla.
+
 ## v2.7.1 — Fix del bootloader GRUB en instalaciones a disco (VirtualBox)
 
 - `scripts/aios-install`: se reemplaza la generación dinámica del menú GRUB (`grub-mkconfig`) por un `grub.cfg` fijo en modo texto.
