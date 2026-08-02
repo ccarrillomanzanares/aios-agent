@@ -1,5 +1,31 @@
 # Changelog
 
+## v3.6 - agosto 2026
+
+### aios-install v1.1.2
+
+- **Fix: kernel panic al arrancar AIOS LFS desde disco duro.**
+  El sistema instalado a disco mostraba el panic `'Attempted to kill init! exit code=0x7f00'` (127) justo tras el arranque.
+
+#### Causas raíz
+
+1. **Escape octal en el patrón `sed` de `build_disk_initrd`**: la cadena Python usaba un solo backslash en `'s/.*root=\([^ ]*\).*/\1/p'`. Python interpreta `\1` como el carácter de control SOH (`0x01`), que terminaba escrito en el `init` generado. Al ejecutarse, `sed` devolvía un dispositivo root fantasma y el posterior `mount -t ext4` fallaba.
+2. **Fallback incorrecto en el initrd**: cuando `mount` fallaba, el script ejecutaba `exec /bin/sh`, pero en el initrd live transformado no existe `/bin/sh`; solo hay `init` y `bin/busybox`, sin symlinks de applets. El `exec` fallaba con código 127, matando el init y provocando el panic.
+3. **Sin espera al dispositivo root**: el dispositivo de root podía no estar disponible en el instante en que el init lo consultaba, por lo que incluso con el dispositivo correcto el arranque era inestable.
+
+#### Solución aplicada
+
+- Se corrigió el patrón `sed`/`tail` usando doble backslash (`\\(` y `\\1`) para que el script `init` generado reciba literalmente `\(` y `\1`, y `sed` extraiga el dispositivo root correcto.
+- Se añadió un bucle de espera activa de hasta 30 segundos hasta que el dispositivo root aparezca en `/dev`.
+- Se reemplazó el fallback `exec /bin/sh` por `exec /bin/busybox sh`, que sí existe en el initrd.
+- Se usa ahora `exec /bin/busybox switch_root /root /sbin/init` para continuar el arranque del sistema real.
+- Se añadió `/bin/busybox` (estático, 2.1 MB, extraído del initrd) al squashfs del sistema live, ya que `build_disk_initrd` lo necesita y el sistema live no lo incluía.
+
+#### Verificación
+
+- Reinstalando AIOS LFS a disco, el arranque desde disco funciona correctamente: se muestra el logo AIOS y llega al login.
+- Pendiente de pulir: GRUB sigue mostrando el mensaje `'Welcome to GRUB!'`. Futura mejora: `timeout_style=hidden` y `quiet_boot=1`.
+
 ## v3.4 - agosto 2026
 
 ### setup.py
