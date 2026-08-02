@@ -92,14 +92,23 @@ def clear():
 
 
 def print_box(title, lines):
-    """Print a bordered menu box."""
+    """Print a bordered menu box, centered on screen."""
     width = max(len(l) for l in lines + [title]) + 4
-    print("╔" + "═" * (width - 2) + "╗")
-    print(f"║  {title}{' ' * (width - 4 - len(title))}║")
-    print("╠" + "═" * (width - 2) + "╣")
+    try:
+        cols, rows = os.get_terminal_size()
+    except OSError:
+        cols, rows = 80, 24
+    hpad = max(0, (cols - width) // 2)
+    vpad = max(0, (rows - (3 + len(lines))) // 2)
+    if vpad:
+        print("\n" * vpad, end="")
+    pad = " " * hpad
+    print(pad + "╔" + "═" * (width - 2) + "╗")
+    print(pad + f"║  {title}{' ' * (width - 4 - len(title))}║")
+    print(pad + "╠" + "═" * (width - 2) + "╣")
     for l in lines:
-        print(f"║  {l}{' ' * (width - 4 - len(l))}║")
-    print("╚" + "═" * (width - 2) + "╝")
+        print(pad + f"║  {l}{' ' * (width - 4 - len(l))}║")
+    print(pad + "╚" + "═" * (width - 2) + "╝")
 
 
 def input_key(label):
