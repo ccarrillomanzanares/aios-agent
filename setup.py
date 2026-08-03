@@ -1,8 +1,13 @@
 import readline
 readline.parse_and_bind('"\\d": backward-delete-char')
 """AIOS Agent - Configuration setup (first-run wizard)."""
+import getpass
 import json
 import os
+import re
+import shlex
+import subprocess as _sp
+import time
 import urllib.request as url_req
 
 CLOUD_ENDPOINTS = {
@@ -56,6 +61,35 @@ from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".aios"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
+
+
+WPA_DIR = Path("/etc/wpa_supplicant")
+SYSTEMD_DIR = Path("/etc/systemd/system")
+
+
+def _run(cmd, **kwargs):
+    """Run a shell command, returning CompletedProcess. cmd may be string or list."""
+    if isinstance(cmd, str):
+        cmd = shlex.split(cmd)
+    return _sp.run(cmd, capture_output=True, text=True, **kwargs)
+
+
+def _run_sudo(cmd, **kwargs):
+    """Run a command via sudo if the current effective uid is not 0."""
+    if isinstance(cmd, str):
+        cmd = shlex.split(cmd)
+    if os.geteuid() != 0:
+        cmd = ["sudo"] + cmd
+    return _sp.run(cmd, capture_output=True, text=True, **kwargs)
+
+
+def _which(name):
+    """Return the path of an executable or None if not found."""
+    for d in os.getenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin").split(os.pathsep):
+        p = Path(d) / name
+        if p.is_file():
+            return str(p)
+    return None
 
 
 def detect_cpu():
@@ -115,6 +149,239 @@ def input_key(label):
     """Read API key once (visible for paste compatibility)."""
     k = input(f"  {label}: ").strip()
     return k if k else None
+
+
+def _get_own_ip(iface):
+    """Return the IPv4 address of iface, or None."""
+    r = _run(["ip", "addr", "show", "dev", iface])
+    m = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+)\b", r.stdout)
+    return m.group(1) if m else None
+
+
+def _iface_has_internet(iface, timeout=5):
+    """Verify internet connectivity using curl or ping fallback."""
+    curl = _which("curl")
+    if curl:
+        r = _run([curl, "-m", str(timeout), "-s", "-o", "/dev/null", "-w", "%{http_code}", "https://1.1.1.1"])
+        try:
+            return int(r.stdout.strip()) == 200
+        except ValueError:
+            pass
+    ping = _which("ping")
+    if ping:
+        r = _run([ping, "-c", "1", "-W", "3", "1.1.1.1"])
+        return r.returncode == 0
+    return False
+
+
+def setup_wifi():
+    """WiFi setup wizard: detect interface, scan, connect, persist if possible."""
+    clear()
+    print_box("WIFI SETUP", ["", "  Detecting wireless interface...", ""])
+    time.sleep(0.5)
+
+    iface = None
+    r = _run(["iw", "dev"])
+    if r.returncode == 0:
+        for line in r.stdout.splitlines():
+            if "Interface" in line:
+                parts = line.split()
+                # iw dev output is like: \tInterface wlan0
+                for i, p in enumerate(parts):
+                    if p == "Interface" and i + 1 < len(parts):
+                        candidate = parts[i + 1]
+                        # confirm type managed
+                        mode_r = _run(["iw", "dev", candidate, "info"])
+                        if candidate not in (iface or "") and "managed" in mode_r.stdout.lower():
+                            iface = candidate
+                            break
+            if iface:
+                break
+
+    if not iface:
+        net_dir = Path("/sys/class/net")
+        if net_dir.exists():
+            for dev in sorted(net_dir.iterdir()):
+                if dev.name.startswith("wl"):
+                    iface = dev.name
+                    break
+
+    if not iface:
+        clear()
+        print_box("WIFI SETUP", ["", "  No wireless interface found.", "  Make sure a WiFi adapter is available.", ""])
+        input("  Press Enter to return to menu...")
+        return
+
+    clear()
+    print_box("WIFI SETUP", ["", f"  Interface detected: {iface}", "  Bringing interface up...", ""])
+    _run_sudo(["ip", "link", "set", iface, "up"])
+    time.sleep(1)
+
+    ssids = []
+    scan_lines = []
+    for attempt in range(2):
+        r = _run_sudo(["iw", "dev", iface, "scan"], timeout=10)
+        if r.returncode == 0:
+            scan_lines = r.stdout.splitlines()
+            break
+        if "busy" in r.stderr.lower() or r.returncode != 0:
+            time.sleep(2)
+
+    seen = set()
+    for line in scan_lines:
+        if "SSID:" in line:
+            parts = line.split("SSID:", 1)
+            if len(parts) == 2:
+                ssid = parts[1].strip()
+                if ssid and ssid not in seen:
+                    ssids.append(ssid)
+                    seen.add(ssid)
+
+    clear()
+    if ssids:
+        lines = ["", f"  Wireless networks found ({len(ssids)}):", ""]
+        for i, s in enumerate(ssids, 1):
+            lines.append(f"  {i}) {s}")
+        lines.extend(["", "  0) Enter SSID manually", "", f"  Selected interface: {iface}", ""])
+        print_box("WIFI SETUP", lines)
+        try:
+            opt = int(input("  Select (0-{}): ".format(len(ssids))))
+        except ValueError:
+            opt = 0
+        if 1 <= opt <= len(ssids):
+            ssid = ssids[opt - 1]
+        else:
+            ssid = input("  SSID: ").strip()
+    else:
+        print_box("WIFI SETUP", ["", "  Could not scan networks.", "  You can still enter the SSID manually.", "", f"  Interface: {iface}", ""])
+        ssid = input("  SSID: ").strip()
+
+    if not ssid:
+        clear()
+        print_box("WIFI SETUP", ["", "  No SSID provided. Returning to menu.", ""])
+        input("  Press Enter to return to menu...")
+        return
+
+    clear()
+    print_box("WIFI SETUP", ["", f"  SSID: {ssid}", "  Enter the WiFi password.", ""])
+    password = getpass.getpass("  Password: ").strip()
+
+    WPA_DIR.mkdir(parents=True, exist_ok=True)
+    conf_path = WPA_DIR / f"wpa_supplicant-{iface}.conf"
+
+    wpa_pass = _which("wpa_passphrase")
+    conf_content = None
+    if wpa_pass and password:
+        r = _run([wpa_pass, ssid, password])
+        if r.returncode == 0 and "network={" in r.stdout:
+            conf_content = r.stdout
+    if not conf_content:
+        # Manual network block; escape quotes for ssid and psk.
+        safe_ssid = ssid.replace('"', '\\"')
+        if password:
+            safe_psk = password.replace('"', '\\"')
+            psk_line = f"\tpsk=\"{safe_psk}\"\n"
+        else:
+            psk_line = "\tkey_mgmt=NONE\n"
+        conf_content = (
+            "ctrl_interface=/run/wpa_supplicant\n"
+            "update_config=1\n"
+            "\n"
+            "network={\n"
+            f"\tssid=\"{safe_ssid}\"\n"
+            f"{psk_line}"
+            "}\n"
+        )
+
+    # Write the file with 600 permissions using sudo tee if needed.
+    try:
+        if os.geteuid() == 0:
+            with open(conf_path, "w") as f:
+                f.write(conf_content)
+            os.chmod(conf_path, 0o600)
+        else:
+            r = _run(["sudo", "tee", str(conf_path)], input=conf_content)
+            if r.returncode == 0:
+                _run(["sudo", "chmod", "600", str(conf_path)])
+            else:
+                raise OSError(r.stderr or "tee failed")
+    except Exception as e:
+        clear()
+        print_box("WIFI SETUP", ["", f"  Failed to write {conf_path}: {e}", ""])
+        input("  Press Enter to return to menu...")
+        return
+
+    clear()
+    print_box("WIFI SETUP", ["", f"  Configuration saved to {conf_path}", "  Connecting...", ""])
+
+    # Stop any existing wpa_supplicant on this interface.
+    _run_sudo(["pkill", "-f", "wpa_supplicant"])
+    time.sleep(0.5)
+
+    wpa_supp = _which("wpa_supplicant")
+    if not wpa_supp:
+        clear()
+        print_box("WIFI SETUP", ["", "  wpa_supplicant not found. Cannot connect.", ""])
+        input("  Press Enter to return to menu...")
+        return
+
+    r = _run_sudo([wpa_supp, "-B", "-i", iface, "-c", str(conf_path)])
+    if r.returncode != 0:
+        clear()
+        print_box("WIFI SETUP", ["", "  Failed to start wpa_supplicant:", f"  {r.stderr.strip()}", ""])
+        input("  Press Enter to return to menu...")
+        return
+    time.sleep(3)
+
+    # Request an IP address.
+    dhcp_done = False
+    udhcpc = _which("udhcpc")
+    if udhcpc:
+        r = _run_sudo([udhcpc, "-i", iface, "-q", "-n"], timeout=15)
+        dhcp_done = r.returncode == 0
+    if not dhcp_done:
+        dhcpcd = _which("dhcpcd")
+        if dhcpcd:
+            r = _run_sudo([dhcpcd, iface], timeout=15)
+            dhcp_done = r.returncode == 0
+
+    ip = _get_own_ip(iface)
+    connected = _iface_has_internet(iface)
+
+    if connected:
+        # Persist on installed systems only.
+        if SYSTEMD_DIR.exists():
+            _run_sudo(["systemctl", "enable", f"wpa_supplicant@{iface}"])
+            _run_sudo(["systemctl", "start", f"wpa_supplicant@{iface}"])
+            # Try to keep DHCP alive via a simple aios-wifi service if not present.
+            svc_path = SYSTEMD_DIR / "aios-wifi.service"
+            if not svc_path.exists():
+                svc = (
+                    "[Unit]\n"
+                    "Description=AIOS WiFi connection\n"
+                    "After=network.target\n"
+                    "\n"
+                    "[Service]\n"
+                    "Type=forking\n"
+                    f"ExecStart=/usr/sbin/wpa_supplicant -B -i {iface} -c {conf_path}\n"
+                    f"ExecStartPost=/bin/sh -c 'sleep 3; /sbin/udhcpc -i {iface} -q -n || /sbin/dhcpcd {iface}'\n"
+                    "Restart=on-failure\n"
+                    "\n"
+                    "[Install]\n"
+                    "WantedBy=multi-user.target\n"
+                )
+                _run_sudo(["tee", str(svc_path)], input=svc)
+                _run_sudo(["systemctl", "daemon-reload"])
+                _run_sudo(["systemctl", "enable", "aios-wifi"])
+
+        clear()
+        print_box("WIFI SETUP", ["", f"  WiFi connected to {ssid}", f"  IP: {ip or 'unknown'}", ""])
+    else:
+        clear()
+        reason = "Could not reach the internet" if dhcp_done else "Could not obtain an IP address"
+        print_box("WIFI SETUP", ["", f"  Failed to connect to {ssid}", f"  Reason: {reason}", f"  IP: {ip or 'none'}", ""])
+
+    input("  Press Enter to return to menu...")
 
 
 def select_provider_and_model():
@@ -264,29 +531,23 @@ def main():
         "     Complex tasks -> cloud model",
         "     Requires an API key from a provider",
         "",
+        "  5) WIFI SETUP",
+        "     Configure wireless network",
+        "",
     ])
     try:
-        mode = int(input("  Select (1-4): "))
+        mode = int(input("  Select (1-5): "))
     except ValueError:
         mode = 0
 
-    LOCAL_MODELS = [
-        {
-            "name": "Qwen3-8B-Instruct",
-            "file": "Qwen_Qwen3-8B-Q4_K_M.gguf",
-            "size": "4.7 GB",
-            "speed": "17 tok/s",
-            "desc": "most reliable",
-            "default": True,
-        },
-    ]
-
+    if mode == 5:
+        setup_wifi()
+        return
 
     if mode not in (1, 2, 3, 4):
         print("\n  Invalid option. Defaulting to LOCAL mode.")
 
     if mode == 4:
-        import subprocess as _sp
         ret = _sp.run(["sudo", "aios-install"])
         if ret.returncode != 0:
             print("\n  Installation aborted or failed.")
@@ -300,7 +561,21 @@ def main():
 
         mode = 1
 
+    LOCAL_MODELS = [
+        {
+            "name": "Qwen3-8B-Instruct",
+            "file": "Qwen_Qwen3-8B-Q4_K_M.gguf",
+            "size": "4.7 GB",
+            "speed": "17 tok/s",
+            "desc": "most reliable",
+            "default": True,
+        },
+    ]
+
     selected = LOCAL_MODELS[0]  # default, may be overridden for local
+    if mode not in (1, 2, 3, 4):
+        print("\n  Invalid option. Defaulting to LOCAL mode.")
+        mode = 1
     if mode == 1:
         selected = LOCAL_MODELS[0]
         model_path = Path(f"/home/aios/.aios/models/{selected['file']}")
@@ -395,7 +670,6 @@ def main():
         yaml.dump(config, f, default_flow_style=False)
 
     # Enable llama service if local or hybrid mode
-    import subprocess as _sp
     if config.get("mode") in ("local", "hybrid"):
         _sp.run(["systemctl", "enable", "aios-llama.service"], capture_output=True)
         _sp.run(["systemctl", "start", "aios-llama.service"], capture_output=True)
