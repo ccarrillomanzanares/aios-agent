@@ -158,19 +158,15 @@ def _get_own_ip(iface):
     return m.group(1) if m else None
 
 
-def _iface_has_internet(iface, timeout=5):
-    """Verify internet connectivity using curl or ping fallback."""
-    curl = _which("curl")
-    if curl:
-        r = _run([curl, "-m", str(timeout), "-s", "-o", "/dev/null", "-w", "%{http_code}", "https://1.1.1.1"])
+def _iface_has_internet(iface, timeout=8):
+    """Verify internet connectivity using Python urllib (no curl/ping needed)."""
+    for url in ("https://example.com", "https://archlinux.org"):
         try:
-            return int(r.stdout.strip()) == 200
-        except ValueError:
-            pass
-    ping = _which("ping")
-    if ping:
-        r = _run([ping, "-c", "1", "-W", "3", "1.1.1.1"])
-        return r.returncode == 0
+            req = url_req.Request(url, method="GET", headers={"User-Agent": "aios-setup"})
+            with url_req.urlopen(req, timeout=timeout) as resp:
+                return resp.status == 200
+        except Exception:
+            continue
     return False
 
 
@@ -353,26 +349,18 @@ def setup_wifi():
         if SYSTEMD_DIR.exists():
             _run_sudo(["systemctl", "enable", f"wpa_supplicant@{iface}"])
             _run_sudo(["systemctl", "start", f"wpa_supplicant@{iface}"])
-            # Try to keep DHCP alive via a simple aios-wifi service if not present.
-            svc_path = SYSTEMD_DIR / "aios-wifi.service"
-            if not svc_path.exists():
-                svc = (
-                    "[Unit]\n"
-                    "Description=AIOS WiFi connection\n"
-                    "After=network.target\n"
+            # DHCP al arranque via systemd-networkd (mismo mecanismo que el ethernet en*)
+            net_path = Path("/etc/systemd/network/20-wifi-dhcp.network")
+            if not net_path.exists():
+                net_cfg = (
+                    "[Match]\n"
+                    "Name=wl*\n"
                     "\n"
-                    "[Service]\n"
-                    "Type=forking\n"
-                    f"ExecStart=/usr/sbin/wpa_supplicant -B -i {iface} -c {conf_path}\n"
-                    f"ExecStartPost=/bin/sh -c 'sleep 3; /sbin/udhcpc -i {iface} -q -n || /sbin/dhcpcd {iface}'\n"
-                    "Restart=on-failure\n"
-                    "\n"
-                    "[Install]\n"
-                    "WantedBy=multi-user.target\n"
+                    "[Network]\n"
+                    "DHCP=ipv4\n"
                 )
-                _run_sudo(["tee", str(svc_path)], input=svc)
-                _run_sudo(["systemctl", "daemon-reload"])
-                _run_sudo(["systemctl", "enable", "aios-wifi"])
+                _run_sudo(["tee", str(net_path)], input=net_cfg)
+                _run_sudo(["systemctl", "restart", "systemd-networkd"])
 
         clear()
         print_box("WIFI SETUP", ["", f"  WiFi connected to {ssid}", f"  IP: {ip or 'unknown'}", ""])

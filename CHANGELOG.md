@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.8 - agosto 2026
+
+### kernel de distro (#5) - hardware generico
+
+- Config del kernel 6.18.10 ampliada: wifi (iwlwifi, ath9k/10k/11k, rtw88/89, rtl8xxxu, brcmfmac, rtlwifi/rtl8723be/rtl8821ae), DRM (i915/amdgpu/nouveau), NVMe, UAS, I2C_HID_ACPI, ethernet (r8169/e1000e/igb), ALSA HDA + USB audio (=m via udev; criticos =y).
+- Firmware linux-firmware en /lib/firmware (~534MB) + symlinks iwlwifi (intel/iwlwifi -> raiz) + regulatory.db + rtl_nic.
+- Verificado en HP Notebook (AMD APU + Realtek RTL8723BE + RTL8106E): wifi, ethernet, audio (alc269 + HDMI), touchpad Synaptics.
+
+### setup.py - opcion 5 WIFI SETUP
+
+- Nueva opcion de menu: detecta interfaz wifi, escanea SSIDs, genera /etc/wpa_supplicant/wpa_supplicant-<iface>.conf (wpa_passphrase), conecta con wpa_supplicant y verifica conectividad.
+- Verificacion de internet con urllib contra example.com/archlinux.org: en el sistema no existen curl/ping y 1.1.1.1 devuelve 403 a urllib.
+- Persistencia en sistema instalado: habilita wpa_supplicant@<iface> y crea /etc/systemd/network/20-wifi-dhcp.network (systemd-networkd DHCP en wl*, mismo mecanismo que el ethernet en*).
+- Fix de bug: el unit aios-wifi.service usaba /usr/sbin/wpa_supplicant (ruta inexistente; Arch lo instala en /usr/bin) -> 203/EXEC -> wifi asociada sin IP al arranque. Sustituido por networkd.
+
+### infraestructura y dependencias
+
+- sven: sincronizacion de bases (sven sync) + registro manual JSON en /var/lib/sven/installed/ para paquetes con estado fantasma (pcsclite, libinput, libgudev) - paquetes marcados instalados sin archivos.
+- libinput.so.10 + libgudev-1.0.so.0 + libwacom + liblua instalados (cadena de dependencias del driver libinput del Xorg) -> touchpad Synaptics funcional en hardware real.
+- busybox: symlinks de applets (/bin/udhcpc, /sbin/udhcpc) + default.script en /usr/share/udhcpc y /etc/udhcpc (el busybox de Ubuntu busca la ruta compilada /etc/udhcpc/).
+- HITO: AIOS completo en hardware real - wifi al arranque sin cable, agente cloud funcional (4 Ago 2026).
+
 ## v3.7 - agosto 2026
 
 ### hito físico
