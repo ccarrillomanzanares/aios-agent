@@ -131,6 +131,21 @@ class Agent:
         return text
 
     def run(self, query: str) -> str:
+        """Wrapper: marca al agente como ocupado (barra de estado i3 ⏳) y ejecuta _run."""
+        try:
+            with open("/tmp/aios-agent.busy", "w") as f:
+                f.write("1")
+        except Exception:
+            pass
+        try:
+            return self._run(query)
+        finally:
+            try:
+                os.remove("/tmp/aios-agent.busy")
+            except Exception:
+                pass
+
+    def _run(self, query: str) -> str:
         """Procesa una consulta con function calling loop. Primero busca en memoria procedural."""
         # Comprimir historial si es necesario
         self._compress()
@@ -283,7 +298,7 @@ class Agent:
                             pass
 
                     result = execute_tool(name, args, context=self.messages)
-                    print(f"  🔧 {name}({func.get('arguments','')})")
+                    print(f"  ⚙ {name}({func.get('arguments','')})")
                     if name == "run_command":
                         r = json.loads(result)
                         print(f"     stdout: {r.get('stdout','')[:150]}")
