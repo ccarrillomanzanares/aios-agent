@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """AIOS Agent - Disk installer. Uses mke2fs -t ext4 instead of mkfs.ext4."""
+import glob
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.1.3"
 CONFIG_SRC = Path.home() / ".aios" / "config.yaml"
 MODEL_SRC = Path("/usr/local/share/aios/models")
 AGENT_SRC = Path("/usr/local/bin/aios-agent")
@@ -104,6 +105,7 @@ def partition_and_format(disk):
     print(f"  Formatting {part2} as ext4...")
     run(["/usr/sbin/mke2fs", "-t", "ext4", "-F", "-L", "AIOS", part2])
     return part2
+
 def copy_system(target):
     print("\n  Copying system to target (this may take a while)...")
     excludes = [
@@ -156,6 +158,35 @@ def enable_services(target):
     print("  Enabling systemd services...")
     for svc in ["aios-llama.service"]:
         run(["/usr/sbin/chroot", target, "systemctl", "enable", svc])
+
+def persist_wifi(target):
+    """Persist live WiFi configuration into the installed target."""
+    live_confs = sorted(glob.glob("/etc/wpa_supplicant/wpa_supplicant-*.conf"))
+    if not live_confs:
+        return []
+
+    target_wpa = Path(target) / "etc" / "wpa_supplicant"
+    target_wpa.mkdir(parents=True, exist_ok=True)
+
+    persisted = []
+    for src in live_confs:
+        src_path = Path(src)
+        dst = target_wpa / src_path.name
+        import shutil
+        shutil.copy2(src_path, dst)
+        os.chmod(dst, 0o600)
+        iface = src_path.stem.split("-", 1)[1]
+        run(["/usr/sbin/chroot", target, "systemctl", "enable", f"wpa_supplicant@{iface}"])
+        persisted.append(iface)
+
+    target_net = Path(target) / "etc" / "systemd" / "network"
+    target_net.mkdir(parents=True, exist_ok=True)
+    wifi_network = target_net / "20-wifi-dhcp.network"
+    if not wifi_network.exists():
+        wifi_network.write_text("[Match]\nName=wl*\n\n[Network]\nDHCP=ipv4\n")
+
+    print(f"  WiFi config persisted for: {', '.join(persisted)}")
+    return persisted
 
 def configure_system(target):
     print("\n  Configuring system...")
@@ -301,6 +332,7 @@ def main():
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
+    persisted_ifaces = persist_wifi(target)
     cleanup_chroot(target)
     passwords_changed = set_passwords(target)
     run(["/usr/bin/umount", target])
@@ -310,6 +342,8 @@ def main():
         f"  AIOS LFS installed to /dev/{disk['name']}",
         "",
     ]
+    if persisted_ifaces:
+        summary.append(f"  WiFi config copied: {', '.join(persisted_ifaces)}")
     if not passwords_changed:
         summary.append("  Login: aios / aios  or  root / root")
     summary += ["", "  Remove the installation media and reboot.", ""]

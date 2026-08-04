@@ -6,6 +6,7 @@ import re
 import signal
 import subprocess
 import time
+import shlex
 from pathlib import Path
 
 import requests
@@ -236,6 +237,219 @@ def mcp_call(server: str, tool: str, args: str = "{}") -> str:
     return json.dumps({"error": f"MCP server did not respond or tool '{tool}' does not exist", "details": last_error}, ensure_ascii=False)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Vision / GUI interaction tools
+# ──────────────────────────────────────────────────────────────────────────────
+
+SCREENSHOT_PATH = "/tmp/aios-shot.png"
+
+
+def _display_env():
+    """Return a copy of the current environment with DISPLAY=:0."""
+    env = os.environ.copy()
+    env["DISPLAY"] = ":0"
+    return env
+
+
+def screenshot() -> str:
+    """Capture the screen to /tmp/aios-shot.png. Returns JSON with path and size."""
+    env = _display_env()
+    try:
+        # Primary: scrot
+        r = subprocess.run(
+            ["scrot", SCREENSHOT_PATH],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if r.returncode == 0 and os.path.exists(SCREENSHOT_PATH):
+            return json.dumps(
+                {
+                    "path": SCREENSHOT_PATH,
+                    "size": os.path.getsize(SCREENSHOT_PATH),
+                    "method": "scrot",
+                },
+                ensure_ascii=False,
+            )
+
+        # Fallback: xwd + ImageMagick convert
+        fallback = "xwd -root -display :0 | convert xwd:- " + shlex.quote(SCREENSHOT_PATH)
+        r2 = subprocess.run(
+            fallback,
+            env=env,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if r2.returncode == 0 and os.path.exists(SCREENSHOT_PATH):
+            return json.dumps(
+                {
+                    "path": SCREENSHOT_PATH,
+                    "size": os.path.getsize(SCREENSHOT_PATH),
+                    "method": "xwd+convert",
+                },
+                ensure_ascii=False,
+            )
+
+        stderr = (r.stderr or "") + " | fallback: " + (r2.stderr or "")
+        return json.dumps(
+            {"error": "Screenshot failed", "stderr": stderr.strip()[:1000]},
+            ensure_ascii=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        return json.dumps(
+            {"error": f"Screenshot timeout ({e.timeout}s)"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps({"error": f"Screenshot error: {e}"}, ensure_ascii=False)
+
+
+def ocr(path: str = "") -> str:
+    """Extract text from an image using tesseract. Returns JSON with text.
+
+    If no path is provided, captures a screenshot first.
+    """
+    image_path = path.strip() if path else SCREENSHOT_PATH
+
+    if not image_path or image_path == SCREENSHOT_PATH:
+        if not os.path.exists(SCREENSHOT_PATH):
+            res = screenshot()
+            try:
+                parsed = json.loads(res)
+                if "error" in parsed:
+                    return res
+            except Exception:
+                pass
+        image_path = SCREENSHOT_PATH
+
+    if not os.path.exists(image_path):
+        return json.dumps(
+            {"error": f"Image not found: {image_path}"},
+            ensure_ascii=False,
+        )
+
+    env = _display_env()
+    try:
+        r = subprocess.run(
+            ["tesseract", image_path, "stdout", "-l", "eng"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        text = r.stdout.strip()[:2000]
+        if r.returncode != 0:
+            stderr = r.stderr.strip()[:1000]
+            return json.dumps(
+                {"error": "OCR failed", "stderr": stderr, "text": text},
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {"path": image_path, "text": text, "length": len(r.stdout.strip())},
+            ensure_ascii=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        return json.dumps(
+            {"error": f"OCR timeout ({e.timeout}s)"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps({"error": f"OCR error: {e}"}, ensure_ascii=False)
+
+
+def xdotool_type(text: str) -> str:
+    """Type text into the focused X11 window. Returns JSON with ok/error."""
+    if text is None or text == "":
+        return json.dumps({"error": "text is required"}, ensure_ascii=False)
+    env = _display_env()
+    try:
+        r = subprocess.run(
+            ["xdotool", "type", "--delay", "10", "--", text],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if r.returncode != 0:
+            return json.dumps(
+                {"error": "xdotool type failed", "stderr": r.stderr.strip()[:1000]},
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {"ok": True, "typed_chars": len(text)},
+            ensure_ascii=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        return json.dumps(
+            {"error": f"xdotool type timeout ({e.timeout}s)"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps({"error": f"xdotool type error: {e}"}, ensure_ascii=False)
+
+
+def xdotool_key(key: str) -> str:
+    """Press a key or key combination via xdotool. Returns JSON with ok/error."""
+    if key is None or key == "":
+        return json.dumps({"error": "key is required"}, ensure_ascii=False)
+    env = _display_env()
+    try:
+        r = subprocess.run(
+            ["xdotool", "key", "--", key],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if r.returncode != 0:
+            return json.dumps(
+                {"error": "xdotool key failed", "stderr": r.stderr.strip()[:1000]},
+                ensure_ascii=False,
+            )
+        return json.dumps({"ok": True, "key": key}, ensure_ascii=False)
+    except subprocess.TimeoutExpired as e:
+        return json.dumps(
+            {"error": f"xdotool key timeout ({e.timeout}s)"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps({"error": f"xdotool key error: {e}"}, ensure_ascii=False)
+
+
+def xdotool_click(x: int, y: int) -> str:
+    """Move the mouse to (x, y) and click the left button. Returns JSON with ok/error."""
+    try:
+        x = int(x)
+        y = int(y)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "x and y must be integers"}, ensure_ascii=False)
+    env = _display_env()
+    try:
+        r = subprocess.run(
+            ["xdotool", "mousemove", str(x), str(y), "click", "1"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if r.returncode != 0:
+            return json.dumps(
+                {"error": "xdotool click failed", "stderr": r.stderr.strip()[:1000]},
+                ensure_ascii=False,
+            )
+        return json.dumps({"ok": True, "x": x, "y": y}, ensure_ascii=False)
+    except subprocess.TimeoutExpired as e:
+        return json.dumps(
+            {"error": f"xdotool click timeout ({e.timeout}s)"},
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return json.dumps({"error": f"xdotool click error: {e}"}, ensure_ascii=False)
+
+
 # Schemas for function calling
 TOOLS = [
     {
@@ -417,7 +631,76 @@ TOOLS = [
             "description": "Shows current context usage: tokens used vs maximum. Helps monitor session size.",
             "parameters": {"type": "object", "properties": {}}
         }
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "screenshot",
+            "description": "Capture the current X11 screen and save it to /tmp/aios-shot.png. Returns the file path and size.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ocr",
+            "description": "Extract text from an image using Tesseract. If no path is given, takes a screenshot first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Optional absolute path to an image. Defaults to the last screenshot."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "xdotool_type",
+            "description": "Type text into the currently focused X11 window using xdotool.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to type"}
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "xdotool_key",
+            "description": "Press a key or key combination via xdotool in the active X11 window.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Key or combination, e.g. Return, ctrl+c, alt+Tab"}
+                },
+                "required": ["key"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "xdotool_click",
+            "description": "Move the mouse to the given screen coordinates and click the left mouse button.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer", "description": "X coordinate"},
+                    "y": {"type": "integer", "description": "Y coordinate"}
+                },
+                "required": ["x", "y"]
+            }
+        }
+    },
 ]
 
 
@@ -447,7 +730,7 @@ def cloud_reasoning(args: dict, context=None) -> str:
     messages.append({"role": "user", "content": prompt})
 
     try:
-        resp = _requests.post(
+        resp = requests.post(
             endpoint,
             json={
                 "model": model,
@@ -492,6 +775,11 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "process_list": process_list,
         "cloud_reasoning": lambda **kw: cloud_reasoning(kw, context=context),
         "get_context_usage": lambda **kw: get_context_usage(kw, context=context),
+        "screenshot": screenshot,
+        "ocr": ocr,
+        "xdotool_type": xdotool_type,
+        "xdotool_key": xdotool_key,
+        "xdotool_click": xdotool_click,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
