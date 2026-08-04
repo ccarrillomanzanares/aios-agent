@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.9 - agosto 2026
+
+### fix: agente mudo (respuesta en blanco + prompt >)
+
+- **Sintoma**: el agente dejaba de responder (respuesta en blanco, prompt ">", sin ejecucion de tools) cuando el modelo devolvia tool calls largas con coordenadas de vision (p.ej. OCR TSV "805,316,5x3") y ocasionalmente sin ellas.
+- **Causa raiz**: chat.py tragaba en silencio el retorno de agent.run() (solo print() de salto de linea) -> cualquier error o "(respuesta vacia del modelo)" quedaba invisible. Ademas, si el stream del LLM se cortaba sin finish_reason (servidor cerraba a mitad de tool call), content quedaba vacio y el agente se rendia sin reintentar.
+- **Fixes**:
+  1. chat.py: el retorno de agent.run() se muestra si no vino por el stream (errores y respuesta vacia ya no son mudos).
+  2. agent.py: log crudo del stream SSE en /tmp/aios-stream.log (lineas data: + marcador END con finish_reason/chunks/tools + excepciones) para diagnostico.
+  3. agent.py: reintento unico si el stream termina sin finish_reason y sin contenido ("⚠️ Stream vacio (posible corte). Reintentando...").
+- Verificado en portatil fisico (4 Ago 2026): tras reiniciar el agente, responde con normalidad. Pendiente confirmacion a largo plazo del caso de coordenadas.
+
+# Changelog
+
 ## v3.8 - agosto 2026
 
 ### kernel de distro (#5) - hardware generico

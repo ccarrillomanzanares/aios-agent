@@ -192,8 +192,15 @@ def main():
         try:
             response = agent.run(query)
             # La respuesta ya se imprimió carácter a carácter durante el stream.
-            # Solo añadimos un salto final si el stream no lo dejó ya.
-            print()
+            # Pero si run() devolvió un error o una respuesta vacía SIN stream,
+            # chat.py lo tragaba en silencio → "respuesta en blanco + prompt >".
+            # Ahora mostramos el retorno cuando no vino por el stream.
+            if response and not response.startswith("Error") and response != "(respuesta vacía del modelo)":
+                # vino por stream (o es contenido normal); solo salto de línea
+                print()
+            else:
+                # error o respuesta vacía: mostrarlo para no quedar mudo
+                print(response or "(sin respuesta del agente)")
         except KeyboardInterrupt:
             print("\n[Interrumpido]")
             continue

@@ -144,6 +144,7 @@ class Agent:
         self.messages.append({"role": "user", "content": f"/no_think {query}"})
 
         final_response = ""
+        empty_retries = 0
         for _ in range(MAX_TURNS):
             payload = {
                 "messages": self.messages,
@@ -164,12 +165,23 @@ class Agent:
             content_chunks = []
             tool_calls_by_index = {}
             finish_reason = None
+            stream_log = None
 
             try:
+                # Log crudo del stream (diagnóstico del bug de respuesta vacía)
+                try:
+                    stream_log = open("/tmp/aios-stream.log", "a", encoding="utf-8", errors="replace")
+                    stream_log.write(f"\n--- {time.strftime('%H:%M:%S')} mode={AIOS_MODE} ---\n")
+                except Exception:
+                    stream_log = None
+
                 for raw_line in resp.iter_lines():
                     if not raw_line:
                         continue
                     line = raw_line.decode("utf-8")
+                    if stream_log:
+                        stream_log.write(line + "\n")
+                        stream_log.flush()
                     if not line.startswith("data: "):
                         continue
                     data_str = line[6:].strip()
@@ -207,8 +219,15 @@ class Agent:
                                     tool_calls_by_index[idx]["function"]["name"] += func_delta["name"]
                                 if func_delta.get("arguments"):
                                     tool_calls_by_index[idx]["function"]["arguments"] += func_delta["arguments"]
+                if stream_log:
+                    stream_log.write(f"--- END finish={finish_reason} chunks={len(content_chunks)} tools={len(tool_calls_by_index)} ---\n")
             except Exception as e:
+                if stream_log:
+                    stream_log.write(f"--- EXC {type(e).__name__}: {e} ---\n")
                 return f"Error leyendo stream del LLM: {e}"
+            finally:
+                if stream_log:
+                    stream_log.close()
 
             print()  # salto de línea tras el stream
             content = "".join(content_chunks)
@@ -217,6 +236,14 @@ class Agent:
                 tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index)]
                 msg["tool_calls"] = tool_calls
             finish = finish_reason or ""
+
+            # Stream cortado sin finish_reason y sin contenido → reintentar UNA vez
+            # (el servidor puede cerrar la conexión a mitad de una tool call larga,
+            # p.ej. con argumentos de coordenadas de visión)
+            if not finish and not content and not msg.get("tool_calls") and empty_retries < 1:
+                empty_retries += 1
+                print("\n  ⚠️ Stream vacío (posible corte). Reintentando...")
+                continue
 
             # Tool call → ejecutar y devolver resultado al LLM
             if finish == "tool_calls" or msg.get("tool_calls"):
