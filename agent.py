@@ -15,9 +15,46 @@ CLOUD_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
 MAX_TURNS = 10
-# Compression: 95% for local (32K), 50% for cloud (per-provider context_limit)
+# Compression: 95% for local (RAM-derived), 50% for cloud (per-provider context_limit)
 _LOCAL_CONTEXT = 32768
 _cloud_context = int(os.environ.get("AIOS_CLOUD_CONTEXT", "128000"))
+
+
+def _ram_gb():
+    """RAM total en GB (redondeado) desde /proc/meminfo — mismo criterio que setup.py/status.py."""
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return max(1, kb // (1024 * 1024))
+    except Exception:
+        pass
+    return 8
+
+
+def _auto_context(ram_gb):
+    """Auto-select context por RAM (espejo de setup.py auto_context)."""
+    if ram_gb <= 8:
+        return 8192
+    elif ram_gb <= 16:
+        return 32768
+    else:
+        return 65536
+
+
+# Contexto local REAL según RAM del equipo (antes hardcodeado a 32K — bug latente
+# en portátiles ≤8GB donde el servidor solo tiene 8K y la compresión usaba 32K)
+_LOCAL_CONTEXT = _auto_context(_ram_gb())
+
+# max_tokens relativo: cloud necesita margen para reasoning_content (DeepSeek gasta
+# cientos de tokens pensando; 512 se agotaba → "respuesta vacía" con finish=length);
+# local = 1/8 del contexto por RAM (deja 7/8 para system+tools+historial)
+if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
+    MAX_TOKENS = 4096
+else:
+    MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
+
 MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.50)
 SESSION_FILE = Path("data") / f"session_{os.environ.get('AIOS_MODE', 'local')}.json"
 
@@ -297,12 +334,13 @@ class Agent:
                 msg["tool_calls"] = tool_calls
             finish = finish_reason or ""
 
-            # Stream cortado sin finish_reason y sin contenido → reintentar UNA vez
-            # (el servidor puede cerrar la conexión a mitad de una tool call larga,
-            # p.ej. con argumentos de coordenadas de visión)
-            if not finish and not content and not msg.get("tool_calls") and empty_retries < 1:
+            # Stream terminó sin contenido: reintentar UNA vez si (a) se cortó sin
+            # finish_reason (conexión rota a mitad de tool call) o (b) finish=length
+            # con content vacío (el modelo agotó max_tokens solo razonando — DeepSeek
+            # reasoning_content). Con max_tokens ya ampliado esto es poco común.
+            if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1:
                 empty_retries += 1
-                print("\n  ⚠️ Stream vacío (posible corte). Reintentando...")
+                print("\n  ⚠️ Stream vacío (posible corte o razonamiento agotado). Reintentando...")
                 continue
 
             # Tool call → ejecutar y devolver resultado al LLM
