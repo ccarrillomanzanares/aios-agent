@@ -127,7 +127,7 @@ def clear():
 
 def print_box(title, lines):
     """Print a bordered menu box, centered on screen."""
-    width = max(len(l) for l in lines + [title]) + 4
+    width = max(len(l) for l in lines + [title]) + 6
     try:
         cols, rows = os.get_terminal_size()
     except OSError:
