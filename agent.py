@@ -109,6 +109,47 @@ class Agent:
         with open(SESSION_FILE, "w", encoding="utf-8") as f:
             json.dump(self.messages, f, ensure_ascii=False)
 
+    @staticmethod
+    def _sanitize_messages(msgs):
+        """Limpia el historial para que la API lo acepte (400 Bad Request si no):
+        1. Assistant con tool_calls DEBE ir seguido de tool messages con cada tool_call_id.
+           Si falta alguno, se elimina el assistant huérfano (esté donde esté).
+        2. Tool messages sin su assistant previo se eliminan.
+        3. Dos user seguidos se colapsan (se queda el último).
+        """
+        out = []
+        pending_ids = set()
+        orphan_idx = None  # índice en `out` del último assistant con tool_calls sin resolver
+        for m in msgs:
+            role = m.get("role")
+            if role == "assistant" and m.get("tool_calls"):
+                pending_ids = {tc.get("id") for tc in m["tool_calls"]}
+                orphan_idx = len(out)
+                out.append(m)
+            elif role == "tool":
+                if m.get("tool_call_id") in pending_ids:
+                    pending_ids.discard(m["tool_call_id"])
+                    if not pending_ids:
+                        orphan_idx = None  # resuelto
+                    out.append(m)
+                else:
+                    continue  # tool sin assistant previo → descartar
+            else:
+                # Llega un user/assistant normal con tool_calls sin resolver →
+                # el assistant huérfano anterior se elimina
+                if pending_ids and orphan_idx is not None:
+                    out.pop(orphan_idx)
+                    pending_ids = set()
+                    orphan_idx = None
+                if role == "user" and out and out[-1].get("role") == "user":
+                    out[-1] = m  # colapsar user consecutivos
+                else:
+                    out.append(m)
+        # Si al final quedan tool_calls sin respuesta, quitar el assistant huérfano
+        if pending_ids and orphan_idx is not None:
+            out.pop(orphan_idx)
+        return out
+
     def _load_session(self):
         """Carga el historial de la conversación anterior."""
         if SESSION_FILE.exists():
@@ -116,6 +157,7 @@ class Agent:
                 old = json.loads(SESSION_FILE.read_text())
                 # Mantener system prompt original, concatenar historial cargado
                 loaded_messages = [m for m in old if m["role"] != "system"]
+                loaded_messages = self._sanitize_messages(loaded_messages)
                 self.messages.extend(loaded_messages)
                 # Comprimir si el historial cargado es muy largo
                 texts = [m.get("content", "") for m in self.messages]
@@ -161,6 +203,9 @@ class Agent:
         final_response = ""
         empty_retries = 0
         for _ in range(MAX_TURNS):
+            # Sanitizar antes de cada POST: si una tool call quedó huérfana (stream
+            # cortado o excepción a mitad), la API devolvería 400 Bad Request.
+            self.messages = [self.messages[0]] + self._sanitize_messages(self.messages[1:])
             payload = {
                 "messages": self.messages,
                 "tools": TOOLS,
