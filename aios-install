@@ -331,6 +331,8 @@ def main():
         "  All data on the target disk will be destroyed.",
         "",
         "  ⚠️ DISCLAIMER:",
+        "  - This is an EXPERIMENTAL / BETA project. It may contain bugs,",
+        "    break unexpectedly, or behave in unpredictable ways.",
         "  - This software is provided AS IS, without warranty of any kind.",
         "  - You are solely responsible for backing up your data before",
         "    installing. The project accepts NO liability for data loss,",
