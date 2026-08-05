@@ -224,12 +224,10 @@ def setup_aios_config(target):
     print("  ~/.aios/config.yaml created")
 
 def set_passwords(target):
-    """Offer to change root/aios passwords in the installed system."""
-    print("\n  The installed system uses factory passwords: root/root, aios/aios.")
-    if not confirm("  Change them now"):
-        return False
-
+    """REQUIRED: change root/aios passwords in the installed system."""
     import getpass
+    print("\n  SECURITY: the live system uses factory passwords (root/root, aios/aios).")
+    print("  The installed system MUST have its own passwords set.")
 
     def read_new_password(user):
         while True:
@@ -258,6 +256,30 @@ def set_passwords(target):
         return False
     print("  Passwords updated.")
     return True
+
+
+def harden_ssh(target):
+    """Installed system: block root SSH with password (factory creds are public).
+    Root stays reachable via public key (authorized_keys) or local console.
+    """
+    import re
+    sshd_cfg = Path(target) / "etc" / "ssh" / "sshd_config"
+    if not sshd_cfg.exists():
+        print("  WARNING: sshd_config not found; SSH hardening skipped")
+        return
+    text = sshd_cfg.read_text()
+    for directive, value in [("PermitRootLogin", "prohibit-password"),
+                             ("PasswordAuthentication", "no"),
+                             ("KbdInteractiveAuthentication", "no")]:
+        if re.search(rf"^\s*{directive}\s", text, re.M):
+            text = re.sub(rf"^\s*{directive}\s.*$", f"{directive} {value}", text, flags=re.M)
+        else:
+            text += f"\n{directive} {value}\n"
+    sshd_cfg.write_text(text)
+    # Ensure sshd is enabled on the installed system
+    subprocess.run(["/usr/sbin/chroot", target, "systemctl", "enable", "sshd"],
+                   capture_output=True)
+    print("  SSH hardened: root only via key, password auth disabled")
 
 
 def build_disk_initrd(target, root_part):
@@ -308,8 +330,16 @@ def main():
         "  This will install the AIOS LFS live system to a disk.",
         "  All data on the target disk will be destroyed.",
         "",
+        "  ⚠️ DISCLAIMER:",
+        "  - This software is provided AS IS, without warranty of any kind.",
+        "  - You are responsible for backing up your data before installing.",
+        "  - The project accepts NO liability for data loss or damage.",
+        "  - The installed system will NOT allow root SSH with the factory",
+        "    password; you will be required to set passwords during install.",
+        "  - Report issues at the project repository (no official support).",
+        "",
     ])
-    if not confirm("Continue"):
+    if not confirm("I understand the risks. Continue"):
         print("\n  Installation aborted.\n")
         return
     disks = list_disks()
@@ -335,6 +365,7 @@ def main():
     persisted_ifaces = persist_wifi(target)
     cleanup_chroot(target)
     passwords_changed = set_passwords(target)
+    harden_ssh(target)
     run(["/usr/bin/umount", target])
     clear()
     summary = [
@@ -344,9 +375,13 @@ def main():
     ]
     if persisted_ifaces:
         summary.append(f"  WiFi config copied: {', '.join(persisted_ifaces)}")
-    if not passwords_changed:
-        summary.append("  Login: aios / aios  or  root / root")
-    summary += ["", "  Remove the installation media and reboot.", ""]
+    summary += [
+        "  SSH: root login disabled with password (key-only).",
+        "  Passwords were set during installation.",
+        "",
+        "  Remove the installation media and reboot.",
+        "",
+    ]
     print_box("INSTALLATION COMPLETE", summary)
 
 if __name__ == "__main__":
