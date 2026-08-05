@@ -282,6 +282,27 @@ def harden_ssh(target):
     print("  SSH hardened: root only via key, password auth disabled")
 
 
+def add_user_groups(target):
+    """Add 'aios' to the standard desktop groups (video/audio/input/...).
+
+    Without these, X cannot open /dev/dri/card0 (video), input devices
+    (input), or ALSA (audio) -> black screen / no keyboard / no sound.
+    Groups are created if missing (groupadd -f), so this works on any
+    hardware/installation, not just the reference laptop.
+    """
+    desktop_groups = [
+        "video", "audio", "input", "storage", "optical", "power",
+        "kvm", "render", "log", "rfkill", "disk", "cdrom", "dialout", "lp",
+    ]
+    print("  Adding aios to desktop groups:", ", ".join(desktop_groups))
+    for group in desktop_groups:
+        subprocess.run(["/usr/sbin/chroot", target, "/usr/bin/groupadd", "-f", group],
+                       capture_output=True)
+    subprocess.run(["/usr/sbin/chroot", target, "/usr/bin/usermod", "-aG",
+                    ",".join(desktop_groups), "aios"], capture_output=True)
+    print("  aios added to desktop groups (video/audio/input/...)")
+
+
 def build_disk_initrd(target, root_part):
     """Transform the live initrd into a disk-boot initrd (clear + AIOS banner)."""
     import tempfile, shutil
@@ -371,6 +392,7 @@ def main():
     cleanup_chroot(target)
     passwords_changed = set_passwords(target)
     harden_ssh(target)
+    add_user_groups(target)
     run(["/usr/bin/umount", target])
     clear()
     summary = [
