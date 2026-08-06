@@ -125,9 +125,28 @@ def clear():
     os.system("clear" if os.name == "posix" else "cls")
 
 
+def _vlen(s):
+    """Longitud VISIBLE de una cadena: quita códigos ANSI y cuenta 2 columnas
+    para caracteres de ancho doble (emoji, CJK). El len() normal sobrecuenta
+    ANSI y subcuenta ancho doble → el padding del print_box se desalinea y el
+    texto se pega a la pared derecha del rectángulo."""
+    import re, unicodedata
+    s = re.sub(r"\x1b\[[0-9;]*m", "", s)
+    total = 0
+    for ch in s:
+        if unicodedata.combining(ch):
+            continue
+        try:
+            ea = unicodedata.east_asian_width(ch)
+        except Exception:
+            ea = "N"
+        total += 2 if ea in ("W", "F") else 1
+    return total
+
+
 def print_box(title, lines):
     """Print a bordered menu box, centered on screen."""
-    width = max(len(l) for l in lines + [title]) + 6
+    width = max(_vlen(l) for l in lines + [title]) + 6
     try:
         cols, rows = os.get_terminal_size()
     except OSError:
@@ -138,10 +157,10 @@ def print_box(title, lines):
         print("\n" * vpad, end="")
     pad = " " * hpad
     print(pad + "╔" + "═" * (width - 2) + "╗")
-    print(pad + f"║  {title}{' ' * (width - 4 - len(title))}║")
+    print(pad + f"║  {title}{' ' * max(1, width - 4 - _vlen(title))}║")
     print(pad + "╠" + "═" * (width - 2) + "╣")
     for l in lines:
-        print(pad + f"║  {l}{' ' * (width - 4 - len(l))}║")
+        print(pad + f"║  {l}{' ' * max(1, width - 4 - _vlen(l))}║")
     print(pad + "╚" + "═" * (width - 2) + "╝")
 
 
