@@ -172,7 +172,7 @@ cloud:
 | `scripts/aios-session` | Arranque de sesión gráfica en la ISO: detecta si existe `~/.aios/config.yaml`, ejecuta setup en caso contrario, luego lanza `startx` → `i3` → `xterm` con el agente |
 | `scripts/launch_llama.py` | Lanzador legacy de llama-server; `chat.py` lo auto-arranca en v3.3, por lo que el servicio sigue siendo útil en background/ISO |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
-| `scripts/aios-install` | Instala ISO AIOS LFS a disco duro |
+| `aios-install` | Instala ISO AIOS LFS a disco duro |
 | `setup.py` | Wizard de instalación y arranque en la ISO. Modo local fijado a Qwen3-8B, sin descarga automática, sin selección de modelo. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK`. |
 
 ### setup.py — Cambios v3.3

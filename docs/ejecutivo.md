@@ -14,7 +14,7 @@
 | `memory.py` | Memoria procedural persistente por modo (ProcMEM). |
 | `process.py` | Gestión de procesos interactivos vía PTY. |
 | `setup.py` | Asistente de configuración inicial (local/cloud/híbrido). |
-| `scripts/aios-install` | Instalador de la ISO AIOS LFS a disco duro. |
+| `aios-install` | Instalador de la ISO AIOS LFS a disco duro. |
 | `scripts/launch_llama.py` | Lanzador de llama-server; no crea config, arranca solo en local/híbrido. |
 | `scripts/firstboot.sh` | Configuración de primer arranque. |
 | `systemd/aios-llama.service` | Servicio systemd del servidor de modelos (deshabilitado en boot). |
@@ -29,7 +29,7 @@
    - Configuración: `~/.aios/config.yaml`
    - Claves API: `~/.aios/.env`
 
-2. **Instalador a disco duro (`scripts/aios-install`)**
+2. **Instalador a disco duro (`aios-install`)**
    - Particiona GPT, formatea ext4 y copia el sistema live.
    - Instala GRUB, genera `/etc/fstab` por UUID.
    - Genera `~/.aios/config.yaml` para el usuario `aios`.

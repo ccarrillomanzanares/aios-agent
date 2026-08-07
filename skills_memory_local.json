@@ -30,5 +30,13 @@
     "hits": 1,
     "created": 1784804392.8233244,
     "last_used": 1784804392.823325
+  },
+  {
+    "key": "instalar grafana docker",
+    "query": "como instalo grafana en docker?",
+    "solution": "No tienes permisos para acceder al Docker API. Para ejecutar comandos de Docker, necesitas tener permisos de sudo o agregar tu usuario al grupo docker.\n\nPuedes hacerlo con uno de estos métodos:\n\n1. Ejecutar el comando con `sudo`:\n   ```bash\n   sudo docker run -d --name grafana -p 3000:3000 grafana/grafana\n   ```\n\n2. Agregar tu usuario al grupo docker:\n   ```bash\n   sudo usermod -aG docker $USER\n   ```\n   Luego, reinicia tu sesión o ejecuta:\n   ```bash\n   newgrp docker\n   ```\n\n¿Quieres que te ayude con cualquiera de estos métodos?",
+    "hits": 1,
+    "created": 1786047547.8149252,
+    "last_used": 1786047547.814926
   }
 ]
