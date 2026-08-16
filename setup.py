@@ -5,6 +5,10 @@ Reescrito 8 Ago 2026 (Carlos): menu estilo Wargames, sin cajas, sonido
 archivos), saludo solo al primer arranque, flujo live/install + local/cloud,
 check de internet con propuesta de WiFi (setup_wifi intacta - no cambiar).
 """
+import readline
+# Backspace fiable: cubre ^H y DEL (los dos codigos que envian los terminales)
+readline.parse_and_bind('"\\C-h": backward-delete-char')
+readline.parse_and_bind('"\\C-?": backward-delete-char')
 import getpass
 import json
 import math

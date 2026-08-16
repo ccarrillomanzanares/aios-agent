@@ -2,6 +2,10 @@
 """Interactive chat with the SRE Agent.
 Loads config from ~/.aios/config.yaml on first run.
 Supports local, cloud, and hybrid modes."""
+import readline
+# Backspace fiable: cubre ^H y DEL (los dos codigos que envian los terminales)
+readline.parse_and_bind('"\\C-h": backward-delete-char')
+readline.parse_and_bind('"\\C-?": backward-delete-char')
 import os
 import sys
 import readline
