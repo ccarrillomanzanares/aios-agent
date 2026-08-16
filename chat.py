@@ -68,7 +68,7 @@ def _start_local_model(config):
     except:
         pass
 
-    model_path = Path.home() / ".aios" / "models" / config["local"]["model"]
+    model_path = Path("/usr/local/share/aios/models") / config["local"]["model"]
     if not model_path.exists():
         print(f"  Model not found at {model_path}. Use the LLM ISO or place it manually.")
         return
@@ -76,7 +76,6 @@ def _start_local_model(config):
     ctx = config["local"]["context"]
     threads = config["local"]["threads"]
     env = os.environ.copy()
-    env["LD_LIBRARY_PATH"] = "/usr/local/lib/llama"
     port = 8083
 
     print(f"  Starting local model ({config['local']['model_name']}, CTX={ctx}, T={threads})...")
@@ -192,15 +191,8 @@ def main():
         try:
             response = agent.run(query)
             # La respuesta ya se imprimió carácter a carácter durante el stream.
-            # Pero si run() devolvió un error o una respuesta vacía SIN stream,
-            # chat.py lo tragaba en silencio → "respuesta en blanco + prompt >".
-            # Ahora mostramos el retorno cuando no vino por el stream.
-            if response and not response.startswith("Error") and response != "(respuesta vacía del modelo)":
-                # vino por stream (o es contenido normal); solo salto de línea
-                print()
-            else:
-                # error o respuesta vacía: mostrarlo para no quedar mudo
-                print(response or "(sin respuesta del agente)")
+            # Solo añadimos un salto final si el stream no lo dejó ya.
+            print()
         except KeyboardInterrupt:
             print("\n[Interrumpido]")
             continue

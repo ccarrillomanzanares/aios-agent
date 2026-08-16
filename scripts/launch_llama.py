@@ -2,9 +2,8 @@
 """Launch llama-server if config exists and mode is local."""
 import os, sys, time
 from pathlib import Path
-os.environ["LD_LIBRARY_PATH"] = "/usr/local/lib/llama:" + os.environ.get("LD_LIBRARY_PATH", "")
 CONFIG_FILE = Path.home() / ".aios" / "config.yaml"
-LLAMA_BIN = "/usr/local/bin/llama-server"
+LLAMA_BIN = "/usr/bin/llama-server"
 MODELS_DIR = Path("/usr/local/share/aios/models")
 
 def main():
