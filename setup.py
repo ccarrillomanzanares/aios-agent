@@ -784,10 +784,10 @@ def main():
     _open_audio()
     clear()
 
-    # Saludo (primer arranque)
+    # Saludo (primer arranque) - seguido directamente del menu, sin limpiar pantalla
     wg("Greetings, Professor Falken")
     time.sleep(0.4)
-    clear()
+    wg("")
 
     # Menu principal
     wg("You have just booted Artificial Intelligence Operating System.")
