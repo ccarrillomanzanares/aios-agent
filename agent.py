@@ -137,6 +137,8 @@ from memory import ProceduralMemory
 
 
 class Agent:
+    SOUND_ON = True  # typewriter sound toggle (chat.py: /sound)
+
     def __init__(self):
         self.memory = ProceduralMemory()
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -343,7 +345,7 @@ class Agent:
                             content_chunks.append(chunk)
                             for ch in chunk:
                                 print(ch, end="", flush=True)
-                                if SOUND_ON:
+                                if self.SOUND_ON:
                                     _tic()
                                 time.sleep(0.02)
                         # Tool calls fragmentadas por índice
