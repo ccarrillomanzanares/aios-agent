@@ -125,7 +125,7 @@ def main():
         model = config.get("cloud", {}).get("model")
         ctx = config.get("cloud", {}).get("context_limit", 128000)
         api_key = os.environ.get("AIOS_API_KEY", os.environ.get(CLOUD_ENV_VARS.get(provider, ""), ""))
-        endpoint = CLOUD_ENDPOINTS.get(provider, "https://api.deepseek.com/v1")
+        endpoint = config.get("cloud", {}).get("base_url") or CLOUD_ENDPOINTS.get(provider, "https://api.deepseek.com/v1/chat/completions")
         os.environ["AIOS_LLAMA_SERVER"] = endpoint
         os.environ["AIOS_API_KEY"] = api_key
         os.environ["AIOS_CLOUD_MODEL"] = model or "deepseek-chat"
@@ -154,7 +154,7 @@ def main():
         _start_local_model(config)
 
     agent = Agent()
-    mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HIBRIDO"}.get(mode, "LOCAL")
+    mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HYBRID"}.get(mode, "LOCAL")
     if mode == "local":
         model_name = config.get("local", {}).get("model_name", "Qwen3-8B-Instruct")
         threads = config.get("local", {}).get("threads", 14)
@@ -169,7 +169,7 @@ def main():
         mod = config.get("cloud", {}).get("model", "?")
         print(f"  [{mode_label}] Local + {prov}: {mod}")
     print(f"  [{mode_label}] Independent session (context not shared across modes)")
-    print('  Type your query or "exit".')
+    print('  Type your query, "exit" or "/sound" (typewriter sound toggle).')
     print("  (Local model: EN, ZH natively. ES works (tested). Other languages may work but are not guaranteed.)")
     print()
 
@@ -187,6 +187,11 @@ def main():
             agent._save_session()
             print("Goodbye!")
             break
+
+        if query.lower() == "/sound":
+            agent.SOUND_ON = not agent.SOUND_ON
+            print(f"  Typewriter sound: {'ON' if agent.SOUND_ON else 'OFF'}")
+            continue
 
         try:
             response = agent.run(query)

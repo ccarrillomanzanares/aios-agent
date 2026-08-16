@@ -1,7 +1,7 @@
 """Memoria procedural ligera para el agente SRE.
 
 Aprende soluciones de la experiencia sin modificar el LLM.
-Basado en el patrón ProcMEM (arXiv 2602.01869) y Claude Agent Skills.
+Based on the ProcMEM pattern (arXiv 2602.01869) and Claude Agent Skills.
 """
 import json
 import os
@@ -13,7 +13,7 @@ SIMILARITY_THRESHOLD = 0.75
 
 
 class ProceduralMemory:
-    """Caché procedural: query → solución, con eliminación de duplicados."""
+    """Procedural cache: query -> solution, with deduplication."""
 
     def __init__(self, path: str = None):
         self.mode = os.environ.get("AIOS_MODE", "local")
@@ -32,15 +32,15 @@ class ProceduralMemory:
         self.path.write_text(json.dumps(self.skills, ensure_ascii=False, indent=2))
 
     def _simple_sim(self, a: str, b: str) -> float:
-        """Similitud básica: intersección de palabras / unión."""
+        """Basic similarity: word intersection / union."""
         sa, sb = set(a.lower().split()), set(b.lower().split())
         if not sa or not sb:
             return 0.0
         return len(sa & sb) / len(sa | sb)
 
     def _normalize_key(self, query: str, llm_call) -> str:
-        """Usa el LLM para generar clave canónica de la consulta."""
-        prompt = f"Convierte esta consulta en una clave técnica de 2-5 palabras, solo la clave, sin explicación:\n\n{query}"
+        """Use the LLM to generate a canonical key for the query."""
+        prompt = f"Convert this query into a 2-5 word technical key, key only, no explanation:\n\n{query}"
         try:
             key = llm_call(prompt).strip().lower()
             return key if key else query.lower()
@@ -48,7 +48,7 @@ class ProceduralMemory:
             return query.lower()
 
     def find(self, query: str, llm_call) -> str | None:
-        """Busca una solución cacheada. Devuelve None si no hay."""
+        """Look up a cached solution. Returns None if missing."""
         key = self._normalize_key(query, llm_call)
         # Búsqueda exacta
         for s in self.skills:
@@ -67,7 +67,7 @@ class ProceduralMemory:
         return None
 
     def store(self, query: str, solution: str, llm_call):
-        """Guarda una nueva solución."""
+        """Store a new solution."""
         try:
             key = self._normalize_key(query, llm_call)
         except Exception:

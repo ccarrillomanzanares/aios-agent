@@ -436,11 +436,15 @@ def setup_wifi():
 # Cloud flow (heredado del setup anterior - reutilizado sin cajas)
 # ---------------------------------------------------------------------------
 
-def validate_api_key(provider, api_key):
+def validate_api_key(provider, api_key, base_url=None):
     """Test the API key with a lightweight request (hard timeout, DNS-safe)."""
-    base_url = CLOUD_ENDPOINTS.get(provider, "")
+    base_url = base_url or CLOUD_ENDPOINTS.get(provider, "")
     if not base_url:
         return True
+    # Custom endpoints (Other) come with the full chat completions URL:
+    # derive the /models URL from it for validation.
+    if "chat/completions" in base_url:
+        base_url = base_url.rsplit("/chat/completions", 1)[0]
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -476,8 +480,8 @@ PROVIDERS = [
     {
         "name": "DeepSeek",
         "models": [
-            ("deepseek-v4-flash", "deepseek-v4-flash - rapido y barato"),
-            ("deepseek-v4-pro", "deepseek-v4-pro - razonamiento profundo"),
+            ("deepseek-v4-flash", "deepseek-v4-flash - fast and cheap"),
+            ("deepseek-v4-pro", "deepseek-v4-pro - deep reasoning"),
         ],
         "env": "DEEPSEEK_API_KEY",
         "context_limit": 1048576,
@@ -485,8 +489,8 @@ PROVIDERS = [
     {
         "name": "OpenAI",
         "models": [
-            ("gpt-4o", "gpt-4o - calidad maxima"),
-            ("gpt-4o-mini", "gpt-4o-mini - economico"),
+            ("gpt-4o", "gpt-4o - maximum quality"),
+            ("gpt-4o-mini", "gpt-4o-mini - economical"),
         ],
         "env": "OPENAI_API_KEY",
         "context_limit": 128000,
@@ -494,8 +498,8 @@ PROVIDERS = [
     {
         "name": "Anthropic",
         "models": [
-            ("claude-sonnet-4", "claude-sonnet-4 - equilibrio"),
-            ("claude-haiku-3.5", "claude-haiku-3.5 - rapido"),
+            ("claude-sonnet-4", "claude-sonnet-4 - balanced"),
+            ("claude-haiku-3.5", "claude-haiku-3.5 - fast"),
         ],
         "env": "ANTHROPIC_API_KEY",
         "context_limit": 200000,
@@ -503,8 +507,8 @@ PROVIDERS = [
     {
         "name": "Google Gemini",
         "models": [
-            ("gemini-2.0-flash", "gemini-2.0-flash - rapido"),
-            ("gemini-2.0-pro", "gemini-2.0-pro - calidad"),
+            ("gemini-2.0-flash", "gemini-2.0-flash - fast"),
+            ("gemini-2.0-pro", "gemini-2.0-pro - quality"),
         ],
         "env": "GOOGLE_API_KEY",
         "context_limit": 1048576,
@@ -512,8 +516,8 @@ PROVIDERS = [
     {
         "name": "Kimi / Moonshot",
         "models": [
-            ("kimi-k2.7-code", "kimi-k2.7-code - codigo"),
-            ("kimi-k2.7-thinking", "kimi-k2.7-thinking - razonamiento"),
+            ("kimi-k2.7-code", "kimi-k2.7-code - code"),
+            ("kimi-k2.7-thinking", "kimi-k2.7-thinking - reasoning"),
         ],
         "env": "KIMI_API_KEY",
         "context_limit": 128000,
@@ -521,8 +525,8 @@ PROVIDERS = [
     {
         "name": "Ollama Cloud",
         "models": [
-            ("kimi-k2.7-code", "kimi-k2.7-code - codigo y ejecucion"),
-            ("kimi-k2.7-thinking", "kimi-k2.7-thinking - razonamiento"),
+            ("kimi-k2.7-code", "kimi-k2.7-code - code and execution"),
+            ("kimi-k2.7-thinking", "kimi-k2.7-thinking - reasoning"),
         ],
         "env": "OLLAMA_CLOUD_API_KEY",
         "context_limit": 128000,
@@ -543,15 +547,31 @@ def select_provider_and_model():
         wg("Select the cloud provider:")
         for i, p in enumerate(PROVIDERS, 1):
             wg(f"  {i}) {p['name']}")
-        wg("  8) Back")
+        wg("  8) Other (custom endpoint)")
+        wg("  9) Back")
         wg("")
         try:
-            opt = int(wg_input("  Select (1-8): "))
+            opt = int(wg_input("  Select (1-9): "))
         except ValueError:
             return None, None
 
-        if opt == 8:
+        if opt == 9:
             return None, None
+        if opt == 8:
+            wg("")
+            wg("Custom provider (Other):")
+            name = wg_input("  Provider name: ").strip()
+            if not name:
+                return None, None
+            url = wg_input("  Chat completions endpoint URL\n  (e.g. https://api.example.com/v1/chat/completions): ").strip()
+            if not url:
+                return None, None
+            model = wg_input("  Model name: ").strip()
+            if not model:
+                return None, None
+            prov = {"name": name, "models": [(model, model)], "env": "OTHER_API_KEY",
+                    "context_limit": 128000, "base_url": url}
+            return prov, model
         if opt < 1 or opt > 7:
             return None, None
 
@@ -640,6 +660,7 @@ def _write_cloud_config(prov_data, model, key):
             "provider": prov_data["name"],
             "model": model,
             "context_limit": prov_data.get("context_limit", 128000),
+            "base_url": prov_data.get("base_url"),
         },
     }
     with open(CONFIG_FILE, "w") as f:
@@ -680,7 +701,7 @@ def _cloud_flow():
             wg("No API key provided. Cancelling cloud setup.")
             return False
         wg("Testing API key...")
-        valid = validate_api_key(prov_data["name"], key)
+        valid = validate_api_key(prov_data["name"], key, prov_data.get("base_url"))
         if valid is True:
             wg("API key is valid.")
             return _write_cloud_config(prov_data, model, key)
