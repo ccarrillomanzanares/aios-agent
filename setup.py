@@ -35,7 +35,7 @@ def _open_audio():
     try:
         _AUDIO = _sp.Popen(
             ["aplay", "-q", "-f", "S16_LE", "-r", "44100", "-c", "1",
-             "--buffer-size=1024", "--period-size=1024", "-"],
+             "--buffer-size=512", "--period-size=512", "-"],
             stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         )
     except Exception:
@@ -53,15 +53,16 @@ def _close_audio():
 
 
 def _tic():
-    """Reproducir un 'tic' corto sintetizado (850 Hz, 12 ms, decaimiento)."""
+    """Reproducir un 'tic' por caracter: 850 Hz, 35 ms (>= periodo ALSA),
+    decaimiento suave -> suena individual y continuo, sin agruparse."""
     if _AUDIO is None or _AUDIO.poll() is not None:
         return
-    sr, dur, freq = 44100, 0.012, 850.0
+    sr, dur, freq = 44100, 0.035, 850.0
     n = int(sr * dur)
     pcm = bytearray()
     for i in range(n):
         t = i / sr
-        env = math.exp(-t / 0.0035)  # decaimiento rapido -> tic seco
+        env = math.exp(-t / 0.012)
         pcm += struct.pack("<h", int(12000 * env * math.sin(2 * math.pi * freq * t)))
     try:
         _AUDIO.stdin.write(bytes(pcm))
@@ -196,11 +197,15 @@ def _get_own_ip(iface):
     return m.group(1) if m else None
 
 
-def _iface_has_internet(iface=None, timeout=5):
-    """Check de conectividad por TCP puro (sin DNS, sin HTTP): conecta con
-    1.1.1.1:443 / 8.8.8.8:53. Un fallo de DNS no da falsos negativos."""
+def _iface_has_internet(iface=None, timeout=4):
+    """Check de conectividad: IPs directas (sin DNS) + dominios reales (con DNS).
+    Un destino filtrado por la red (p.ej. 1.1.1.1:443) no da falso negativo."""
     import socket
-    for host, port in (("1.1.1.1", 443), ("8.8.8.8", 53), ("1.0.0.1", 443)):
+    targets = [
+        ("1.1.1.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 53),
+        ("google.com", 443), ("google.es", 443), ("archlinux.org", 443),
+    ]
+    for host, port in targets:
         try:
             s = socket.create_connection((host, port), timeout=timeout)
             s.close()
