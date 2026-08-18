@@ -197,6 +197,38 @@ def main():
             print(f"  Typewriter sound: {'ON' if agent.SOUND_ON else 'OFF'}")
             continue
 
+        if query.lower().startswith("/theme"):
+            themes = {
+                "wargames": "Wargames - classic dark green (default)",
+                "amber": "Amber - old terminal phosphor",
+                "white": "White - classic",
+                "cyan": "Cyan - modern",
+            }
+            names = list(themes)
+            print("  Color themes:")
+            for i, n in enumerate(names, 1):
+                print(f"    {i}) {themes[n]}")
+            opt = input("  Select (1-4, Enter=keep): ").strip()
+            try:
+                idx = int(opt) - 1
+            except ValueError:
+                idx = -1
+            if 0 <= idx < len(names):
+                import yaml
+                cfg_path = Path.home() / ".aios" / "config.yaml"
+                try:
+                    with open(cfg_path) as f:
+                        cfg = yaml.safe_load(f) or {}
+                    cfg["theme"] = names[idx]
+                    with open(cfg_path, "w") as f:
+                        yaml.dump(cfg, f, default_flow_style=False)
+                    print(f"  Theme set to {names[idx]}. Restart AIOS to apply.")
+                except Exception as e:
+                    print(f"  Error updating theme: {e}")
+            else:
+                print("  Theme unchanged.")
+            continue
+
         try:
             response = agent.run(query)
             # La respuesta ya se imprimió carácter a carácter durante el stream.

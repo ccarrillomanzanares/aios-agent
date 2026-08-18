@@ -142,6 +142,31 @@ LOCAL_MODELS = [
     },
 ]
 
+# Color themes (aios-xterm reads the config and applies the colors)
+THEMES = {
+    "wargames": ("#006400", "Wargames - classic dark green (default)"),
+    "amber": ("#ffb000", "Amber - old terminal phosphor"),
+    "white": ("#ffffff", "White - classic"),
+    "cyan": ("#00cccc", "Cyan - modern"),
+}
+
+
+def _select_theme():
+    """Ask the user for a color theme (Wargames style). Returns the theme name."""
+    names = list(THEMES)
+    wg("")
+    wg("Select the color theme:")
+    for i, n in enumerate(names, 1):
+        wg(f"  {i}) {THEMES[n][1]}")
+    wg("")
+    try:
+        opt = int(wg_input("> ").strip() or "1")
+    except ValueError:
+        opt = 1
+    if 1 <= opt <= len(names):
+        return names[opt - 1]
+    return names[0]
+
 
 def _run(cmd, **kwargs):
     if isinstance(cmd, str):
@@ -620,8 +645,8 @@ def _legacy_box(title, lines):
 # Flujos
 # ---------------------------------------------------------------------------
 
-def _write_local_config():
-    """Escribir config.yaml en modo local y arrancar el servicio llama."""
+def _write_local_config(theme="wargames"):
+    """Write config.yaml in local mode and start the llama service."""
     import yaml
     model_path = Path("/usr/local/share/aios/models") / LOCAL_MODELS[0]["file"]
     if not model_path.exists():
@@ -633,6 +658,7 @@ def _write_local_config():
     ctx = auto_context(ram_gb)
     config = {
         "mode": "local",
+        "theme": theme,
         "local": {
             "model": LOCAL_MODELS[0]["file"],
             "model_name": LOCAL_MODELS[0]["name"],
@@ -649,11 +675,12 @@ def _write_local_config():
     return True
 
 
-def _write_cloud_config(prov_data, model, key):
-    """Escribir config cloud + API key en .env."""
+def _write_cloud_config(prov_data, model, key, theme="wargames"):
+    """Write cloud config + API key in .env."""
     import yaml
     config = {
         "mode": "cloud",
+        "theme": theme,
         "local": {
             "model": LOCAL_MODELS[0]["file"],
             "model_name": LOCAL_MODELS[0]["name"],
@@ -683,8 +710,8 @@ def _write_cloud_config(prov_data, model, key):
     return True
 
 
-def _cloud_flow():
-    """Flujo cloud: firefox con el proveedor + provider + API key + validacion."""
+def _cloud_flow(theme="wargames"):
+    """Cloud flow: firefox with the provider + provider + API key + validation."""
     prov_data, model = select_provider_and_model()
     if not (prov_data and model):
         return False
@@ -708,14 +735,14 @@ def _cloud_flow():
         valid = validate_api_key(prov_data["name"], key, prov_data.get("base_url"))
         if valid is True:
             wg("API key is valid.")
-            return _write_cloud_config(prov_data, model, key)
+            return _write_cloud_config(prov_data, model, key, theme)
         elif valid is False:
             wg("Invalid API key. Check and try again.")
             continue
         else:
             retry = wg_input("(Could not verify API key. Use anyway? (Y/n): ").strip().lower()
             if retry != "n":
-                return _write_cloud_config(prov_data, model, key)
+                return _write_cloud_config(prov_data, model, key, theme)
             continue
 
 
@@ -736,7 +763,8 @@ def _live_flow(online):
             wg("Cloud mode requires internet. Falling back to LOCAL.")
             m = "1"
         else:
-            if _cloud_flow():
+            theme = _select_theme()
+            if _cloud_flow(theme):
                 wg("Setup complete. Starting the AIOS agent...")
                 return
             wg("Cloud setup cancelled. Falling back to LOCAL.")
@@ -744,7 +772,8 @@ def _live_flow(online):
 
     wg("")
     wg("LOCAL mode - Qwen3-8B (Q4_K_M)")
-    if _write_local_config():
+    theme = _select_theme()
+    if _write_local_config(theme):
         wg("Setup complete. Starting the AIOS agent...")
 
 
@@ -761,18 +790,22 @@ def _install_flow(online):
     m = wg_input("> ")
 
     mode = "local"
+    theme = "wargames"
     if m == "2":
         if not online:
             wg("Cloud mode requires internet. Falling back to LOCAL.")
         else:
-            if _cloud_flow():
+            theme = _select_theme()
+            if _cloud_flow(theme):
                 mode = "cloud"
             else:
                 wg("Cloud setup cancelled. Falling back to LOCAL.")
+    else:
+        theme = _select_theme()
 
     wg("")
     wg("Launching the installer...")
-    ret = _sp.run(["sudo", "aios-install", "--mode", mode])
+    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme])
     if ret.returncode != 0:
         wg("Installation aborted or failed.")
         wg_input("Press Enter to return to the menu...")
