@@ -291,6 +291,27 @@ def set_passwords(target):
     return True
 
 
+def disable_autologin(target):
+    """Installed system: remove the live autologin override (getty@tty1).
+    The live ISO keeps autologin; the installed system requires login."""
+    p = Path(target) / "etc/systemd/system/getty@tty1.service.d/noclear.conf"
+    if p.exists():
+        p.unlink()
+        print("  Autologin removed (installed system requires login)")
+
+
+def harden_sudo(target):
+    """Installed system: sudo requires a password for ALL users (including aios).
+    The live ISO keeps NOPASSWD for the setup wizard flow."""
+    import glob as _glob
+    for sudoers in _glob.glob(str(Path(target) / "etc/sudoers.d/*")):
+        txt = sudoers.read_text() if sudoers.is_file() else ""
+        new = "\n".join(l for l in txt.splitlines() if "NOPASSWD" not in l)
+        if new != txt:
+            sudoers.write_text(new)
+            print(f"  sudo NOPASSWD removed ({Path(sudoers).name}) - password required")
+
+
 def harden_ssh(target):
     """Installed system: block root SSH with password (factory creds are public).
     Root stays reachable via public key (authorized_keys) or local console.
@@ -435,6 +456,8 @@ def main():
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
+    disable_autologin(target)
+    harden_sudo(target)
     setup_aios_config(target, mode, theme)
     persisted_ifaces = persist_wifi(target)
     cleanup_chroot(target)
