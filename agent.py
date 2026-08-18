@@ -18,7 +18,9 @@ _AUDIO = None
 
 def _open_audio():
     """Open a persistent aplay process (no files: synthesized PCM).
-    Minimal ALSA buffer/period so each tic sounds immediately."""
+    Minimal ALSA buffer/period so each tic sounds immediately.
+    Warm-up: 0.2 s of silence so ALSA opens the device BEFORE the first
+    real tic (otherwise the first tics pile up in the pipe and sound late)."""
     global _AUDIO
     try:
         import subprocess as _sp
@@ -27,6 +29,13 @@ def _open_audio():
              "--buffer-size=512", "--period-size=512", "-"],
             stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         )
+        # Warm-up: force the device open (0.2 s of silence) before first real tic
+        try:
+            _AUDIO.stdin.write(b"\x00" * 17640)
+            _AUDIO.stdin.flush()
+            time.sleep(0.1)
+        except Exception:
+            pass
     except Exception:
         _AUDIO = None
 

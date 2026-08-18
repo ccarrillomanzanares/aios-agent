@@ -8,6 +8,7 @@ readline.parse_and_bind('"\\C-h": backward-delete-char')
 readline.parse_and_bind('"\\C-?": backward-delete-char')
 import os
 import sys
+import time
 import readline
 import atexit
 from pathlib import Path
@@ -106,6 +107,18 @@ def _start_local_model(config):
     print("  Warning: local model may not have started in time.")
 
 
+def _greet():
+    """Greetings, Professor Falken - typewriter style, on every agent start."""
+    from agent import _tic, _open_audio
+    _open_audio()
+    for ch in "Greetings, Professor Falken":
+        print(ch, end="", flush=True)
+        _tic()
+        time.sleep(0.05)
+    print()
+    print()
+
+
 def main():
     config = load_or_setup()
     mode = config.get("mode", "local")
@@ -152,7 +165,6 @@ def main():
                 os.environ[env_var] = api_key
 
     from agent import Agent
-
     # Start local model server if needed
     if mode in ("local", "hybrid"):
         _start_local_model(config)
@@ -176,6 +188,7 @@ def main():
     print('  Type your query, "exit" or "/sound" (typewriter sound toggle).')
     print("  (Local model: EN, ZH natively. ES works (tested). Other languages may work but are not guaranteed.)")
     print()
+    _greet()
 
     while True:
         try:

@@ -33,15 +33,25 @@ _TICK_MS = 0.05        # 20 chars/s ~= 3x velocidad de tecleo humano
 
 def _open_audio():
     """Abrir aplay persistente por stdin (sin archivos: PCM sintetizado).
-    Buffer/period minimos (1024 frames ~= 23 ms) para que el tic suene
-    inmediatamente, por caracter (el buffer por defecto acumulaba ~1 s)."""
+    Buffer/period minimos (512 frames ~= 11.6 ms) para que el tic suene
+    inmediatamente. Warm-up: 0.2 s de silencio para que ALSA abra el
+    dispositivo ANTES del primer tic (si no, los primeros tics se acumulan
+    en el pipe y suenan tarde)."""
     global _AUDIO
     try:
+        import subprocess as _sp
         _AUDIO = _sp.Popen(
             ["aplay", "-q", "-f", "S16_LE", "-r", "44100", "-c", "1",
              "--buffer-size=512", "--period-size=512", "-"],
             stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         )
+        # Warm-up: force the device open (0.2 s of silence) before first real tic
+        try:
+            _AUDIO.stdin.write(b"\x00" * 17640)
+            _AUDIO.stdin.flush()
+            time.sleep(0.1)
+        except Exception:
+            pass
     except Exception:
         _AUDIO = None
 
