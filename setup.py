@@ -853,11 +853,11 @@ def main():
     wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
     wg("There is no warranty of any kind, expressed or implied.")
     wg("")
-    choice = wg_input("> ")
-
-    if choice not in ("1", "2"):
-        wg("Invalid option. Continuing with live mode.")
-        choice = "1"
+    while True:
+        choice = wg_input("> ")
+        if choice in ("1", "2"):
+            break
+        wg("Invalid option. Please choose 1 or 2.")
 
     # Check de internet
     wg("")
