@@ -852,7 +852,7 @@ def main():
     wg("Note: AIOS has only been tested on machines without multi-boot setups.")
     wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
     wg("There is no warranty of any kind, expressed or implied.")
-    wg("Press Super+F1 to view the keyboard shortcuts.")
+    wg("Press Super/Win+F1 to view the keyboard shortcuts.")
     wg("")
     while True:
         choice = wg_input("> ")
