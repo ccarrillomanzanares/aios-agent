@@ -34,6 +34,11 @@ def ask(question, default=""):
 def confirm(question):
     return ask(f"{question} (y/N)", "n").lower() in ("y", "yes")
 
+
+def ask_typed(question, expected):
+    """Strong confirmation: the user must type the exact expected word."""
+    return ask(f"{question} (type '{expected}' to confirm)").strip().lower() == expected.lower()
+
 def _vlen(s):
     """Longitud VISIBLE: quita ANSI, cuenta 2 columnas para ancho doble (emoji/CJK).
     len() sobrecuenta ANSI y subcuenta ancho doble → texto pegado a la pared."""
@@ -446,7 +451,7 @@ def main():
     if not confirm("WARNING: This will DESTROY all data on this disk"):
         print("\n  Installation aborted.\n")
         return
-    if not confirm("FINAL CONFIRMATION: this will DESTROY ALL DATA on this disk"):
+    if not ask_typed("FINAL CONFIRMATION: this will DESTROY ALL DATA on this disk", "format disk"):
         print("\n  Installation aborted.\n")
         return
     root_part = partition_and_format(disk["name"])
