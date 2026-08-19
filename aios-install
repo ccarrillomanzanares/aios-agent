@@ -303,13 +303,14 @@ def disable_autologin(target):
 def harden_sudo(target):
     """Installed system: sudo requires a password for %wheel group users (including aios).
     The live ISO keeps NOPASSWD for the setup wizard flow."""
-    import glob as _glob
-    for sudoers in _glob.glob(str(Path(target) / "etc/sudoers.d/*")):
-        txt = sudoers.read_text() if sudoers.is_file() else ""
+    for sudoers in Path(target).glob("etc/sudoers.d/*"):
+        if not sudoers.is_file():
+            continue
+        txt = sudoers.read_text()
         new = "\n".join(l for l in txt.splitlines() if "NOPASSWD" not in l)
         if new != txt:
             sudoers.write_text(new)
-            print(f"  sudo NOPASSWD removed ({Path(sudoers).name}) - %wheel users need their password")
+            print(f"  sudo NOPASSWD removed ({sudoers.name}) - %wheel users need their password")
 
 
 def harden_ssh(target):
@@ -475,6 +476,7 @@ def main():
     print("  Passwords were set during installation.")
     print("")
     print("  Remove the installation media and reboot.")
+    print("  Press Super+F1 after boot to view the keyboard shortcuts.")
     print("")
 
 if __name__ == "__main__":
