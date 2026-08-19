@@ -446,6 +446,9 @@ def main():
     if not confirm("WARNING: This will DESTROY all data on this disk"):
         print("\n  Installation aborted.\n")
         return
+    if not confirm("FINAL CONFIRMATION: this will DESTROY ALL DATA on this disk"):
+        print("\n  Installation aborted.\n")
+        return
     root_part = partition_and_format(disk["name"])
     target = "/mnt/target"
     Path(target).mkdir(parents=True, exist_ok=True)
