@@ -1,0 +1,17 @@
+#!/bin/bash
+# AIOS terminal wrapper: launches xterm with the color theme from config.yaml.
+# Theme is set with the setup wizard or the /theme command in the chat.
+# Default: wargames (dark green).
+CFG="$HOME/.aios/config.yaml"
+theme="wargames"
+if [ -f "$CFG" ]; then
+    t=$(grep -m1 '^theme:' "$CFG" | awk '{print $2}' | tr -d '"' | tr -d "'")
+    [ -n "$t" ] && theme="$t"
+fi
+case "$theme" in
+    amber)  FG="#ffb000" ;;
+    white)  FG="#ffffff" ;;
+    cyan)   FG="#00cccc" ;;
+    *)      FG="#006400" ;;  # wargames (default)
+esac
+exec /usr/bin/xterm -fa "Adwaita Mono" -fs 11 -bg black -fg "$FG" -cr "$FG" -sb -sr -sl 2000 "$@"
