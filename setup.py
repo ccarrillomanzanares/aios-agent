@@ -792,6 +792,7 @@ def _live_flow(online):
         else:
             theme = _select_theme()
             if _cloud_flow(theme):
+                _sp.run(["aios-theme", theme], capture_output=True)
                 wg("Setup complete. Starting the AIOS agent...")
                 return
             wg("Cloud setup cancelled. Falling back to LOCAL.")
@@ -801,6 +802,7 @@ def _live_flow(online):
     wg("LOCAL mode - Qwen3-8B (Q4_K_M)")
     theme = _select_theme()
     if _write_local_config(theme):
+        _sp.run(["aios-theme", theme], capture_output=True)
         wg("Setup complete. Starting the AIOS agent...")
 
 

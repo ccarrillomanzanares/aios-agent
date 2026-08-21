@@ -1,0 +1,67 @@
+#!/bin/bash
+# aios-theme <wargames|amber|white|cyan>
+# Aplica el tema de color a TODO AIOS: config.yaml, colores i3 (client.* + barra)
+# y recarga i3. Las xterms ya lo aplican via aios-xterm (lee config.yaml).
+CFG="$HOME/.aios/config.yaml"
+I3DIR="$HOME/.config/i3"
+THEME="$1"
+
+case "$THEME" in
+    amber|white|cyan|wargames) ;;
+    *) echo "Temas: wargames amber white cyan"; exit 1 ;;
+esac
+
+# 1. Escribir theme en config.yaml (preserva el resto)
+python3 - "$THEME" <<'EOF'
+import sys, yaml
+from pathlib import Path
+p = Path.home() / ".aios" / "config.yaml"
+cfg = yaml.safe_load(p.read_text()) if p.exists() else {}
+cfg["theme"] = sys.argv[1]
+p.write_text(yaml.dump(cfg, default_flow_style=False))
+EOF
+
+# 2. Generar colors.conf para i3 segun el tema
+python3 - "$THEME" <<'EOF'
+import sys
+from pathlib import Path
+t = sys.argv[1]
+# (texto, separador, fondo focused, fondo inactive, borde inactive)
+P = {
+    "wargames": ("#006400", "#003300", "#002200", "#000000", "#005500"),
+    "amber":    ("#ffb000", "#885500", "#332200", "#000000", "#775500"),
+    "white":    ("#ffffff", "#888888", "#333333", "#000000", "#666666"),
+    "cyan":     ("#00cccc", "#006666", "#003333", "#000000", "#009999"),
+}
+txt, sep, fbg, ubg, iborder = P[t]
+conf = f"""# generado por aios-theme ({t}) — no editar a mano
+client.focused          {txt} {fbg} {txt} {txt}
+client.focused_inactive {iborder} {ubg} {txt} {txt}
+client.unfocused        {iborder} {ubg} {txt} {txt}
+client.urgent           #ff0000 #220000 {txt} {txt}
+client.placeholder      {iborder} {ubg} {txt} {txt}
+client.background       #000000
+
+bar {{
+    position bottom
+    status_command python3 {Path.home()}/.config/i3/status.py
+    colors {{
+        background #000000
+        statusline {txt}
+        separator {sep}
+        focused_workspace  #000000 {txt} {txt}
+        active_workspace   #000000 {fbg} {txt}
+        inactive_workspace #000000 {ubg} {txt}
+        urgent_workspace   #000000 #ff0000 {txt}
+        binding_mode       #000000 {txt} {txt}
+    }}
+}}
+"""
+Path.home().joinpath(".config/i3/colors.conf").write_text(conf)
+EOF
+
+# 3. Reiniciar la barra: matar status.py (i3 lo relanza en el reload) + recargar i3
+pkill -f "config/i3/status.py" 2>/dev/null
+i3-msg reload >/dev/null 2>&1
+
+echo "Theme $THEME applied."

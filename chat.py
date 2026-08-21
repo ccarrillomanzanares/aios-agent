@@ -227,17 +227,12 @@ def main():
             except ValueError:
                 idx = -1
             if 0 <= idx < len(names):
-                import yaml
-                cfg_path = Path.home() / ".aios" / "config.yaml"
-                try:
-                    with open(cfg_path) as f:
-                        cfg = yaml.safe_load(f) or {}
-                    cfg["theme"] = names[idx]
-                    with open(cfg_path, "w") as f:
-                        yaml.dump(cfg, f, default_flow_style=False)
-                    print(f"  Theme set to {names[idx]}. Restart AIOS to apply.")
-                except Exception as e:
-                    print(f"  Error updating theme: {e}")
+                import subprocess
+                r = subprocess.run(["aios-theme", names[idx]], capture_output=True, text=True)
+                if r.returncode == 0:
+                    print(f"  Theme set to {names[idx]} (applied to i3 + terminals).")
+                else:
+                    print(f"  Theme saved, but could not apply: {r.stderr.strip()}")
             else:
                 print("  Theme unchanged.")
             continue
