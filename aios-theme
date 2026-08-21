@@ -2,6 +2,7 @@
 # aios-theme <wargames|amber|white|cyan>
 # Aplica el tema de color a TODO AIOS: config.yaml, colores i3 (client.* + barra)
 # y recarga i3. Las xterms ya lo aplican via aios-xterm (lee config.yaml).
+set -e  # falla ruidoso si algo no se puede escribir (leccion 21 Ago: exit 0 falso)
 CFG="$HOME/.aios/config.yaml"
 I3DIR="$HOME/.config/i3"
 THEME="$1"
