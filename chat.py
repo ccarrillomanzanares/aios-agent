@@ -107,11 +107,24 @@ def _start_local_model(config):
     print("  Warning: local model may not have started in time.")
 
 
+WARGAMES_QUOTES = [
+    "Greetings, Professor Falken",
+    "Shall we play a game?",
+    "Would you prefer a nice game of chess?",
+    "A strange game. The only winning move is not to play.",
+    "How about Global Thermonuclear War?",
+    "What's the difference?",
+    "To win the game.",
+    "You are a hard man to reach.",
+]
+
+
 def _greet():
-    """Greetings, Professor Falken - typewriter style, on every agent start."""
+    """Frase de Wargames (rotativa) - typewriter style, on every agent start."""
+    import random
     from agent import _tic, _open_audio
     _open_audio()
-    for ch in "Greetings, Professor Falken":
+    for ch in random.choice(WARGAMES_QUOTES):
         print(ch, end="", flush=True)
         _tic()
         time.sleep(0.05)

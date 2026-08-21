@@ -13,6 +13,7 @@ import getpass
 import json
 import math
 import os
+import random
 import re
 import shlex
 import struct
@@ -159,6 +160,18 @@ THEMES = {
     "white": ("#ffffff", "White - classic"),
     "cyan": ("#00cccc", "Cyan - modern"),
 }
+
+# Frases miticas de Wargames (1983) - saludo rotativo
+WARGAMES_QUOTES = [
+    "Greetings, Professor Falken",
+    "Shall we play a game?",
+    "Would you prefer a nice game of chess?",
+    "A strange game. The only winning move is not to play.",
+    "How about Global Thermonuclear War?",
+    "What's the difference?",
+    "To win the game.",
+    "You are a hard man to reach.",
+]
 
 
 def _select_theme():
@@ -858,8 +871,8 @@ def main():
     _open_audio()
     clear()
 
-    # Saludo (primer arranque) - seguido directamente del menu, sin limpiar pantalla
-    wg("Greetings, Professor Falken")
+    # Saludo (primer arranque) - frase de Wargames rotativa, seguido del menu
+    wg(random.choice(WARGAMES_QUOTES))
     time.sleep(0.4)
     wg("")
 
