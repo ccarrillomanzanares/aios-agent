@@ -169,13 +169,15 @@ def _select_theme():
     for i, n in enumerate(names, 1):
         wg(f"  {i}) {THEMES[n][1]}")
     wg("")
-    try:
-        opt = int(wg_input("> ").strip() or "1")
-    except ValueError:
-        opt = 1
-    if 1 <= opt <= len(names):
-        return names[opt - 1]
-    return names[0]
+    while True:
+        raw = wg_input("> ").strip()
+        try:
+            opt = int(raw) if raw else 1
+        except ValueError:
+            opt = -1
+        if 1 <= opt <= len(names):
+            return names[opt - 1]
+        wg(f"Invalid option. Choose 1-{len(names)}.")
 
 
 def _run(cmd, **kwargs):
@@ -592,7 +594,8 @@ def select_provider_and_model():
         try:
             opt = int(wg_input("  Select (1-9): "))
         except ValueError:
-            return None, None
+            wg("Invalid option. Choose 1-9.")
+            continue
 
         if opt == 9:
             return None, None
@@ -601,18 +604,22 @@ def select_provider_and_model():
             wg("Custom provider (Other):")
             name = wg_input("  Provider name: ").strip()
             if not name:
-                return None, None
+                wg("Provider name cannot be empty.")
+                continue
             url = wg_input("  Chat completions endpoint URL\n  (e.g. https://api.example.com/v1/chat/completions): ").strip()
             if not url:
-                return None, None
+                wg("Endpoint URL cannot be empty.")
+                continue
             model = wg_input("  Model name: ").strip()
             if not model:
-                return None, None
+                wg("Model name cannot be empty.")
+                continue
             prov = {"name": name, "models": [(model, model)], "env": "OTHER_API_KEY",
                     "context_limit": 128000, "base_url": url}
             return prov, model
         if opt < 1 or opt > 7:
-            return None, None
+            wg("Invalid option. Choose 1-9.")
+            continue
 
         prov = PROVIDERS[opt - 1]
 
@@ -625,21 +632,26 @@ def select_provider_and_model():
                 return None, None
             return prov, model
 
-        wg("")
-        for i, m in enumerate(prov["models"]):
-            wg(f"  {chr(97 + i)}) {m[1]}")
-        wg("  q) Back")
-        wg("")
-        opt2 = wg_input("  Select (a-b, q): ").strip().lower()
+        while True:
+            wg("")
+            for i, m in enumerate(prov["models"]):
+                wg(f"  {chr(97 + i)}) {m[1]}")
+            wg("  q) Back")
+            wg("")
+            opt2 = wg_input("  Select (a-b, q): ").strip().lower()
 
-        if opt2 == "q":
-            return None, None
+            if opt2 == "q":
+                return None, None
+            if len(opt2) != 1:
+                wg("Invalid option.")
+                continue
 
-        idx = ord(opt2) - 97
-        if idx < 0 or idx >= len(prov["models"]):
-            return None, None
+            idx = ord(opt2) - 97
+            if idx < 0 or idx >= len(prov["models"]):
+                wg(f"Invalid option. Choose a-{chr(96 + len(prov['models']))}, or q.")
+                continue
 
-        return prov, prov["models"][idx][0]
+            return prov, prov["models"][idx][0]
 
 
 def _legacy_box(title, lines):
@@ -767,7 +779,11 @@ def _live_flow(online):
     wg("     Note: runs slow, about human typing speed.")
     wg("  2) CLOUD - an external model via API")
     wg("")
-    m = wg_input("> ")
+    while True:
+        m = wg_input("> ")
+        if m in ("1", "2"):
+            break
+        wg("Invalid option. Please choose 1 or 2.")
 
     if m == "2":
         if not online:
@@ -799,20 +815,23 @@ def _install_flow(online):
     wg("     Note: runs slow, about human typing speed.")
     wg("  2) CLOUD - an external model via API")
     wg("")
-    m = wg_input("> ")
+    while True:
+        m = wg_input("> ")
+        if m in ("1", "2"):
+            break
+        wg("Invalid option. Please choose 1 or 2.")
 
     mode = "local"
     theme = "wargames"
-    if m == "2":
-        if not online:
-            wg("Cloud mode requires internet. Falling back to LOCAL.")
+    if m == "2" and not online:
+        wg("Cloud mode requires internet. Falling back to LOCAL.")
+    if m == "2" and online:
+        theme = _select_theme()
+        if _cloud_flow(theme):
+            mode = "cloud"
         else:
-            theme = _select_theme()
-            if _cloud_flow(theme):
-                mode = "cloud"
-            else:
-                wg("Cloud setup cancelled. Falling back to LOCAL.")
-    else:
+            wg("Cloud setup cancelled. Falling back to LOCAL.")
+    if mode != "cloud":
         theme = _select_theme()
 
     wg("")
@@ -823,7 +842,7 @@ def _install_flow(online):
         wg_input("Press Enter to return to the menu...")
         return
 
-    wg("Installation complete. WiFi settings have been copied to the disk.")
+    wg("Installation complete. Remove the installation media and reboot.")
     again = wg_input("Reboot now? (y/N): ").strip().lower()
     if again == "y":
         _sp.run(["sudo", "reboot"])

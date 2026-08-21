@@ -29,7 +29,7 @@ def ask(question, default=""):
         return input(f"  {question}{suffix}: ").strip() or default
     except (EOFError, KeyboardInterrupt):
         print()
-        sys.exit(0)
+        sys.exit(1)
 
 def confirm(question):
     return ask(f"{question} (y/N)", "n").lower() in ("y", "yes")
@@ -99,7 +99,7 @@ def select_disk(disks):
         choice = ask("Select disk (e.g. sda, nvme0n1)", "")
         if not choice:
             print("\n  Aborted.")
-            sys.exit(0)
+            sys.exit(1)
         for d in disks:
             if d["name"] == choice:
                 return d
@@ -419,19 +419,19 @@ def main():
     print("")
     if not confirm("I understand the risks. Continue"):
         print("\n  Installation aborted.\n")
-        return
+        sys.exit(1)
     disks = list_disks()
     if not disks:
         print("\n  No disks found.\n")
-        return
+        sys.exit(1)
     disk = select_disk(disks)
     print(f"\n  Selected: /dev/{disk['name']} ({disk['size']})")
     if not confirm("WARNING: This will DESTROY all data on this disk"):
         print("\n  Installation aborted.\n")
-        return
+        sys.exit(1)
     if not ask_typed("FINAL CONFIRMATION: this will DESTROY ALL DATA on this disk", "format disk"):
         print("\n  Installation aborted.\n")
-        return
+        sys.exit(1)
     root_part = partition_and_format(disk["name"])
     target = "/mnt/target"
     Path(target).mkdir(parents=True, exist_ok=True)
