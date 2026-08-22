@@ -320,6 +320,30 @@ def harden_ssh(target):
     print("  SSH hardened: root only via key, password auth disabled")
 
 
+def harden_login(target):
+    """Installed system: require password for sudo and for console login.
+    The LIVE keeps autologin + NOPASSWD; only the disk is hardened.
+    MUST run after set_passwords() (aios needs a password for sudo)."""
+    # 1. sudo: remove the NOPASSWD file for wheel (file-based, no globs —
+    #    the 19-Ago lesson: globbing sudoers.d broke the installer)
+    sudo_np = Path(target) / "etc/sudoers.d/wheel-nopasswd"
+    if sudo_np.exists():
+        sudo_np.unlink()
+    # 2. console login: remove the autologin override of getty@tty1
+    autologin = Path(target) / "etc/systemd/system/getty@tty1.service.d/noclear.conf"
+    if autologin.exists():
+        autologin.unlink()
+    # 3. reload units + verify sudoers syntax
+    subprocess.run(["/usr/sbin/chroot", target, "systemctl", "daemon-reload"],
+                   capture_output=True)
+    chk = subprocess.run(["/usr/sbin/chroot", target, "/usr/sbin/visudo", "-c"],
+                         capture_output=True, text=True)
+    if chk.returncode != 0:
+        print(f"  WARNING: visudo check failed: {chk.stderr.strip()}")
+    else:
+        print("  Login hardened: sudo needs password, console login requires user/password")
+
+
 def add_user_groups(target):
     """Add 'aios' to the standard desktop groups (video/audio/input/...).
 
@@ -447,6 +471,7 @@ def main():
     persisted_ifaces = persist_wifi(target)
     cleanup_chroot(target)
     passwords_changed = set_passwords(target)
+    harden_login(target)
     harden_ssh(target)
     add_user_groups(target)
     run(["/usr/bin/umount", target])
@@ -457,6 +482,7 @@ def main():
     if persisted_ifaces:
         print(f"  WiFi config copied: {', '.join(persisted_ifaces)}")
     print("  SSH: root login disabled with password (key-only).")
+    print("  Login: console requires user/password; sudo requires password.")
     print("  Passwords were set during installation.")
     print("")
     print("  Remove the installation media and reboot.")
