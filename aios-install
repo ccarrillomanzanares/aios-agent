@@ -275,6 +275,25 @@ def apply_theme(target, theme):
         if p.exists():
             os.chown(p, uid, gid)
 
+def persist_ntp(target):
+    """Copia la config NTP del live (si se configuro) y habilita systemd-timesyncd en el disco."""
+    src = "/etc/systemd/timesyncd.conf"
+    try:
+        if not Path(src).exists():
+            return
+        if "NTP=" not in Path(src).read_text():
+            return
+        dst = Path(target + src)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with open(src, "rb") as f:
+            data = f.read()
+        with open(dst, "wb") as f:
+            f.write(data)
+        run(["chroot", target, "systemctl", "enable", "systemd-timesyncd"], check=False)
+        print("  NTP config copied from live + timesyncd enabled")
+    except Exception as e:
+        print(f"  WARN: persist_ntp: {e}")
+
 def set_passwords(target):
     """REQUIRED: change root/aios passwords in the installed system."""
     import getpass
@@ -509,6 +528,7 @@ def main():
     setup_aios_config(target, mode, theme)
     apply_theme(target, theme)
     persisted_ifaces = persist_wifi(target)
+    persist_ntp(target)
     cleanup_chroot(target)
     passwords_changed = set_passwords(target)
     harden_login(target)

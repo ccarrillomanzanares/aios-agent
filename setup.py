@@ -863,6 +863,24 @@ def _install_flow(online):
         _sp.run(["sudo", "reboot"])
 
 
+def setup_ntp():
+    """Configurar hora automatica via servidor NTP externo (systemd-timesyncd)."""
+    print_box("NTP SETUP", ["", "  Automatic time sync via external NTP server.", ""])
+    server = input("  NTP server [pool.ntp.org]: ").strip() or "pool.ntp.org"
+    _run(["sudo", "tee", "/etc/systemd/timesyncd.conf"],
+         input=f"[Time]\nNTP={server}\n")
+    _run(["sudo", "systemctl", "enable", "systemd-timesyncd"])
+    _run(["sudo", "systemctl", "restart", "systemd-timesyncd"])
+    _run(["sudo", "timedatectl", "set-ntp", "true"])
+    time.sleep(2)
+    r = _run(["timedatectl", "status"])
+    if r.stdout:
+        for line in r.stdout.splitlines()[:6]:
+            wg(line.strip())
+    wg("")
+    input("  Press Enter to return to the menu...")
+
+
 def main():
     if CONFIG_FILE.exists():
         return
@@ -877,22 +895,28 @@ def main():
     wg("")
 
     # Menu principal
-    wg("You have just booted Artificial Intelligence Operating System.")
-    wg("What would you like to do?")
-    wg("")
-    wg("  1) Test AIOS in live mode, without installing")
-    wg("  2) Install AIOS to the hard disk")
-    wg("")
-    wg("Note: AIOS has only been tested on machines without multi-boot setups.")
-    wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
-    wg("There is no warranty of any kind, expressed or implied.")
-    wg("Press Super/Win+F1 to view the keyboard shortcuts.")
-    wg("")
     while True:
+        wg("You have just booted Artificial Intelligence Operating System.")
+        wg("What would you like to do?")
+        wg("")
+        wg("  1) Test AIOS in live mode, without installing")
+        wg("  2) Install AIOS to the hard disk")
+        wg("  3) Configure NTP time sync (external server)")
+        wg("")
+        wg("Note: AIOS has only been tested on machines without multi-boot setups.")
+        wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
+        wg("There is no warranty of any kind, expressed or implied.")
+        wg("Press Super/Win+F1 to view the keyboard shortcuts.")
+        wg("")
         choice = wg_input("> ")
-        if choice in ("1", "2"):
+        if choice == "1":
             break
-        wg("Invalid option. Please choose 1 or 2.")
+        elif choice == "2":
+            break
+        elif choice == "3":
+            setup_ntp()
+            continue
+        wg("Invalid option. Please choose 1, 2 or 3.")
 
     # Check de internet
     wg("")
