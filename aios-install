@@ -402,6 +402,31 @@ exec /bin/busybox switch_root /root /sbin/init
         run(["/bin/busybox", "sh", "-c",
              f"cd {workdir} && find . | /bin/busybox cpio -H newc -o | /bin/busybox gzip -9 > {initrd_src}"])
         print("  Disk initrd built (clear + banner + switch_root)")
+        # Early CPU microcode: prepend the cpio — this kernel has NO LATE_LOADING,
+        # so the initrd is the ONLY way to apply amd/intel microcode patches
+        fw = Path(target) / "usr/lib/firmware"
+        amd = sorted((fw / "amd-ucode").glob("microcode_amd*.bin")) if (fw / "amd-ucode").exists() else []
+        intel = sorted((fw / "intel-ucode").glob("*")) if (fw / "intel-ucode").exists() else []
+        if amd or intel:
+            mcwork = tempfile.mkdtemp(prefix="early-mc-")
+            try:
+                mcsub = Path(mcwork) / "kernel/x86/microcode"
+                mcsub.mkdir(parents=True)
+                if amd:
+                    (mcsub / "AuthenticAMD.bin").write_bytes(
+                        b"".join(p.read_bytes() for p in amd))
+                if intel:
+                    (mcsub / "GenuineIntel.bin").write_bytes(
+                        b"".join(p.read_bytes() for p in intel))
+                run(["/bin/busybox", "sh", "-c",
+                     f"cd {mcwork} && find kernel -type f | sort | "
+                     f"/bin/busybox cpio -H newc -o 2>/dev/null > {mcwork}/microcode.cpio"])
+                run(["/bin/busybox", "sh", "-c",
+                     f"cat {mcwork}/microcode.cpio {initrd_src} > {mcwork}/initrd-early.img "
+                     f"&& mv {mcwork}/initrd-early.img {initrd_src}"])
+                print("  Early microcode prepended to disk initrd")
+            finally:
+                shutil.rmtree(mcwork, ignore_errors=True)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
