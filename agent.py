@@ -272,7 +272,6 @@ class Agent:
                 texts = [m.get("content", "") for m in self.messages]
                 if self._count_tokens(texts) > MAX_HISTORY_TOKENS:
                     self._compress()
-                print(f"  [Session resumed:  {len(loaded_messages)} previous messages]")
             except Exception:
                 pass
 

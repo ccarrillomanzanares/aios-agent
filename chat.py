@@ -120,10 +120,11 @@ WARGAMES_QUOTES = [
 
 
 def _greet():
-    """Frase de Wargames (rotativa) - typewriter style, on every agent start."""
+    """Cabecera estilo sistema antiguo (BBS) + frase de Wargames (rotativa)."""
     import random
     from agent import _tic, _open_audio
     _open_audio()
+    print(f"   AIOS/1.4 — {time.strftime('%a %b %d %Y').upper()}")
     for ch in random.choice(WARGAMES_QUOTES):
         print(ch, end="", flush=True)
         _tic()
@@ -183,23 +184,6 @@ def main():
         _start_local_model(config)
 
     agent = Agent()
-    mode_label = {"local": "LOCAL", "cloud": "CLOUD", "hybrid": "HYBRID"}.get(mode, "LOCAL")
-    if mode == "local":
-        model_name = config.get("local", {}).get("model_name", "Qwen3-8B-Instruct")
-        threads = config.get("local", {}).get("threads", 14)
-        cores = os.cpu_count() or 16
-        print(f"  [{mode_label}] {model_name} (~20 tok/s, {threads}/{cores} cores)")
-    elif mode == "cloud":
-        prov = config.get("cloud", {}).get("provider", "?")
-        mod = config.get("cloud", {}).get("model", "?")
-        print(f"  [{mode_label}] {prov}: {mod}")
-    else:  # hybrid
-        prov = config.get("cloud", {}).get("provider", "?")
-        mod = config.get("cloud", {}).get("model", "?")
-        print(f"  [{mode_label}] Local + {prov}: {mod}")
-    print(f"  [{mode_label}] Independent session (context not shared across modes)")
-    print('  Type your query, "exit" or "/sound" (typewriter sound toggle).')
-    print("  (Local model: EN, ZH natively. ES works (tested). Other languages may work but are not guaranteed.)")
     print()
     _greet()
 
