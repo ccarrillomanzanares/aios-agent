@@ -58,6 +58,19 @@ def _tic():
         _AUDIO.stdin.flush()
     except Exception:
         pass
+
+
+def _skip_pressed():
+    """True si el usuario pulso ESPACIO durante el typewriter (lo consume). No bloquea."""
+    try:
+        import select
+        if select.select([0], [], [], 0)[0]:
+            return os.read(0, 1) == b" "
+    except Exception:
+        pass
+    return False
+
+
 API_KEY = os.environ.get("AIOS_API_KEY", "")
 AIOS_MODE = os.environ.get("AIOS_MODE", "local")
 CLOUD_MODEL = os.environ.get("AIOS_CLOUD_MODEL", "")
@@ -345,6 +358,8 @@ class Agent:
                 except Exception:
                     stream_log = None
 
+                skip_rest = False  # espacio durante el typewriter -> imprimir el resto de golpe
+
                 for raw_line in resp.iter_lines():
                     if not raw_line:
                         continue
@@ -369,11 +384,18 @@ class Agent:
                         if "content" in delta and delta["content"]:
                             chunk = delta["content"]
                             content_chunks.append(chunk)
-                            for ch in chunk:
-                                print(ch, end="", flush=True)
-                                if self.SOUND_ON:
-                                    _tic()
-                                time.sleep(0.02)
+                            if skip_rest:
+                                print(chunk, end="", flush=True)
+                            else:
+                                for i, ch in enumerate(chunk):
+                                    print(ch, end="", flush=True)
+                                    if _skip_pressed():
+                                        print(chunk[i + 1:], end="", flush=True)
+                                        skip_rest = True
+                                        break
+                                    if self.SOUND_ON:
+                                        _tic()
+                                    time.sleep(0.02)
                         # Tool calls fragmentadas por índice
                         if "tool_calls" in delta:
                             for tc_delta in delta["tool_calls"]:

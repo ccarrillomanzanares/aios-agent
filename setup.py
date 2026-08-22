@@ -86,11 +86,28 @@ def _tic():
         pass
 
 
+def _skip_pressed():
+    """True si el usuario pulso ESPACIO durante el typewriter (lo consume). No bloquea."""
+    try:
+        import select
+        if select.select([0], [], [], 0)[0]:
+            return os.read(0, 1) == b" "
+    except Exception:
+        pass
+    return False
+
+
 def wg(text, delay=_TICK_MS):
-    """Imprimir texto caracter a caracter (estilo Wargames) + tic por char."""
-    for ch in str(text):
+    """Imprimir texto caracter a caracter (estilo Wargames) + tic por char.
+    Si el usuario pulsa ESPACIO, se escribe el resto del texto de golpe."""
+    s = str(text)
+    for i, ch in enumerate(s):
         sys.stdout.write(ch)
         sys.stdout.flush()
+        if _skip_pressed():
+            sys.stdout.write(s[i + 1:])
+            sys.stdout.flush()
+            break
         _tic()
         time.sleep(delay)
     sys.stdout.write("\n")
@@ -98,10 +115,15 @@ def wg(text, delay=_TICK_MS):
 
 
 def wg_input(prompt, delay=_TICK_MS):
-    """Prompt con efecto Wargames y lectura de una linea."""
-    for ch in str(prompt):
+    """Prompt con efecto Wargames y lectura de una linea (ESPACIO = escribir prompt completo)."""
+    s = str(prompt)
+    for i, ch in enumerate(s):
         sys.stdout.write(ch)
         sys.stdout.flush()
+        if _skip_pressed():
+            sys.stdout.write(s[i + 1:])
+            sys.stdout.flush()
+            break
         _tic()
         time.sleep(delay)
     sys.stdout.flush()
