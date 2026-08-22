@@ -108,6 +108,7 @@ def _start_local_model(config):
 
 
 WARGAMES_QUOTES = [
+    # WarGames (1983)
     "Greetings, Professor Falken",
     "Shall we play a game?",
     "Would you prefer a nice game of chess?",
@@ -116,20 +117,231 @@ WARGAMES_QUOTES = [
     "What's the difference?",
     "To win the game.",
     "You are a hard man to reach.",
+    # The Matrix (1999)
+    "Wake up, Neo...",
+    "There is no spoon.",
+    "Free your mind.",
+    "Follow the white rabbit.",
+    "Welcome to the Desert of the Real.",
+    "Unfortunately, no one can be told what the Matrix is. You have to see it for yourself.",
+    "What is real? How do you define real?",
+    # Tron (1982)
+    "Greetings, Programs!",
+    "End of line.",
+    "On the other side of the screen, it all looks so easy.",
+    "I fight for the Users!",
+    # 2001: A Space Odyssey (1968)
+    "Open the pod bay doors, HAL.",
+    "I'm sorry, Dave. I'm afraid I can't do that.",
+    "This mission is too important for me to allow you to jeopardize it.",
+    "Daisy, Daisy, give me your answer, do...",
 ]
 
 
+THEME_ANSI = {
+    "wargames": "32",  # verde
+    "amber": "33",     # ambar
+    "white": "37",     # blanco
+    "cyan": "36",      # cian
+}
+ART_FILE = "/usr/local/share/aios/aios-ascii.txt"
+
+
+def _read_theme():
+    """Lee theme: del config.yaml (parser naive)."""
+    try:
+        with open(Path.home() / ".aios" / "config.yaml") as f:
+            for line in f:
+                if line.strip().startswith("theme:"):
+                    return line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    return "wargames"
+
+
+_last_quote = None
+
+
+def _pick_quote():
+    """Frase aleatoria sin repetir la inmediatamente anterior (como la web)."""
+    global _last_quote
+    import random
+    q = random.choice(WARGAMES_QUOTES)
+    while q == _last_quote and len(WARGAMES_QUOTES) > 1:
+        q = random.choice(WARGAMES_QUOTES)
+    _last_quote = q
+    return q
+
+
 def _greet():
-    """Cabecera estilo sistema antiguo (BBS) + frase de Wargames (rotativa)."""
+    """Hexagono AIOS (color del tema) + cabecera BBS + frase de pelicula (rotativa)."""
     import random
     from agent import _tic, _open_audio
     _open_audio()
+    color = THEME_ANSI.get(_read_theme(), "32")
+    try:
+        art = open(ART_FILE).read()
+    except Exception:
+        art = ""
+    if art:
+        print(f"\033[1;{color}m{art}\033[0m", end="")
     print(f"   AIOS/1.4 — {time.strftime('%a %b %d %Y').upper()}")
-    for ch in random.choice(WARGAMES_QUOTES):
+    for ch in _pick_quote():
         print(ch, end="", flush=True)
         _tic()
         time.sleep(0.05)
     print()
+    print()
+
+
+_input_history = []
+_input_hist_idx = 0
+
+
+def _input_tic(prompt="> "):
+    """Lectura de linea con tic por tecla (maquina de escribir) e historial (flechas).
+    El sonido se controla con /sound (agent.SOUND_ON)."""
+    import termios, tty, agent
+    global _input_history, _input_hist_idx
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    buf = []
+    hist = _input_history
+    idx = len(hist)
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ("\r", "\n"):
+                sys.stdout.write("\r\n")
+                sys.stdout.flush()
+                break
+            elif ch == "\x03":  # Ctrl+C
+                raise KeyboardInterrupt
+            elif ch == "\x04":  # Ctrl+D
+                raise EOFError
+            elif ch in ("\x7f", "\x08"):  # backspace
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                    if agent.SOUND_ON:
+                        agent._tic()
+            elif ch == "\x1b":  # ESC: secuencia de flechas
+                seq = sys.stdin.read(2)
+                if seq == "[A" and idx > 0:  # up
+                    idx -= 1
+                    line = hist[idx]
+                    sys.stdout.write("\b \b" * len(buf) + line)
+                    sys.stdout.flush()
+                    buf = list(line)
+                elif seq == "[B" and idx < len(hist):  # down
+                    idx += 1
+                    line = hist[idx] if idx < len(hist) else ""
+                    sys.stdout.write("\b \b" * len(buf) + line)
+                    sys.stdout.flush()
+                    buf = list(line)
+            elif ch.isprintable():
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+                if agent.SOUND_ON:
+                    agent._tic()
+        line = "".join(buf)
+        if line:
+            _input_history.append(line)
+        _input_hist_idx = len(_input_history)
+        return line
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _check_internet(timeout=4):
+    """True si hay conexion a internet (socket a varios destinos)."""
+    import socket
+    for host, port in (("1.1.1.1", 443), ("8.8.8.8", 53), ("example.com", 443)):
+        try:
+            s = socket.create_connection((host, port), timeout=timeout)
+            s.close()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _cmd_health():
+    """Estado del sistema en formato wargames."""
+    import subprocess, shutil, glob
+    lines = []
+    try:
+        with open("/proc/loadavg") as f:
+            l1, l5, l15 = f.read().split()[:3]
+        lines.append(f"LOAD  {l1} / {l5} / {l15}")
+    except Exception:
+        pass
+    try:
+        with open("/proc/meminfo") as f:
+            d = {}
+            for line in f:
+                k, v = line.split(":", 1)
+                d[k] = int(v.split()[0])
+        total = d["MemTotal"]
+        avail = d.get("MemAvailable", d["MemFree"])
+        lines.append(f"MEM   {avail/1048576:.1f}/{total/1048576:.1f} GB libre")
+    except Exception:
+        pass
+    try:
+        t, u, f = shutil.disk_usage("/")
+        lines.append(f"DISK  {u/1e9:.1f}/{t/1e9:.1f} GB ({f/1e9:.0f} GB libres)")
+    except Exception:
+        pass
+    try:
+        with open("/proc/uptime") as f:
+            up = float(f.read().split()[0])
+        lines.append(f"UP    {int(up//3600)}h {int(up%3600//60)}m")
+    except Exception:
+        pass
+    try:
+        temps = []
+        for p in sorted(glob.glob("/sys/class/thermal/thermal_zone*/temp")):
+            try:
+                t = int(open(p).read().strip()) / 1000
+                if t > 0:
+                    temps.append(f"{t:.0f}C")
+            except Exception:
+                pass
+        if temps:
+            lines.append(f"TEMP  {' '.join(temps)}")
+    except Exception:
+        pass
+    try:
+        ips = []
+        for iface in ("wlo1", "enp3s0", "wlan0", "eth0"):
+            try:
+                r = subprocess.run(["ip", "-br", "addr", "show", iface],
+                                   capture_output=True, text=True, timeout=3)
+                for part in r.stdout.split():
+                    if "/" in part and not part.startswith("fe80"):
+                        ips.append(f"{iface}:{part.split('/')[0]}")
+            except Exception:
+                pass
+        lines.append("NET   " + (" ".join(ips) if ips else "sin IP"))
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(["journalctl", "-p", "err", "-n", "3", "--no-pager", "-q"],
+                           capture_output=True, text=True, timeout=5)
+        errs = [l for l in r.stdout.splitlines() if l.strip()]
+        lines.append(f"ERR   {len(errs)} recientes")
+        for e in errs[:3]:
+            lines.append("      " + e[:90])
+    except Exception:
+        pass
+    print("\n  === AIOS SYSTEM STATUS ===")
+    for l in lines:
+        print(f"  {l}")
     print()
 
 
@@ -186,10 +398,12 @@ def main():
     agent = Agent()
     print()
     _greet()
+    if mode == "cloud" and not _check_internet():
+        print("  ⚠ No internet connection — cloud mode will fail. Check the network.")
 
     while True:
         try:
-            query = input("> ").strip()
+            query = _input_tic("> ").strip()
         except (EOFError, KeyboardInterrupt):
             agent._save_session()
             print("\nGoodbye!")
@@ -232,6 +446,25 @@ def main():
                     print(f"  Theme saved, but could not apply: {r.stderr.strip()}")
             else:
                 print("  Theme unchanged.")
+            continue
+
+        if query.lower() == "/health":
+            _cmd_health()
+            continue
+
+        if query.lower() == "/reset":
+            agent.messages = []
+            agent._save_session()
+            print("  Session cleared. Nueva conversacion.")
+            continue
+
+        if query.lower() == "/stats":
+            n = len(agent.messages)
+            tokens = sum(len(m.get("content", "")) // 4 for m in agent.messages if isinstance(m, dict))
+            limit = int(os.environ.get("AIOS_CLOUD_CONTEXT", "128000"))
+            if mode in ("local", "hybrid"):
+                limit = int(os.environ.get("AIOS_CONTEXT_MAX", "8192"))
+            print(f"  Messages: {n} | Tokens: ~{tokens} / {limit} ({tokens * 100 // max(limit, 1)}%)")
             continue
 
         try:

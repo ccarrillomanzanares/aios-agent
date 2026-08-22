@@ -185,6 +185,7 @@ THEMES = {
 
 # Frases miticas de Wargames (1983) - saludo rotativo
 WARGAMES_QUOTES = [
+    # WarGames (1983)
     "Greetings, Professor Falken",
     "Shall we play a game?",
     "Would you prefer a nice game of chess?",
@@ -193,7 +194,37 @@ WARGAMES_QUOTES = [
     "What's the difference?",
     "To win the game.",
     "You are a hard man to reach.",
+    # The Matrix (1999)
+    "Wake up, Neo...",
+    "There is no spoon.",
+    "Free your mind.",
+    "Follow the white rabbit.",
+    "Welcome to the Desert of the Real.",
+    "Unfortunately, no one can be told what the Matrix is. You have to see it for yourself.",
+    "What is real? How do you define real?",
+    # Tron (1982)
+    "Greetings, Programs!",
+    "End of line.",
+    "On the other side of the screen, it all looks so easy.",
+    "I fight for the Users!",
+    # 2001: A Space Odyssey (1968)
+    "Open the pod bay doors, HAL.",
+    "I'm sorry, Dave. I'm afraid I can't do that.",
+    "This mission is too important for me to allow you to jeopardize it.",
+    "Daisy, Daisy, give me your answer, do...",
 ]
+
+_last_quote = None
+
+
+def _pick_quote():
+    """Frase aleatoria sin repetir la inmediatamente anterior (como la web)."""
+    global _last_quote
+    q = random.choice(WARGAMES_QUOTES)
+    while q == _last_quote and len(WARGAMES_QUOTES) > 1:
+        q = random.choice(WARGAMES_QUOTES)
+    _last_quote = q
+    return q
 
 
 def _select_theme():
@@ -912,7 +943,7 @@ def main():
     clear()
 
     # Saludo (primer arranque) - frase de Wargames rotativa, seguido del menu
-    wg(random.choice(WARGAMES_QUOTES))
+    wg(_pick_quote())
     time.sleep(0.4)
     wg("")
 
