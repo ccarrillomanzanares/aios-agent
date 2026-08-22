@@ -261,6 +261,20 @@ def setup_aios_config(target, mode="local", theme="wargames"):
         os.chown(f, uid, gid)
     print("  ~/.aios/config.yaml created")
 
+def apply_theme(target, theme):
+    """Genera colors.conf de i3 en el sistema instalado con el tema elegido.
+    aios-theme corre en el chroot (escribe como root) -> chown a uid/gid de aios."""
+    if not (Path(target) / "usr/local/bin/aios-theme").exists():
+        return
+    run(["chroot", target, "/usr/bin/env", "HOME=/home/aios",
+         "/usr/local/bin/aios-theme", theme], check=False)
+    uid = os.stat(Path(target) / "home" / "aios").st_uid
+    gid = os.stat(Path(target) / "home" / "aios").st_gid
+    for f in ("/home/aios/.config/i3/colors.conf", "/home/aios/.aios/config.yaml"):
+        p = Path(target + f)
+        if p.exists():
+            os.chown(p, uid, gid)
+
 def set_passwords(target):
     """REQUIRED: change root/aios passwords in the installed system."""
     import getpass
@@ -493,6 +507,7 @@ def main():
     enable_services(target)
     configure_system(target)
     setup_aios_config(target, mode, theme)
+    apply_theme(target, theme)
     persisted_ifaces = persist_wifi(target)
     cleanup_chroot(target)
     passwords_changed = set_passwords(target)
