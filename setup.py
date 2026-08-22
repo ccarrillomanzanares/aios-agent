@@ -285,6 +285,22 @@ def detect_ram_gb():
     return 12
 
 
+def _check_local_requirements():
+    """Compara los recursos del equipo con el minimo para Qwen3-8B local.
+    Devuelve una linea con el veredicto (podria funcionar / mejor no lo pruebes)."""
+    try:
+        cores = os.cpu_count() or 4
+        ram = detect_ram_gb()
+        req_cores, req_ram = 4, 8
+        if cores >= req_cores and ram >= req_ram:
+            return (f"     This machine could run it ({cores} cores, {ram} GB RAM) "
+                    f"- slow, about typing speed.")
+        return (f"     Better not to try it: needs {req_cores}+ cores and {req_ram} GB RAM "
+                f"(this machine: {cores} cores, {ram} GB).")
+    except Exception:
+        return ""
+
+
 def auto_context(ram_gb):
     if ram_gb <= 8:
         return 8192
@@ -843,6 +859,7 @@ def _live_flow(online):
     wg("     Requires: CPU at least like an Intel i5-1035G1 (4 cores / 8 threads,")
     wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 8 GB RAM.")
     wg("     Note: runs slow, about human typing speed.")
+    wg(_check_local_requirements())
     wg("  2) CLOUD - an external model via API")
     wg("")
     while True:
@@ -881,6 +898,7 @@ def _install_flow(online):
     wg("     Requires: CPU at least like an Intel i5-1035G1 (4 cores / 8 threads,")
     wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 8 GB RAM.")
     wg("     Note: runs slow, about human typing speed.")
+    wg(_check_local_requirements())
     wg("  2) CLOUD - an external model via API")
     wg("")
     while True:
