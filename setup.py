@@ -97,19 +97,45 @@ def _skip_pressed():
     return False
 
 
+def _cbreak_on():
+    """Activa modo cbreak (cada tecla al instante, sin echo) si hay tty.
+    Devuelve (fd, old) para restaurar con _cbreak_off, o (None, None)."""
+    try:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        return fd, old
+    except Exception:
+        return None, None
+
+
+def _cbreak_off(fd, old):
+    if fd is not None:
+        try:
+            import termios
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except Exception:
+            pass
+
+
 def wg(text, delay=_TICK_MS):
     """Imprimir texto caracter a caracter (estilo Wargames) + tic por char.
     Si el usuario pulsa ESPACIO, se escribe el resto del texto de golpe."""
     s = str(text)
-    for i, ch in enumerate(s):
-        sys.stdout.write(ch)
-        sys.stdout.flush()
-        if _skip_pressed():
-            sys.stdout.write(s[i + 1:])
+    fd_cb, old_cb = _cbreak_on()
+    try:
+        for i, ch in enumerate(s):
+            sys.stdout.write(ch)
             sys.stdout.flush()
-            break
-        _tic()
-        time.sleep(delay)
+            if _skip_pressed():
+                sys.stdout.write(s[i + 1:])
+                sys.stdout.flush()
+                break
+            _tic()
+            time.sleep(delay)
+    finally:
+        _cbreak_off(fd_cb, old_cb)
     sys.stdout.write("\n")
     sys.stdout.flush()
 
@@ -117,15 +143,19 @@ def wg(text, delay=_TICK_MS):
 def wg_input(prompt, delay=_TICK_MS):
     """Prompt con efecto Wargames y lectura de una linea (ESPACIO = escribir prompt completo)."""
     s = str(prompt)
-    for i, ch in enumerate(s):
-        sys.stdout.write(ch)
-        sys.stdout.flush()
-        if _skip_pressed():
-            sys.stdout.write(s[i + 1:])
+    fd_cb, old_cb = _cbreak_on()
+    try:
+        for i, ch in enumerate(s):
+            sys.stdout.write(ch)
             sys.stdout.flush()
-            break
-        _tic()
-        time.sleep(delay)
+            if _skip_pressed():
+                sys.stdout.write(s[i + 1:])
+                sys.stdout.flush()
+                break
+            _tic()
+            time.sleep(delay)
+    finally:
+        _cbreak_off(fd_cb, old_cb)
     sys.stdout.flush()
     try:
         return input("")
@@ -921,6 +951,10 @@ def _install_flow(online):
         theme = _select_theme()
 
     wg("")
+    ntp_opt = wg_input("Configure NTP time sync (external server)? (y/N): ").strip().lower()
+    if ntp_opt == "y":
+        setup_ntp(standalone=False)
+    wg("")
     wg("Launching the installer...")
     ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme])
     if ret.returncode != 0:
@@ -934,8 +968,9 @@ def _install_flow(online):
         _sp.run(["sudo", "reboot"])
 
 
-def setup_ntp():
-    """Configurar hora automatica via servidor NTP externo (systemd-timesyncd)."""
+def setup_ntp(standalone=True):
+    """Configurar hora automatica via servidor NTP externo (systemd-timesyncd).
+    standalone=False: llamado desde el flujo de instalacion (sin Enter final)."""
     print_box("NTP SETUP", ["", "  Automatic time sync via external NTP server.", ""])
     server = input("  NTP server [pool.ntp.org]: ").strip() or "pool.ntp.org"
     _run(["sudo", "tee", "/etc/systemd/timesyncd.conf"],
@@ -949,7 +984,8 @@ def setup_ntp():
         for line in r.stdout.splitlines()[:6]:
             wg(line.strip())
     wg("")
-    input("  Press Enter to return to the menu...")
+    if standalone:
+        input("  Press Enter to return to the menu...")
 
 
 def main():
@@ -972,7 +1008,6 @@ def main():
         wg("")
         wg("  1) Test AIOS in live mode, without installing")
         wg("  2) Install AIOS to the hard disk")
-        wg("  3) Configure NTP time sync (external server)")
         wg("")
         wg("Note: AIOS has only been tested on machines without multi-boot setups.")
         wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
@@ -984,10 +1019,7 @@ def main():
             break
         elif choice == "2":
             break
-        elif choice == "3":
-            setup_ntp()
-            continue
-        wg("Invalid option. Please choose 1, 2 or 3.")
+        wg("Invalid option. Please choose 1 or 2.")
 
     # Check de internet
     wg("")

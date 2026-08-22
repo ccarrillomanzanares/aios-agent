@@ -176,7 +176,7 @@ def _pick_quote():
 def _greet():
     """Hexagono AIOS (color del tema) + cabecera BBS + frase de pelicula (rotativa)."""
     import random
-    from agent import _tic, _open_audio
+    from agent import _tic, _open_audio, _skip_pressed, _cbreak_on, _cbreak_off
     _open_audio()
     color = THEME_ANSI.get(_read_theme(), "32")
     try:
@@ -186,10 +186,18 @@ def _greet():
     if art:
         print(f"\033[1;{color}m{art}\033[0m", end="")
     print(f"   AIOS/1.4 — {time.strftime('%a %b %d %Y').upper()}")
-    for ch in _pick_quote():
-        print(ch, end="", flush=True)
-        _tic()
-        time.sleep(0.05)
+    quote = _pick_quote()
+    fd_cb, old_cb = _cbreak_on()
+    try:
+        for i, ch in enumerate(quote):
+            print(ch, end="", flush=True)
+            if _skip_pressed():
+                print(quote[i + 1:], end="", flush=True)
+                break
+            _tic()
+            time.sleep(0.05)
+    finally:
+        _cbreak_off(fd_cb, old_cb)
     print()
     print()
 

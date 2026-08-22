@@ -71,6 +71,28 @@ def _skip_pressed():
     return False
 
 
+def _cbreak_on():
+    """Activa modo cbreak (cada tecla al instante, sin echo) si hay tty.
+    Devuelve (fd, old) para restaurar con _cbreak_off, o (None, None)."""
+    try:
+        import termios, tty
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        return fd, old
+    except Exception:
+        return None, None
+
+
+def _cbreak_off(fd, old):
+    if fd is not None:
+        try:
+            import termios
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except Exception:
+            pass
+
+
 API_KEY = os.environ.get("AIOS_API_KEY", "")
 AIOS_MODE = os.environ.get("AIOS_MODE", "local")
 CLOUD_MODEL = os.environ.get("AIOS_CLOUD_MODEL", "")
@@ -349,6 +371,7 @@ class Agent:
             tool_calls_by_index = {}
             finish_reason = None
             stream_log = None
+            fd_cb, old_cb = None, None
 
             try:
                 # Log crudo del stream (diagnóstico del bug de respuesta vacía)
@@ -359,6 +382,7 @@ class Agent:
                     stream_log = None
 
                 skip_rest = False  # espacio durante el typewriter -> imprimir el resto de golpe
+                fd_cb, old_cb = _cbreak_on()
 
                 for raw_line in resp.iter_lines():
                     if not raw_line:
@@ -422,6 +446,7 @@ class Agent:
             finally:
                 if stream_log:
                     stream_log.close()
+                _cbreak_off(fd_cb, old_cb)
 
             print()  # salto de línea tras el stream
             content = "".join(content_chunks)
