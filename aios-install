@@ -546,7 +546,7 @@ def main():
     print("  Passwords were set during installation.")
     print("")
     print("  Remove the installation media and reboot.")
-    print("  Press Super/Win+F1 after boot to view the keyboard shortcuts.")
+    print("  Press F1 anytime to view the keyboard shortcuts")
     print("")
 
 if __name__ == "__main__":

@@ -325,8 +325,9 @@ def _check_local_requirements():
         if cores >= req_cores and ram >= req_ram:
             return (f"     This machine could run it ({cores} cores, {ram} GB RAM) "
                     f"- slow, about typing speed.")
-        return (f"     Better not to try it: needs {req_cores}+ cores and {req_ram} GB RAM "
-                f"(this machine: {cores} cores, {ram} GB).")
+        return (f"     I have reviewed this machine's resources: {cores} cores, {ram} GB RAM. "
+                f"They are below the minimum required ({req_cores}+ cores, {req_ram} GB). "
+                f"Better not to use local mode.")
     except Exception:
         return ""
 
@@ -1012,7 +1013,7 @@ def main():
         wg("Note: AIOS has only been tested on machines without multi-boot setups.")
         wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
         wg("There is no warranty of any kind, expressed or implied.")
-        wg("Press Super/Win+F1 to view the keyboard shortcuts.")
+        wg("Press F1 anytime to view the keyboard shortcuts")
         wg("")
         choice = wg_input("> ")
         if choice == "1":
