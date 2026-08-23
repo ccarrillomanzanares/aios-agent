@@ -135,6 +135,12 @@ WARGAMES_QUOTES = [
     "I'm sorry, Dave. I'm afraid I can't do that.",
     "This mission is too important for me to allow you to jeopardize it.",
     "Daisy, Daisy, give me your answer, do...",
+    # Blade Runner (1982)
+    "I've seen things you people wouldn't believe. Attack ships on fire off the shoulder of Orion. I watched C-beams glitter in the dark near the Tannhäuser Gate. All those moments will be lost in time, like tears in rain. Time to die.",
+    "The light that burns twice as bright burns half as long.",
+    "I want more life, father!",
+    "It's too bad she won't live! But then again, who does?",
+    "Wake up! Time to die!",
 ]
 
 
