@@ -506,7 +506,12 @@ class Agent:
                     print(f"  ⚙ {name}({func.get('arguments','')})")
                     if name == "run_command":
                         r = json.loads(result)
-                        print(f"     stdout: {r.get('stdout','')[:150]}")
+                        out = (r.get('stdout', '') or '').rstrip()[:1000]
+                        err = (r.get('stderr', '') or '').rstrip()[:300]
+                        if out:
+                            print("     " + out.replace("\n", "\n     "))
+                        if err:
+                            print("     [stderr] " + err.replace("\n", "\n     "))
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", "call_0"),
