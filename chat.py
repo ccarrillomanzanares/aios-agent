@@ -118,7 +118,7 @@ WARGAMES_QUOTES = [
     "To win the game.",
     "You are a hard man to reach.",
     # The Matrix (1999)
-    "Wake up, Neo...",
+    "Wake up, Neo... The Matrix has you... Follow the white rabbit. Knock, knock, Neo.",
     "There is no spoon.",
     "Free your mind.",
     "Follow the white rabbit.",
