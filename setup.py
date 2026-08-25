@@ -1002,7 +1002,7 @@ def _install_flow(online):
         theme = _select_theme()
 
     wg("")
-    ntp_opt = wg_input("Configure NTP time sync (external server)? (y/N): ").strip().lower()
+    ntp_opt = wg_input("Set the correct time automatically using an internet time server? (y/N): ").strip().lower()
     if ntp_opt == "y":
         setup_ntp(standalone=False)
     wg("")
