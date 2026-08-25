@@ -471,10 +471,14 @@ def _iface_has_internet(iface=None, timeout=4):
 
 
 def _net_summary():
-    """Devuelve (ip, gateway) visibles — para diagnosticar el 'no internet'."""
+    """Devuelve (ip, gateway) visibles — para diagnosticar el 'no internet'.
+    Usa rutas absolutas de ip (Debian/Ubuntu lo ponen en /usr/sbin, fuera del PATH)."""
     ip, gw = "", ""
+    ip_bin = next((p for p in ("/usr/sbin/ip", "/usr/bin/ip", "/sbin/ip") if os.path.exists(p)), None)
+    if ip_bin is None:
+        return ip, gw
     try:
-        out = subprocess.run(["ip", "-o", "addr", "show"], capture_output=True,
+        out = subprocess.run([ip_bin, "-o", "addr", "show"], capture_output=True,
                              text=True, timeout=5).stdout
         for line in out.splitlines():
             if " inet " in line and "127.0.0.1" not in line:
@@ -483,7 +487,7 @@ def _net_summary():
     except Exception:
         pass
     try:
-        out = subprocess.run(["ip", "route"], capture_output=True,
+        out = subprocess.run([ip_bin, "route"], capture_output=True,
                              text=True, timeout=5).stdout
         for line in out.splitlines():
             if line.startswith("default"):
