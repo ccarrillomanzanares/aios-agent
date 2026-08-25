@@ -958,6 +958,10 @@ def _install_flow(online):
     wg("")
     wg("Launching the installer...")
     ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme])
+    if ret.returncode == 2:
+        wg("Installation cancelled.")
+        wg_input("Press Enter to return to the menu...")
+        return
     if ret.returncode != 0:
         wg("Installation aborted or failed.")
         wg_input("Press Enter to return to the menu...")
@@ -1002,13 +1006,14 @@ def main():
     time.sleep(0.4)
     wg("")
 
-    # Menu principal
+    # Menu principal (bucle: tras live o instalación vuelve al menú; solo "0" sale)
     while True:
         wg("You have just booted Artificial Intelligence Operating System.")
         wg("What would you like to do?")
         wg("")
         wg("  1) Test AIOS in live mode, without installing")
         wg("  2) Install AIOS to the hard disk")
+        wg("  0) Exit to shell")
         wg("")
         wg("Note: AIOS has only been tested on machines without multi-boot setups.")
         wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
@@ -1016,33 +1021,34 @@ def main():
         wg("Press F1 anytime to view the keyboard shortcuts")
         wg("")
         choice = wg_input("> ")
-        if choice == "1":
+        if choice == "0":
             break
-        elif choice == "2":
-            break
-        wg("Invalid option. Please choose 1 or 2.")
+        elif choice not in ("1", "2"):
+            wg("Invalid option. Please choose 0, 1 or 2.")
+            continue
 
-    # Check de internet
-    wg("")
-    wg("Checking internet connection...")
-    online = _iface_has_internet()
-    if not online:
-        wg("No internet connection detected.")
-        opt = wg_input("Configure WiFi now? (y/N): ").strip().lower()
-        if opt == "y":
-            setup_wifi()
-            wg("")
-            wg("Checking internet connection again...")
-            online = _iface_has_internet()
-            if not online:
-                wg("Still no internet. Continuing anyway.")
+        # Check de internet
+        wg("")
+        wg("Checking internet connection...")
+        online = _iface_has_internet()
+        if not online:
+            wg("No internet connection detected.")
+            opt = wg_input("Configure WiFi now? (y/N): ").strip().lower()
+            if opt == "y":
+                setup_wifi()
+                wg("")
+                wg("Checking internet connection again...")
+                online = _iface_has_internet()
+                if not online:
+                    wg("Still no internet. Continuing anyway.")
+            else:
+                wg("Continuing without internet.")
+
+        if choice == "2":
+            _install_flow(online)
         else:
-            wg("Continuing without internet.")
-
-    if choice == "2":
-        _install_flow(online)
-    else:
-        _live_flow(online)
+            _live_flow(online)
+        # al terminar el flujo (éxito, aborto o salida del live) → vuelve al menú
 
 
 if __name__ == "__main__":

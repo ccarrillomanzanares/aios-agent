@@ -88,6 +88,7 @@ def list_disks():
     return disks
 
 def select_disk(disks):
+    _attempts = 0
     while True:
         clear()
         print("\n  SELECT TARGET DISK")
@@ -96,14 +97,18 @@ def select_disk(disks):
         for d in disks:
             print(f"  {d['name']:<10} {d['size']:<8} {d.get('model','')}")
         print("\n  WARNING: All data on the selected disk will be destroyed.\n")
-        choice = ask("Select disk (e.g. sda, nvme0n1)", "")
+        choice = ask("Select disk (e.g. sda, nvme0n1)", "").strip()
         if not choice:
-            print("\n  Aborted.")
-            sys.exit(1)
+            print("\n  No disk selected. Installation cancelled.")
+            sys.exit(2)   # cancelación → setup.py vuelve al menú
         for d in disks:
             if d["name"] == choice:
                 return d
-        print(f"\n  Disk '{choice}' not found.")
+        _attempts += 1
+        print(f"\n  Disk '{choice}' not found. Try again (e.g. sda, nvme0n1).")
+        if _attempts >= 3:
+            print("\n  Too many invalid attempts. Installation cancelled.")
+            sys.exit(2)
 
 def partition_and_format(disk):
     dev = f"/dev/{disk}"
@@ -499,9 +504,11 @@ def main():
     print("  - Issues are reported at the project repository; there is no")
     print("    official support.")
     print("")
+    print("\n  [1/7] Reviewing installer disclaimer...")
     if not confirm("I understand the risks. Continue"):
-        print("\n  Installation aborted.\n")
-        sys.exit(1)
+        print("\n  Installation cancelled.\n")
+        sys.exit(2)
+    print("\n  [2/7] Selecting target disk...")
     disks = list_disks()
     if not disks:
         print("\n  No disks found.\n")
@@ -509,19 +516,23 @@ def main():
     disk = select_disk(disks)
     print(f"\n  Selected: /dev/{disk['name']} ({disk['size']})")
     if not confirm("WARNING: This will DESTROY all data on this disk"):
-        print("\n  Installation aborted.\n")
-        sys.exit(1)
+        print("\n  Installation cancelled.\n")
+        sys.exit(2)
     if not ask_typed("FINAL CONFIRMATION: this will DESTROY ALL DATA on this disk", "format disk"):
-        print("\n  Installation aborted.\n")
-        sys.exit(1)
+        print("\n  Installation cancelled.\n")
+        sys.exit(2)
+    print("\n  [3/7] Partitioning and formatting...")
     root_part = partition_and_format(disk["name"])
     target = "/mnt/target"
     Path(target).mkdir(parents=True, exist_ok=True)
     run(["/usr/bin/mount", root_part, target])
+    print("\n  [4/7] Copying system files (this may take a while)...")
     copy_system(target)
     setup_chroot(target)
+    print("\n  [5/7] Installing bootloader (GRUB)...")
     install_grub(target, disk["name"], root_part)
     build_disk_initrd(target, root_part)
+    print("\n  [6/7] Configuring the system...")
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
@@ -530,6 +541,7 @@ def main():
     persisted_ifaces = persist_wifi(target)
     persist_ntp(target)
     cleanup_chroot(target)
+    print("\n  [7/7] Finalizing (passwords, security)...")
     passwords_changed = set_passwords(target)
     harden_login(target)
     harden_ssh(target)

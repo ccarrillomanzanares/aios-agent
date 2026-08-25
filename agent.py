@@ -165,6 +165,7 @@ _RULES_COMMON = """Always respond in the same language the user writes in.
 Be concise.
 If you run a command, show its output to the user.
 Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.
+If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).
 If you don't know something, say so honestly: 'I don't know'.
 Do not use <think> tags.
 
@@ -480,16 +481,20 @@ class Agent:
                     except json.JSONDecodeError:
                         args = {}
 
-                    # Anti-bucle: detect repeated tool calls
+                    # Anti-bucle: detect repeated tool calls (mismo tool + mismo comando base)
                     _last_call = getattr(self, '_last_tool', None)
                     _repeat_count = getattr(self, '_tool_repeat_count', 0)
-                    if _last_call and _last_call['name'] == name and _last_call['args'] == args:
+                    _base = args.get('command', '')
+                    if isinstance(_base, str) and _base.strip():
+                        _base = _base.strip().split()[0]   # comando base (p.ej. 'ls')
+                    _same = bool(_last_call and _last_call['name'] == name and _last_call['base'] == _base)
+                    if _same:
                         self._tool_repeat_count = _repeat_count + 1
                     else:
                         self._tool_repeat_count = 0
-                    self._last_tool = {'name': name, 'args': args}
+                    self._last_tool = {'name': name, 'base': _base}
 
-                    if self._tool_repeat_count >= 3:
+                    if self._tool_repeat_count >= 4:
                         print(f"  Same tool call {name} repeated {self._tool_repeat_count + 1} times")
                         print("  Abort the task? (y/N): ", end="", flush=True)
                         try:
