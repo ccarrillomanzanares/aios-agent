@@ -987,8 +987,13 @@ def _live_flow(online):
 
     if m == "2":
         if not online:
-            wg("Cloud mode requires internet. Falling back to LOCAL.")
-            m = "1"
+            wg("Cloud mode requires internet (none detected).")
+            opt = wg_input("Use LOCAL mode instead? (Y/n): ").strip().lower()
+            if opt in ("", "y", "yes"):
+                wg("Switching to LOCAL.")
+                m = "1"
+            else:
+                return  # volver al menú
         else:
             theme = _select_theme()
             if _cloud_flow(theme):
@@ -1027,7 +1032,13 @@ def _install_flow(online):
     mode = "local"
     theme = "wargames"
     if m == "2" and not online:
-        wg("Cloud mode requires internet. Falling back to LOCAL.")
+        wg("Cloud mode requires internet (none detected).")
+        opt = wg_input("Use LOCAL mode instead? (Y/n): ").strip().lower()
+        if opt in ("", "y", "yes"):
+            wg("Switching to LOCAL.")
+            m = "1"
+        else:
+            return  # volver al menú
     if m == "2" and online:
         theme = _select_theme()
         if _cloud_flow(theme):
@@ -1132,7 +1143,7 @@ def main():
                 wg("Checking internet connection again...")
                 online = _iface_has_internet()
                 if not online:
-                    wg("Still no internet. Continuing anyway.")
+                    wg("Still no internet. CLOUD mode will not be available — it will fall back to LOCAL.")
             else:
                 wg("Continuing without internet.")
 
