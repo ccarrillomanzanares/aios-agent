@@ -1026,6 +1026,7 @@ def _install_flow(online):
 def setup_ntp(standalone=True):
     """Configurar hora automatica via servidor NTP externo (systemd-timesyncd).
     standalone=False: llamado desde el flujo de instalacion (sin Enter final)."""
+    print_box = _legacy_box  # keep original visual, it works (fix 25 Ago: NameError)
     print_box("NTP SETUP", ["", "  Automatic time sync via external NTP server.", ""])
     server = input("  NTP server [pool.ntp.org]: ").strip() or "pool.ntp.org"
     _run(["sudo", "tee", "/etc/systemd/timesyncd.conf"],
