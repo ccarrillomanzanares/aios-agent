@@ -255,7 +255,7 @@ LOCAL_MODELS = [
 
 # Color themes (aios-xterm reads the config and applies the colors)
 THEMES = {
-    "wargames": ("#006400", "Wargames - classic dark green (default)"),
+    "wargames": ("#00ff66", "Wargames - neon green (default)"),
     "amber": ("#ffb000", "Amber - old terminal phosphor"),
     "white": ("#ffffff", "White - classic"),
     "cyan": ("#00cccc", "Cyan - modern"),

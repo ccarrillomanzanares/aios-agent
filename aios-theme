@@ -29,7 +29,7 @@ from pathlib import Path
 t = sys.argv[1]
 # (texto, separador, fondo focused, fondo inactive, borde inactive)
 P = {
-    "wargames": ("#006400", "#003300", "#002200", "#000000", "#005500"),
+    "wargames": ("#00ff66", "#66ffa8", "#001a10", "#000000", "#00b356"),
     "amber":    ("#ffb000", "#885500", "#332200", "#000000", "#775500"),
     "white":    ("#ffffff", "#888888", "#333333", "#000000", "#666666"),
     "cyan":     ("#00cccc", "#006666", "#003333", "#000000", "#009999"),

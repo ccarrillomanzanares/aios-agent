@@ -12,6 +12,6 @@ case "$theme" in
     amber)  FG="#ffb000" ;;
     white)  FG="#ffffff" ;;
     cyan)   FG="#00cccc" ;;
-    *)      FG="#006400" ;;  # wargames (default)
+    *)      FG="#00ff66" ;;  # wargames (default)
 esac
 exec /usr/bin/xterm -fa "Adwaita Mono" -fs 11 -bg black -fg "$FG" -cr "$FG" -sb -sl 2000 -xrm "*rightScrollBar: true" "$@"
