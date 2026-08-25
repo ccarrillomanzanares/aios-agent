@@ -119,6 +119,43 @@ def _cbreak_off(fd, old):
             pass
 
 
+def _read_line():
+    """Lee una linea con backspace correcto y el prompt protegido (fix 25 Ago).
+
+    Usa raw mode + gestion manual del teclado: el backspace borra del buffer
+    (nunca el prompt), sin caracteres '^' extra; Ctrl+C interrumpe."""
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    buf = []
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ("\r", "\n"):
+                break
+            if ch in ("\x7f", "\x08"):   # backspace / DEL
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+            if ch == "\x03":              # Ctrl+C
+                raise KeyboardInterrupt
+            if ch == "\x04":              # Ctrl+D
+                break
+            if ch.isprintable() or ch in (" ", "\t"):
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return "".join(buf)
+
+
 def wg(text, delay=_TICK_MS):
     """Imprimir texto caracter a caracter (estilo Wargames) + tic por char.
     Si el usuario pulsa ESPACIO, se escribe el resto del texto de golpe."""
@@ -159,22 +196,21 @@ def wg_input(prompt, delay=_TICK_MS):
     sys.stdout.flush()
     try:
         # Descartar entrada pendiente (p.ej. Enter residual del subproceso) para
-        # que el prompt espere SIEMPRE la tecla del usuario (fix 25 Ago: "el Enter
-        # para volver al menú no funciona" tras fallo de instalación).
+        # que el prompt espere SIEMPRE la tecla del usuario (fix 25 Ago).
         try:
             import termios
             termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
         except Exception:
             pass
-        return input("")
+        return _read_line()
     except EOFError:
         return ""
 
 
 def _apply_layout(code):
-    """Apply the keyboard layout to the console (loadkeys) and X11 (setxkbmap)."""
+    """Apply the keyboard layout to the console (loadkeys, needs root) and X11 (setxkbmap)."""
     try:
-        _run(["loadkeys", code])
+        _run(["sudo", "loadkeys", code])
     except Exception:
         pass
     try:
