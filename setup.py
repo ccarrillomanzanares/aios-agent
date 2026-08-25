@@ -436,8 +436,9 @@ def _get_own_ip(iface):
 
 
 def _iface_has_internet(iface=None, timeout=4):
-    """Check de conectividad: IPs directas (sin DNS) + dominios reales (con DNS).
-    Un destino filtrado por la red (p.ej. 1.1.1.1:443) no da falso negativo."""
+    """Check de conectividad: TCP a IPs directas + dominios, y DNS UDP como
+    último recurso (redes que filtran TCP saliente). Sin falsos negativos por
+    destinos filtrados: basta con que UNO funcione."""
     import socket
     targets = [
         ("1.1.1.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 53),
@@ -450,7 +451,47 @@ def _iface_has_internet(iface=None, timeout=4):
             return True
         except Exception:
             continue
+    # Último recurso: DNS UDP (a veces el TCP saliente está filtrado pero el UDP no)
+    for server in ("1.1.1.1", "8.8.8.8", "208.67.222.222"):
+        try:
+            import struct
+            import random
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(2)
+            tid = random.randint(0, 65535)
+            q = struct.pack(">HHHHHH", tid, 0x0100, 1, 0, 0, 0) + \
+                b"\x07example\x03com\x00\x00\x01\x00\x01"
+            s.sendto(q, (server, 53))
+            s.recvfrom(512)
+            s.close()
+            return True
+        except Exception:
+            continue
     return False
+
+
+def _net_summary():
+    """Devuelve (ip, gateway) visibles — para diagnosticar el 'no internet'."""
+    ip, gw = "", ""
+    try:
+        out = subprocess.run(["ip", "-o", "addr", "show"], capture_output=True,
+                             text=True, timeout=5).stdout
+        for line in out.splitlines():
+            if " inet " in line and "127.0.0.1" not in line:
+                ip = line.split()[3].split("/")[0]
+                break
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(["ip", "route"], capture_output=True,
+                             text=True, timeout=5).stdout
+        for line in out.splitlines():
+            if line.startswith("default"):
+                gw = line.split()[2]
+                break
+    except Exception:
+        pass
+    return ip, gw
 
 
 def _ensure_dns():
@@ -1143,7 +1184,10 @@ def main():
                 wg("Checking internet connection again...")
                 online = _iface_has_internet()
                 if not online:
-                    wg("Still no internet. CLOUD mode will not be available — it will fall back to LOCAL.")
+                    ip, gw = _net_summary()
+                    wg("Still no internet connection.")
+                    wg(f"  (IP: {ip or 'none'} · Gateway: {gw or 'none'} — no external host is reachable)")
+                    wg("CLOUD mode will not be available — it will fall back to LOCAL.")
             else:
                 wg("Continuing without internet.")
 
