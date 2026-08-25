@@ -69,6 +69,21 @@ def _read_line(prompt=""):
     sys.stdout.flush()
     return "".join(buf)
 
+
+def _fix_erase():
+    """Fijar el erase char del tty a DEL (0x7f) — los prompts canonicos
+    (getpass del instalador, sudo, login) no borran con backspace si el erase
+    no coincide con la tecla (bug '^ y letras', 26 Ago 2026). Cubre tambien el
+    xterm del setup, que no lee .bashrc ni /etc/profile."""
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[6][termios.VERASE] = b"\x7f"
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
 def confirm(question):
     return ask(f"{question} (y/N)", "n").lower() in ("y", "yes")
 
@@ -550,6 +565,7 @@ def main():
         else:
             i += 1
     clear()
+    _fix_erase()
     print("\n  AIOS LFS INSTALLER v" + VERSION)
     print("")
     print("  This will install the AIOS LFS live system to a disk.")

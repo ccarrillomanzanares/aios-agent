@@ -119,6 +119,21 @@ def _cbreak_off(fd, old):
             pass
 
 
+def _fix_erase():
+    """Fijar el erase char del tty a DEL (0x7f) — el backspace de prompts
+    canonicos (getpass, sudo, login) no borra si el erase no coincide con la
+    tecla (bug '^ y letras', 26 Ago 2026). Cubre tambien el xterm del setup,
+    que no lee .bashrc ni /etc/profile."""
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        attrs = termios.tcgetattr(fd)
+        attrs[6][termios.VERASE] = b"\x7f"
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+
+
 def _read_line():
     """Lee una linea con backspace correcto y el prompt protegido (fix 25 Ago).
 
@@ -1148,6 +1163,7 @@ def main():
         return
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _fix_erase()
     _open_audio()
     clear()
 
