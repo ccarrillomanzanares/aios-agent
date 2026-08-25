@@ -1088,9 +1088,11 @@ def main():
     _open_audio()
     clear()
 
-    # Saludo (primer arranque) - frase de Wargames rotativa, seguido del menu
+    # Saludo (primer arranque) - frase de película + bienvenida + ayuda (25 Ago)
     wg(_pick_quote())
     time.sleep(0.4)
+    wg("You have just booted Artificial Intelligence Operating System.")
+    wg("Press F1 or Super+F1 (Super = the Windows key) to view the keyboard shortcuts")
     wg("")
 
     # Layout de teclado (primer arranque) — aplica TTY + X11 y se persiste
@@ -1100,7 +1102,6 @@ def main():
 
     # Menu principal (bucle: tras live o instalación vuelve al menú; solo "0" sale)
     while True:
-        wg("You have just booted Artificial Intelligence Operating System.")
         wg("What would you like to do?")
         wg("")
         wg("  1) Test AIOS in live mode, without installing")
@@ -1110,7 +1111,6 @@ def main():
         wg("Note: AIOS has only been tested on machines without multi-boot setups.")
         wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
         wg("There is no warranty of any kind, expressed or implied.")
-        wg("Press F1 anytime to view the keyboard shortcuts")
         wg("")
         choice = wg_input("> ")
         if choice == "0":
