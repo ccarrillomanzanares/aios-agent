@@ -3,6 +3,7 @@
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -129,14 +130,34 @@ def partition_and_format(disk):
     return part2
 
 def copy_system(target):
-    print("\n  Copying system to target (this may take a while)...")
+    print("\n  [4/7] Copying system files (this may take a while)...")
     excludes = [
         "--exclude=/proc/*", "--exclude=/sys/*", "--exclude=/dev/*",
         "--exclude=/run/*", "--exclude=/tmp/*", "--exclude=/mnt/*",
         "--exclude=/media/*", "--exclude=/lost+found",
         "--exclude=/swapfile",
     ]
-    run(["/usr/bin/rsync", "-aHAX"] + excludes + ["/", target])
+    # Barra de progreso global: rsync --info=progress2 emite el % del trabajo (25 Ago)
+    cmd = ["/usr/bin/rsync", "-aHAX", "--info=progress2"] + excludes + ["/", target]
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, bufsize=1)
+    except FileNotFoundError:
+        print("  ERROR: rsync not found")
+        sys.exit(1)
+    last = -1
+    for line in p.stdout:
+        m = re.search(r"(\d{1,3})%\s", line)
+        if m:
+            pct = int(m.group(1))
+            if pct != last:
+                last = pct
+                filled = pct // 5
+                print(f"\r  [{'█' * filled}{'·' * (20 - filled)}] {pct:3d}%", end="", flush=True)
+    p.wait()
+    print(f"\r  [{'█' * 20}] 100%")
+    if p.returncode != 0:
+        sys.exit(p.returncode)
 
 def setup_chroot(target):
     for d in ["dev", "proc", "sys", "run"]:
