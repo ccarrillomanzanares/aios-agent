@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Apply the persisted keyboard layout to X11 (setxkbmap). Called by i3 at startup.
+
+Reads ~/.aios/config.yaml (key "keyboard", set by setup.py in the first run).
+If missing/invalid, defaults to "us".
+"""
+import os
+import subprocess
+import sys
+
+cfg = os.path.expanduser("~/.aios/config.yaml")
+kb = "us"
+try:
+    import yaml
+    if os.path.exists(cfg):
+        with open(cfg) as f:
+            data = yaml.safe_load(f) or {}
+        kb = str(data.get("keyboard", "us") or "us")
+except Exception:
+    pass
+
+try:
+    subprocess.run(["setxkbmap", "-layout", kb], capture_output=True)
+except Exception:
+    pass

@@ -88,24 +88,25 @@ def list_disks():
     return disks
 
 def select_disk(disks):
+    """Select a disk by NUMBER (1..N) — no typing needed, layout-independent. Fallback: disk name."""
     _attempts = 0
     while True:
         clear()
         print("\n  SELECT TARGET DISK")
-        print(f"  {'DEVICE':<10} {'SIZE':<8} {'MODEL'}")
-        print(f"  {'──────':<10} {'────':<8} {'─────'}")
-        for d in disks:
-            print(f"  {d['name']:<10} {d['size']:<8} {d.get('model','')}")
+        for i, d in enumerate(disks, 1):
+            print(f"  {i}) {d['name']:<10} {d['size']:<8} {d.get('model','')}")
         print("\n  WARNING: All data on the selected disk will be destroyed.\n")
-        choice = ask("Select disk (e.g. sda, nvme0n1)", "").strip()
+        choice = ask(f"Select disk [1-{len(disks)}]", "").strip()
         if not choice:
             print("\n  No disk selected. Installation cancelled.")
             sys.exit(2)   # cancelación → setup.py vuelve al menú
+        if choice.isdigit() and 1 <= int(choice) <= len(disks):
+            return disks[int(choice) - 1]
         for d in disks:
             if d["name"] == choice:
                 return d
         _attempts += 1
-        print(f"\n  Disk '{choice}' not found. Try again (e.g. sda, nvme0n1).")
+        print(f"\n  Invalid choice '{choice}'. Pick a number 1-{len(disks)} or a disk name (e.g. sda).")
         if _attempts >= 3:
             print("\n  Too many invalid attempts. Installation cancelled.")
             sys.exit(2)
@@ -515,10 +516,7 @@ def main():
         sys.exit(1)
     disk = select_disk(disks)
     print(f"\n  Selected: /dev/{disk['name']} ({disk['size']})")
-    if not confirm("WARNING: This will DESTROY all data on this disk"):
-        print("\n  Installation cancelled.\n")
-        sys.exit(2)
-    if not ask_typed("FINAL CONFIRMATION: this will DESTROY ALL DATA on this disk", "format disk"):
+    if not ask_typed("WARNING: This will DESTROY all data on this disk", "format disk"):
         print("\n  Installation cancelled.\n")
         sys.exit(2)
     print("\n  [3/7] Partitioning and formatting...")

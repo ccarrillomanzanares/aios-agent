@@ -158,9 +158,55 @@ def wg_input(prompt, delay=_TICK_MS):
         _cbreak_off(fd_cb, old_cb)
     sys.stdout.flush()
     try:
+        # Descartar entrada pendiente (p.ej. Enter residual del subproceso) para
+        # que el prompt espere SIEMPRE la tecla del usuario (fix 25 Ago: "el Enter
+        # para volver al menú no funciona" tras fallo de instalación).
+        try:
+            import termios
+            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+        except Exception:
+            pass
         return input("")
     except EOFError:
         return ""
+
+
+def _apply_layout(code):
+    """Apply the keyboard layout to the console (loadkeys) and X11 (setxkbmap)."""
+    try:
+        _run(["loadkeys", code])
+    except Exception:
+        pass
+    try:
+        _sp.run(["setxkbmap", "-layout", code], capture_output=True)
+    except Exception:
+        pass
+
+
+_LAYOUTS = {
+    "1": ("us", "US / QWERTY"),
+    "2": ("fr", "French / AZERTY"),
+    "3": ("es", "Spanish / QWERTY-ES"),
+    "4": ("de", "German / QWERTZ"),
+    "5": ("other", "Other (localectl --list-keymaps)"),
+}
+
+
+def _select_layout():
+    """Ask the user for the keyboard layout (TTY + X11). Returns the layout name."""
+    wg("Select keyboard layout:")
+    for k, (_code, label) in _LAYOUTS.items():
+        wg(f"  {k}) {label}")
+    choice = wg_input("> ").strip()
+    if choice not in _LAYOUTS:
+        wg("  Using default (US / QWERTY).")
+        _apply_layout("us")
+        return "us"
+    code = _LAYOUTS[choice][0]
+    if code == "other":
+        code = wg_input("Layout name (e.g. be, cz, it): ").strip() or "us"
+    _apply_layout(code)
+    return code
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +236,8 @@ CLOUD_KEY_URLS = {
 
 CONFIG_DIR = Path.home() / ".aios"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
+
+_KB_LAYOUT = "us"   # layout de teclado elegido en el primer arranque (persistido en config.yaml)
 
 WPA_DIR = Path("/etc/wpa_supplicant")
 SYSTEMD_DIR = Path("/etc/systemd/system")
@@ -794,6 +842,7 @@ def _write_local_config(theme="wargames"):
     config = {
         "mode": "local",
         "theme": theme,
+        "keyboard": _KB_LAYOUT,
         "local": {
             "model": LOCAL_MODELS[0]["file"],
             "model_name": LOCAL_MODELS[0]["name"],
@@ -816,6 +865,7 @@ def _write_cloud_config(prov_data, model, key, theme="wargames"):
     config = {
         "mode": "cloud",
         "theme": theme,
+        "keyboard": _KB_LAYOUT,
         "local": {
             "model": LOCAL_MODELS[0]["file"],
             "model_name": LOCAL_MODELS[0]["name"],
@@ -1004,6 +1054,11 @@ def main():
     # Saludo (primer arranque) - frase de Wargames rotativa, seguido del menu
     wg(_pick_quote())
     time.sleep(0.4)
+    wg("")
+
+    # Layout de teclado (primer arranque) — aplica TTY + X11 y se persiste
+    global _KB_LAYOUT
+    _KB_LAYOUT = _select_layout()
     wg("")
 
     # Menu principal (bucle: tras live o instalación vuelve al menú; solo "0" sale)
