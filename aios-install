@@ -545,7 +545,6 @@ def main():
     target = "/mnt/target"
     Path(target).mkdir(parents=True, exist_ok=True)
     run(["/usr/bin/mount", root_part, target])
-    print("\n  [4/7] Copying system files (this may take a while)...")
     copy_system(target)
     setup_chroot(target)
     print("\n  [5/7] Installing bootloader (GRUB)...")
