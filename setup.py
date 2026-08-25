@@ -214,6 +214,13 @@ def _apply_layout(code):
     except Exception:
         pass
     try:
+        # Forzar Backspace de la consola a DEL (0x7f) con cualquier layout:
+        # algunos keymaps (fr/es) mandan ^H (0x08) y el backspace no borra
+        # en prompts canonicos (sudo/getpass) -> "caracteres ^ y letras" (26 Ago).
+        _run(["sudo", "bash", "-c", "echo 'keycode 14 = Delete' | loadkeys"])
+    except Exception:
+        pass
+    try:
         _sp.run(["setxkbmap", "-layout", code], capture_output=True)
     except Exception:
         pass
