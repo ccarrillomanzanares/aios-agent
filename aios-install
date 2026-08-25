@@ -241,7 +241,7 @@ dev /dev devtmpfs mode=0755,nosuid 0 0
 
 def enable_services(target):
     print("  Enabling systemd services...")
-    for svc in ["aios-llama.service"]:
+    for svc in ["aios-llama.service", "sven-sync.service", "sven-sync.timer"]:
         run(["/usr/sbin/chroot", target, "systemctl", "enable", svc])
 
 def persist_wifi(target):
