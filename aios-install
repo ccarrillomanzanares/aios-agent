@@ -187,10 +187,11 @@ def copy_system(target):
         m = re.search(r"(\d{1,3})%\s", line)
         if m:
             pct = int(m.group(1))
-            if pct != last:
-                last = pct
-                filled = pct // 5
-                print(f"\r  [{'█' * filled}{'·' * (20 - filled)}] {pct:3d}%", end="", flush=True)
+            if pct <= last:      # el total estimado se recalcula: ignorar bajadas (barra monótona)
+                continue
+            last = pct
+            filled = pct // 5
+            print(f"\r  [{'█' * filled}{'·' * (20 - filled)}] {pct:3d}%", end="", flush=True)
     p.wait()
     print(f"\r  [{'█' * 20}] 100%")
     if p.returncode != 0:
