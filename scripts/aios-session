@@ -1,18 +1,9 @@
 #!/bin/bash
-# AIOS Session: setup wizard (si no hay config) + startx
+# AIOS Session: arranca el escritorio (X + i3).
+# El setup del primer arranque (si no hay config) lo gestiona i3 en xterm
+# (linea 54 del i3 config: setup.py en aios-xterm). Decision Carlos 26 Ago:
+# el menu sale DESPUES de i3, nunca antes (el setup-before-X de consola
+# tty1 se elimino — hacia que el menu apareciera sin startx).
 LOG="/home/aios/startx.log"
-
-if [ ! -f "$HOME/.aios/config.yaml" ]; then
-    echo ""
-    echo "  ╔══════════════════════════════════════════════╗"
-    echo "  ║  AIOS AGENT - First Run Setup                ║"
-    echo "  ╚══════════════════════════════════════════════╝"
-    echo ""
-    cd /usr/local/bin/aios-agent
-    python3 setup.py
-    echo ""
-    echo "  Setup complete. Starting desktop..."
-    echo ""
-fi
 
 exec /usr/bin/startx "$@" > "$LOG" 2>&1
