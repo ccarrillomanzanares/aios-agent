@@ -396,12 +396,14 @@ def apply_theme(target, theme):
             os.chown(p, uid, gid)
 
 def persist_keyboard(target, layout):
-    """Persiste el layout de teclado en la consola del disco (/etc/vconsole.conf).
+    """Persiste layout de teclado + fuente GRANDE de login en el disco (/etc/vconsole.conf).
 
-    Reemplaza la linea KEYMAP= existente (o la anade) preservando el resto
-    (p.ej. FONT=). Solo actua si layout es un keymap valido en el arbol:
+    El disco arranca con login de consola -> KEYMAP=<layout elegido> + FONT=ter-232n
+    (fuente ~triple, decision Carlos 26 Ago: SOLO para el login del DISCO; el live
+    usa autologin y mantiene la fuente del arbol ter-112n).
+    Preserva el resto de lineas. Solo actua si layout es un keymap valido en el arbol:
     /usr/share/kbd/keymaps/**/<layout>.map.gz (si no, avisa y deja el actual).
-    systemd-vconsole-setup lo aplica en cada arranque -> login con el teclado elegido.
+    systemd-vconsole-setup lo aplica en cada arranque -> login con teclado y fuente grandes.
     X11 lo aplica aios-keyboard desde keyboard: en ~/.aios/config.yaml (setup_aios_config)."""
     if not layout:
         return
@@ -415,12 +417,14 @@ def persist_keyboard(target, layout):
     lines = []
     if vc.exists():
         try:
-            lines = [l for l in vc.read_text().splitlines() if l.strip() and not l.strip().startswith("KEYMAP")]
+            lines = [l for l in vc.read_text().splitlines()
+                     if l.strip() and not l.strip().startswith("KEYMAP") and not l.strip().startswith("FONT")]
         except Exception:
             lines = []
     lines.append(f"KEYMAP={layout}")
+    lines.append("FONT=ter-232n")
     vc.write_text("\n".join(lines) + "\n")
-    print(f"  Keyboard layout {layout} persisted (console + X11)")
+    print(f"  Keyboard layout {layout} + FONT=ter-232n persisted (login disco)")
 
 def persist_ntp(target):
     """Copia la config NTP del live (si se configuro) y habilita systemd-timesyncd en el disco."""
