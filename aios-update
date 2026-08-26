@@ -86,8 +86,9 @@ MANIFEST=(
 
 changed=0; same=0
 for entry in "${MANIFEST[@]}"; do
-  src="${entry%% *}"
-  dst="${entry#* }"
+  # read -r colapsa los espacios de alineacion del manifest (fix 26 Ago:
+  # ${entry#* } dejaba los espacios pegados a dst -> [ -f ] falso -> nunca actualizaba)
+  read -r src dst <<< "$entry"
   case "$src" in
     agent/*) file="$CACHE/aios-agent/${src#agent/}" ;;
     lfs/*)   file="$CACHE/aios-lfs/${src#lfs/}" ;;
