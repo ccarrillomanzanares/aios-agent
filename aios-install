@@ -299,15 +299,39 @@ def configure_system(target):
 ::1 localhost ip6-localhost ip6-loopback
 """)
 
-def setup_aios_config(target, mode="local", theme="wargames"):
+def _live_layout():
+    """Lee el layout de teclado elegido en el live (keyboard: en ~/.aios/config.yaml).
+    El instalador corre como root (Path.home()=/root) -> probar primero la ruta real
+    del usuario aios. Devuelve None si no hay elección."""
+    candidates = ["/home/aios/.aios/config.yaml", str(Path.home() / ".aios" / "config.yaml")]
+    for p in candidates:
+        try:
+            import yaml
+            with open(p) as f:
+                data = yaml.safe_load(f) or {}
+            kb = data.get("keyboard")
+            if kb:
+                return str(kb)
+        except Exception:
+            continue
+    return None
+
+def setup_aios_config(target, mode="local", theme="wargames", layout=None):
     aios_home = Path(target) / "home" / "aios" / ".aios"
     aios_home.mkdir(parents=True, exist_ok=True)
     uid = os.stat(Path(target) / "home" / "aios").st_uid
     gid = os.stat(Path(target) / "home" / "aios").st_gid
+    # Layout: el elegido en el live (--layout) o el persistido en su config.yaml
+    if not layout:
+        layout = _live_layout()
     # Modo cloud: copiar config + API key ya configurados en el live por el setup
     if mode == "cloud":
-        live_cfg = Path.home() / ".aios" / "config.yaml"
-        live_env = Path.home() / ".aios" / ".env"
+        live_cfg = Path("/home/aios/.aios/config.yaml")
+        if not live_cfg.exists():
+            live_cfg = Path.home() / ".aios" / "config.yaml"
+        live_env = Path("/home/aios/.aios/.env")
+        if not live_env.exists():
+            live_env = Path.home() / ".aios" / ".env"
         copied = False
         if live_cfg.exists():
             with open(live_cfg, "rb") as f:
@@ -320,6 +344,17 @@ def setup_aios_config(target, mode="local", theme="wargames"):
                 data = f.read()
             with open(aios_home / ".env", "wb") as f:
                 f.write(data)
+        # Asegurar keyboard: en el config copiado (cuando el instalador recibe --layout)
+        if copied and layout:
+            try:
+                import yaml
+                with open(aios_home / "config.yaml") as f:
+                    data = yaml.safe_load(f) or {}
+                data["keyboard"] = layout
+                with open(aios_home / "config.yaml", "w") as f:
+                    yaml.dump(data, f, default_flow_style=False)
+            except Exception:
+                pass
         for f in aios_home.iterdir():
             os.chown(f, uid, gid)
         if copied:
@@ -330,6 +365,7 @@ def setup_aios_config(target, mode="local", theme="wargames"):
     config = {
         "mode": "local",
         "theme": theme,
+        "keyboard": layout or "us",
         "local": {
             "model": model_name,
             "model_name": model_name.replace(".gguf", "").replace("Qwen_", "").replace("Instruct-", ""),
@@ -358,6 +394,33 @@ def apply_theme(target, theme):
         p = Path(target + f)
         if p.exists():
             os.chown(p, uid, gid)
+
+def persist_keyboard(target, layout):
+    """Persiste el layout de teclado en la consola del disco (/etc/vconsole.conf).
+
+    Reemplaza la linea KEYMAP= existente (o la anade) preservando el resto
+    (p.ej. FONT=). Solo actua si layout es un keymap valido en el arbol:
+    /usr/share/kbd/keymaps/**/<layout>.map.gz (si no, avisa y deja el actual).
+    systemd-vconsole-setup lo aplica en cada arranque -> login con el teclado elegido.
+    X11 lo aplica aios-keyboard desde keyboard: en ~/.aios/config.yaml (setup_aios_config)."""
+    if not layout:
+        return
+    # Validar que el keymap existe en el sistema instalado
+    import glob
+    found = glob.glob(f"{target}/usr/share/kbd/keymaps/**/{layout}.map.gz", recursive=True)
+    if not found:
+        print(f"  WARN: persist_keyboard: no keymap '{layout}' in the system, keeping current")
+        return
+    vc = Path(target) / "etc" / "vconsole.conf"
+    lines = []
+    if vc.exists():
+        try:
+            lines = [l for l in vc.read_text().splitlines() if l.strip() and not l.strip().startswith("KEYMAP")]
+        except Exception:
+            lines = []
+    lines.append(f"KEYMAP={layout}")
+    vc.write_text("\n".join(lines) + "\n")
+    print(f"  Keyboard layout {layout} persisted (console + X11)")
 
 def persist_ntp(target):
     """Copia la config NTP del live (si se configuro) y habilita systemd-timesyncd en el disco."""
@@ -550,9 +613,10 @@ exec /bin/busybox switch_root /root /sbin/init
 
 def main():
     import sys
-    # aios-install [--mode local|cloud] [--theme <name>] - modo del agente en el sistema instalado
+    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] - modo del agente en el sistema instalado
     mode = "local"
     theme = "wargames"
+    layout = None
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -561,6 +625,9 @@ def main():
             i += 2
         elif args[i] == "--theme" and i + 1 < len(args):
             theme = args[i + 1]
+            i += 2
+        elif args[i] == "--layout" and i + 1 < len(args):
+            layout = args[i + 1]
             i += 2
         else:
             i += 1
@@ -612,10 +679,11 @@ def main():
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
-    setup_aios_config(target, mode, theme)
+    setup_aios_config(target, mode, theme, layout)
     apply_theme(target, theme)
     persisted_ifaces = persist_wifi(target)
     persist_ntp(target)
+    persist_keyboard(target, layout)
     cleanup_chroot(target)
     print("\n  [7/7] Finalizing (passwords, security)...")
     passwords_changed = set_passwords(target)

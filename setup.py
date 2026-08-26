@@ -1121,7 +1121,7 @@ def _install_flow(online):
         setup_ntp(standalone=False)
     wg("")
     wg("Launching the installer...")
-    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme])
+    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme, "--layout", _KB_LAYOUT])
     if ret.returncode == 2:
         wg("Installation cancelled.")
         wg_input("Press Enter to return to the menu...")
