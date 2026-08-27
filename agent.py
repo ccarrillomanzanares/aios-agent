@@ -96,7 +96,11 @@ def _cbreak_off(fd, old):
 API_KEY = os.environ.get("AIOS_API_KEY", "")
 AIOS_MODE = os.environ.get("AIOS_MODE", "local")
 CLOUD_MODEL = os.environ.get("AIOS_CLOUD_MODEL", "")
-CLOUD_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+AUTH_TYPE = os.environ.get("AIOS_CLOUD_AUTH", "bearer")
+if API_KEY:
+    CLOUD_HEADERS = {"X-API-Key": API_KEY} if AUTH_TYPE == "x-api-key" else {"Authorization": f"Bearer {API_KEY}"}
+else:
+    CLOUD_HEADERS = {}
 # Thinking mode local (binario). Qwen3 piensa por defecto; /no_think lo apaga.
 # OFF (por defecto) -> rápido; ON -> el modelo razona antes de responder (más preciso, más lento).
 THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true", "yes", "on")

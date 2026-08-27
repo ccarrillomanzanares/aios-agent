@@ -371,12 +371,14 @@ def main():
         provider = config.get("cloud", {}).get("provider")
         model = config.get("cloud", {}).get("model")
         ctx = config.get("cloud", {}).get("context_limit", 128000)
-        api_key = os.environ.get("AIOS_API_KEY", os.environ.get(CLOUD_ENV_VARS.get(provider, ""), ""))
+        provider_env = config.get("cloud", {}).get("provider_env", "")
+        api_key = os.environ.get(provider_env, "") if provider_env else os.environ.get("AIOS_API_KEY", os.environ.get(CLOUD_ENV_VARS.get(provider, ""), ""))
         endpoint = config.get("cloud", {}).get("base_url") or CLOUD_ENDPOINTS.get(provider, "https://api.deepseek.com/v1/chat/completions")
         os.environ["AIOS_LLAMA_SERVER"] = endpoint
         os.environ["AIOS_API_KEY"] = api_key
         os.environ["AIOS_CLOUD_MODEL"] = model or "deepseek-chat"
         os.environ["AIOS_CLOUD_CONTEXT"] = str(ctx)
+        os.environ["AIOS_CLOUD_AUTH"] = config.get("cloud", {}).get("auth_type", "bearer")
     elif mode == "hybrid":
         os.environ["AIOS_MODE"] = "hybrid"
         os.environ["AIOS_LLAMA_SERVER"] = "http://localhost:8083/v1/chat/completions"

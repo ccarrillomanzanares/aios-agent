@@ -741,7 +741,7 @@ def setup_wifi():
 # Cloud flow (heredado del setup anterior - reutilizado sin cajas)
 # ---------------------------------------------------------------------------
 
-def validate_api_key(provider, api_key, base_url=None):
+def validate_api_key(provider, api_key, base_url=None, auth_type="bearer"):
     """Test the API key with a lightweight request (hard timeout, DNS-safe)."""
     base_url = base_url or CLOUD_ENDPOINTS.get(provider, "")
     if not base_url:
@@ -751,10 +751,10 @@ def validate_api_key(provider, api_key, base_url=None):
     if "chat/completions" in base_url:
         base_url = base_url.rsplit("/chat/completions", 1)[0]
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "User-Agent": "AIOS-Setup/1.0"
-    }
+    if auth_type == "x-api-key":
+        headers = {"X-API-Key": api_key, "User-Agent": "AIOS-Setup/1.0"}
+    else:
+        headers = {"Authorization": f"Bearer {api_key}", "User-Agent": "AIOS-Setup/1.0"}
     result = {}
 
     def _check():
@@ -878,8 +878,13 @@ def select_provider_and_model():
             if not model:
                 wg("Model name cannot be empty.")
                 continue
+            wg("  Auth type:")
+            wg("    b) Bearer  (Authorization: Bearer <key>  — most providers)")
+            wg("    x) X-API-Key  (header X-API-Key: <key>  — Ollama hardened)")
+            auth_opt = wg_input("  Select (b/x): ").strip().lower()
+            auth_type = "x-api-key" if auth_opt == "x" else "bearer"
             prov = {"name": name, "models": [(model, model)], "env": "OTHER_API_KEY",
-                    "context_limit": 128000, "base_url": url}
+                    "context_limit": 128000, "base_url": url, "auth_type": auth_type}
             return prov, model
         if opt < 1 or opt > 7:
             wg("Invalid option. Choose 1-9.")
@@ -984,6 +989,8 @@ def _write_cloud_config(prov_data, model, key, theme="wargames"):
             "model": model,
             "context_limit": prov_data.get("context_limit", 128000),
             "base_url": prov_data.get("base_url"),
+            "auth_type": prov_data.get("auth_type", "bearer"),
+            "provider_env": prov_data.get("env", ""),
         },
     }
     with open(CONFIG_FILE, "w") as f:
@@ -1024,7 +1031,7 @@ def _cloud_flow(theme="wargames"):
             wg("No API key provided. Cancelling cloud setup.")
             return False
         wg("Testing API key...")
-        valid = validate_api_key(prov_data["name"], key, prov_data.get("base_url"))
+        valid = validate_api_key(prov_data["name"], key, prov_data.get("base_url"), prov_data.get("auth_type", "bearer"))
         if valid is True:
             wg("API key is valid.")
             return _write_cloud_config(prov_data, model, key, theme)
