@@ -430,6 +430,21 @@ def main():
             print(f"  Typewriter sound: {'ON' if agent.SOUND_ON else 'OFF'}")
             continue
 
+        if query.lower() == "/think":
+            if mode not in ("local", "hybrid"):
+                print("  Thinking mode is a local-model feature (not available in cloud).")
+                continue
+            new_state = agent.set_think(not agent.think)
+            try:
+                import yaml
+                cfg = yaml.safe_load(CONFIG_FILE.read_text()) or {}
+                cfg.setdefault("local", {})["think"] = new_state
+                CONFIG_FILE.write_text(yaml.dump(cfg, default_flow_style=False))
+            except Exception:
+                pass
+            print(f"  Thinking mode: {'ON' if new_state else 'OFF'} (ON = more precise, slower)")
+            continue
+
         if query.lower().startswith("/theme"):
             themes = {
                 "wargames": "Wargames - classic dark green (default)",

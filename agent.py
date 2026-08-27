@@ -168,24 +168,24 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 2
 
 
-# Solo decimos "no pienses" cuando el thinking está apagado. Si está encendido,
-# dejamos que Qwen3 razone (más preciso); el bloque <think> se limpia en _clean().
-_NO_THINK_RULE = "" if THINK_LOCAL else "Do not use <think> tags.\n"
-
-_RULES_COMMON = (
-    "Always respond in the same language the user writes in.\n"
-    "Be concise.\n"
-    "If you run a command, show its output to the user.\n"
-    "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
-    "If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).\n"
-    "If you don't know something, say so honestly: 'I don't know'.\n"
-    + _NO_THINK_RULE
-    + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
-    "Example:\n"
-    "  User: \"install WordPress with Docker and MariaDB\"\n"
-    "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
-    "\nIf a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."
-)
+def _rules_common():
+    # Solo decimos "no pienses" cuando el thinking está apagado. Si está encendido,
+    # dejamos que Qwen3 razone (más preciso); el bloque <think> se limpia en _clean().
+    _no_think = "" if THINK_LOCAL else "Do not use <think> tags.\n"
+    return (
+        "Always respond in the same language the user writes in.\n"
+        "Be concise.\n"
+        "If you run a command, show its output to the user.\n"
+        "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
+        "If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).\n"
+        "If you don't know something, say so honestly: 'I don't know'.\n"
+        + _no_think
+        + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
+        "Example:\n"
+        "  User: \"install WordPress with Docker and MariaDB\"\n"
+        "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
+        "\nIf a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."
+    )
 
 _CLOUD_IDENTITY = """You are AIOS, the assistant of the AIOS operating system - a Linux distribution built from scratch (LFS) with a package layer managed by sven.
 
@@ -208,7 +208,7 @@ Update AIOS itself: run 'aios-update' (updates agent, scripts and configs; requi
 
 """
 
-SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _RULES_COMMON
+SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _rules_common()
 
 from tools import TOOLS, execute_tool
 from memory import ProceduralMemory
@@ -219,6 +219,7 @@ class Agent:
 
     def __init__(self):
         self.memory = ProceduralMemory()
+        self.think = THINK_LOCAL
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self._load_session()
 
@@ -557,6 +558,22 @@ class Agent:
                 break
 
         return final_response or "(no response)"
+
+    def set_think(self, on: bool) -> bool:
+        """Activa/desactiva el thinking en caliente (token + max_tokens + system prompt)."""
+        global THINK_LOCAL, MAX_TOKENS, SYSTEM_PROMPT
+        THINK_LOCAL = on
+        self.think = on
+        if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
+            MAX_TOKENS = 4096
+        else:
+            MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
+            if THINK_LOCAL:
+                MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
+        SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _rules_common()
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
+        return on
 
     def reset(self):
         """Reinicia la conversación."""
