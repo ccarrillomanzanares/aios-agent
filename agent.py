@@ -97,6 +97,9 @@ API_KEY = os.environ.get("AIOS_API_KEY", "")
 AIOS_MODE = os.environ.get("AIOS_MODE", "local")
 CLOUD_MODEL = os.environ.get("AIOS_CLOUD_MODEL", "")
 CLOUD_HEADERS = {"Authorization": f"Bearer {API_KEY}"} if API_KEY else {}
+# Thinking mode local (binario). Qwen3 piensa por defecto; /no_think lo apaga.
+# OFF (por defecto) -> rápido; ON -> el modelo razona antes de responder (más preciso, más lento).
+THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true", "yes", "on")
 
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
@@ -140,6 +143,10 @@ if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
     MAX_TOKENS = 4096
 else:
     MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
+    if THINK_LOCAL:
+        # El razonamiento (<think>) consume tokens ANTES de la respuesta visible;
+        # con poco presupuesto el modelo corta en finish=length y devuelve vacío.
+        MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
 
 MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.50)
 SESSION_FILE = Path("data") / f"session_{os.environ.get('AIOS_MODE', 'local')}.json"
@@ -161,20 +168,24 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 2
 
 
-_RULES_COMMON = """Always respond in the same language the user writes in.
-Be concise.
-If you run a command, show its output to the user.
-Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.
-If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).
-If you don't know something, say so honestly: 'I don't know'.
-Do not use <think> tags.
+# Solo decimos "no pienses" cuando el thinking está apagado. Si está encendido,
+# dejamos que Qwen3 razone (más preciso); el bloque <think> se limpia en _clean().
+_NO_THINK_RULE = "" if THINK_LOCAL else "Do not use <think> tags.\n"
 
-For complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.
-Example:
-  User: "install WordPress with Docker and MariaDB"
-  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.
-
-If a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."""
+_RULES_COMMON = (
+    "Always respond in the same language the user writes in.\n"
+    "Be concise.\n"
+    "If you run a command, show its output to the user.\n"
+    "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
+    "If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).\n"
+    "If you don't know something, say so honestly: 'I don't know'.\n"
+    + _NO_THINK_RULE
+    + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
+    "Example:\n"
+    "  User: \"install WordPress with Docker and MariaDB\"\n"
+    "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
+    "\nIf a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."
+)
 
 _CLOUD_IDENTITY = """You are AIOS, the assistant of the AIOS operating system - a Linux distribution built from scratch (LFS) with a package layer managed by sven.
 
@@ -348,7 +359,8 @@ class Agent:
             if cached:
                 return f"[cache] {cached}"
 
-        self.messages.append({"role": "user", "content": f"/no_think {query}"})
+        content = query if THINK_LOCAL else f"/no_think {query}"
+        self.messages.append({"role": "user", "content": content})
 
         final_response = ""
         empty_retries = 0

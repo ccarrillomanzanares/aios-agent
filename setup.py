@@ -942,6 +942,9 @@ def _write_local_config(theme="wargames"):
 
     ram_gb = detect_ram_gb()
     ctx = auto_context(ram_gb)
+    # Thinking mode local: OFF por defecto (rápido). ON razona antes de responder.
+    think_opt = wg_input("Enable thinking mode? (slower, more precise) [y/N]: ").strip().lower()
+    think = think_opt in ("y", "yes")
     config = {
         "mode": "local",
         "theme": theme,
@@ -951,6 +954,7 @@ def _write_local_config(theme="wargames"):
             "model_name": LOCAL_MODELS[0]["name"],
             "threads": detect_cpu(),
             "context": ctx,
+            "think": think,
         },
         "cloud": {"provider": None, "model": None},
     }
@@ -1115,13 +1119,20 @@ def _install_flow(online):
     if mode != "cloud":
         theme = _select_theme()
 
+    # Thinking mode local: OFF por defecto. Solo se pregunta en modo local.
+    think = False
+    if mode == "local":
+        think_opt = wg_input("Enable thinking mode? (slower, more precise) [y/N]: ").strip().lower()
+        think = think_opt in ("y", "yes")
+
     wg("")
     ntp_opt = wg_input("Set the correct time automatically using an internet time server? (y/N): ").strip().lower()
     if ntp_opt == "y":
         setup_ntp(standalone=False)
     wg("")
     wg("Launching the installer...")
-    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme, "--layout", _KB_LAYOUT])
+    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme, "--layout", _KB_LAYOUT,
+                   "--think", "1" if think else "0"])
     if ret.returncode == 2:
         wg("Installation cancelled.")
         wg_input("Press Enter to return to the menu...")

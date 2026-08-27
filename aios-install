@@ -316,7 +316,34 @@ def _live_layout():
             continue
     return None
 
-def setup_aios_config(target, mode="local", theme="wargames", layout=None):
+def _detect_cpu():
+    """Threads recomendados (87.5% de los cores) — espejo de setup.py detect_cpu()."""
+    return max(1, int((os.cpu_count() or 4) * 0.875))
+
+
+def _detect_ram_gb():
+    """RAM total en GB desde /proc/meminfo — espejo de setup.py detect_ram_gb()."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return round(kb / 1024 / 1024)
+    except Exception:
+        pass
+    return 12
+
+
+def _auto_context(ram_gb):
+    """Contexto según RAM (espejo de setup.py auto_context): <=8->8K, <=16->32K, >16->64K."""
+    if ram_gb <= 8:
+        return 8192
+    elif ram_gb <= 16:
+        return 32768
+    return 65536
+
+
+def setup_aios_config(target, mode="local", theme="wargames", layout=None, think=False):
     aios_home = Path(target) / "home" / "aios" / ".aios"
     aios_home.mkdir(parents=True, exist_ok=True)
     uid = os.stat(Path(target) / "home" / "aios").st_uid
@@ -369,8 +396,9 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None):
         "local": {
             "model": model_name,
             "model_name": model_name.replace(".gguf", "").replace("Qwen_", "").replace("Instruct-", ""),
-            "threads": 14,
-            "context": 32768,
+            "threads": _detect_cpu(),
+            "context": _auto_context(_detect_ram_gb()),
+            "think": think,
         },
         "cloud": {"provider": None, "model": None},
     }
@@ -617,10 +645,11 @@ exec /bin/busybox switch_root /root /sbin/init
 
 def main():
     import sys
-    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] - modo del agente en el sistema instalado
+    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] [--think 0|1] - modo del agente en el sistema instalado
     mode = "local"
     theme = "wargames"
     layout = None
+    think = False
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -632,6 +661,9 @@ def main():
             i += 2
         elif args[i] == "--layout" and i + 1 < len(args):
             layout = args[i + 1]
+            i += 2
+        elif args[i] == "--think" and i + 1 < len(args):
+            think = args[i + 1] in ("1", "true", "yes", "on")
             i += 2
         else:
             i += 1
@@ -683,7 +715,7 @@ def main():
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
-    setup_aios_config(target, mode, theme, layout)
+    setup_aios_config(target, mode, theme, layout, think)
     apply_theme(target, theme)
     persisted_ifaces = persist_wifi(target)
     persist_ntp(target)

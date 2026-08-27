@@ -394,6 +394,11 @@ def main():
             if env_var:
                 os.environ[env_var] = api_key
 
+    # Thinking switch del modelo local (aplica a local y hybrid). Debe ir ANTES de
+    # importar agent, porque agent.py lee AIOS_LOCAL_THINK al importarse.
+    if mode in ("local", "hybrid"):
+        os.environ["AIOS_LOCAL_THINK"] = "true" if config.get("local", {}).get("think", False) else "false"
+
     from agent import Agent
     # Start local model server if needed
     if mode in ("local", "hybrid"):
