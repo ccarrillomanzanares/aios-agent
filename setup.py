@@ -837,6 +837,16 @@ PROVIDERS = [
         "context_limit": 128000,
     },
     {
+        "name": "Ollama Hardened",
+        "models": [
+            ("hf.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF:Q3_K_M", "Moonlight-16B-A3B Q3_K_M - 16B MoE (3B activos)"),
+        ],
+        "env": "OLLAMA_HARDENED_API_KEY",
+        "context_limit": 8192,
+        "base_url": "https://webuillama.ccmai.org:8443/v1/chat/completions",
+        "auth_type": "x-api-key",
+    },
+    {
         "name": "OpenRouter",
         "models": [],
         "env": "OPENROUTER_API_KEY",
@@ -852,18 +862,18 @@ def select_provider_and_model():
         wg("Select the cloud provider:")
         for i, p in enumerate(PROVIDERS, 1):
             wg(f"  {i}) {p['name']}")
-        wg("  8) Other (custom endpoint)")
-        wg("  9) Back")
+        wg("  9) Other (custom endpoint)")
+        wg("  10) Back")
         wg("")
         try:
-            opt = int(wg_input("  Select (1-9): "))
+            opt = int(wg_input("  Select (1-10): "))
         except ValueError:
-            wg("Invalid option. Choose 1-9.")
+            wg("Invalid option. Choose 1-10.")
             continue
 
-        if opt == 9:
+        if opt == 10:
             return None, None
-        if opt == 8:
+        if opt == 9:
             wg("")
             wg("Custom provider (Other):")
             name = wg_input("  Provider name: ").strip()
@@ -886,8 +896,8 @@ def select_provider_and_model():
             prov = {"name": name, "models": [(model, model)], "env": "OTHER_API_KEY",
                     "context_limit": 128000, "base_url": url, "auth_type": auth_type}
             return prov, model
-        if opt < 1 or opt > 7:
-            wg("Invalid option. Choose 1-9.")
+        if opt < 1 or opt > 8:
+            wg("Invalid option. Choose 1-10.")
             continue
 
         prov = PROVIDERS[opt - 1]
