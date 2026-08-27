@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.11 - agosto 2026
+
+### mejoras al LLM local (precisión / anti-alucinación)
+
+- **Grounding AIOS**: `_AIOS_GROUNDING` inyecta los invariantes de AIOS en el system prompt (LFS, `sven` como único gestor — nunca apt/dnf/pacman, systemd, i3, red con systemd-networkd + wpa_supplicant sin ctrl_interface, usrmerge, `aios-update`/`aios-install`, grabación `$mod+Print`). Evita que el modelo invente comandos de otras distros.
+- **Disciplina de verificación**: regla en el prompt — para preguntas sobre el estado ACTUAL del sistema (RAM/disco/procesos/servicios), comprobar con tool primero, nunca responder de memoria.
+- **Sampling según doc oficial de Qwen3**: `_sampling_params()` — thinking `temp 0.6/top_p 0.95/top_k 20/min_p 0`, no-thinking `0.7/0.8/20/0`; cloud mantiene temperatura conservadora. Verificado A/B en VPS (b10655): misma respuesta correcta, sin repeticiones.
+- **Eco del reasoning_content**: el agente captura y devuelve `reasoning_content` en el historial multi-turno (thinking limpio en conversaciones largas).
+
 ## v3.10 - agosto 2026
 
 ### switch thinking local (ON/OFF) + context/threads relativos en instalación a disco
