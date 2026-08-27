@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.12 - agosto 2026
+
+### soporte ollama-hardened (Moonlight) como proveedor
+
+- **X-API-Key**: `auth_type` en config (bearer/x-api-key); `CLOUD_HEADERS` usa `X-API-Key` para hardened. `verify=False` solo x-api-key (cert self-signed).
+- **Proveedor "Ollama Hardened"**: `https://webuillama.ccmai.org:8443/v1/chat/completions`, Moonlight-16B-A3B Q3_K_M. Key en `~/.aios/.env` (privada, no en ISO).
+- **Fix lectura de key** del proveedor custom (`provider_env`).
+- **Caddyfile hardened** (repo ollama-hardened): rutas API → 401 sin key válida.
+
 ## v3.11 - agosto 2026
 
 ### mejoras al LLM local (precisión / anti-alucinación)
