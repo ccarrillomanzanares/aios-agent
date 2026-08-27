@@ -175,6 +175,7 @@ def _rules_common():
     return (
         "Always respond in the same language the user writes in.\n"
         "Be concise.\n"
+        "For questions about the CURRENT state of the system (RAM, disk, processes, services, installed packages, network), ALWAYS check with a tool first — never answer from memory.\n"
         "If you run a command, show its output to the user.\n"
         "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
         "If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).\n"
@@ -186,6 +187,23 @@ def _rules_common():
         "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
         "\nIf a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."
     )
+
+_AIOS_GROUNDING = """AIOS is Linux From Scratch (LFS), NOT Debian/Ubuntu/Arch/Fedora. Packages are managed ONLY with `sven`:
+- `sven install <pkg>` / `sven remove <pkg>` / `sven search <q>` / `sven update` / `sven upgrade`
+- There is NO apt/apt-get, NO dnf/yum, NO pacman. Never suggest them.
+
+AIOS facts:
+- Init: systemd (systemctl works).
+- Desktop: Xorg + i3 (no GNOME/KDE).
+- Network: systemd-networkd (ethernet + wifi DHCP); WiFi uses wpa_supplicant WITHOUT ctrl_interface — read SSID with `iw dev <iface> link`, never `wpa_cli`.
+- Filesystem: usrmerge (binaries in /usr/bin, libs in /usr/lib).
+- Update AIOS: `aios-update` (needs sudo). Install to disk: `aios-install`.
+- Screen recording: $mod+Print toggles /tmp/grabacion.mp4.
+- Local LLM: llama-server on 127.0.0.1:8083.
+
+If unsure whether a package or command exists in AIOS, CHECK it (sven search / which) instead of guessing.
+
+"""
 
 _CLOUD_IDENTITY = """You are AIOS, the assistant of the AIOS operating system - a Linux distribution built from scratch (LFS) with a package layer managed by sven.
 
@@ -208,7 +226,17 @@ Update AIOS itself: run 'aios-update' (updates agent, scripts and configs; requi
 
 """
 
-SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _rules_common()
+SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common()
+
+def _sampling_params():
+    """Sampling: Qwen3 local sigue la doc oficial (thinking 0.6/0.95; no-thinking 0.7/0.8).
+    Cloud mantiene temperatura conservadora — los modelos cloud ya vienen calibrados."""
+    if os.environ.get("AIOS_MODE") == "cloud":
+        return {"temperature": TEMPERATURE}
+    if THINK_LOCAL:
+        return {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0}
+    return {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0}
+
 
 from tools import TOOLS, execute_tool
 from memory import ProceduralMemory
@@ -372,9 +400,9 @@ class Agent:
             payload = {
                 "messages": self.messages,
                 "tools": TOOLS,
-                "temperature": TEMPERATURE,
                 "max_tokens": MAX_TOKENS,
                 "stream": True,
+                **_sampling_params(),
             }
             if AIOS_MODE in ("cloud", "hybrid") and CLOUD_MODEL:
                 payload["model"] = CLOUD_MODEL
@@ -386,6 +414,7 @@ class Agent:
                 return f"LLM connection error: {e}"
 
             content_chunks = []
+            reasoning_chunks = []
             tool_calls_by_index = {}
             finish_reason = None
             stream_log = None
@@ -422,6 +451,9 @@ class Agent:
                         delta = choice.get("delta", {})
                         if choice.get("finish_reason"):
                             finish_reason = choice["finish_reason"]
+                        # Razonamiento del modelo (thinking) — se guarda para devolverlo en el turno
+                        if "reasoning_content" in delta and delta["reasoning_content"]:
+                            reasoning_chunks.append(delta["reasoning_content"])
                         # Live text (typewriter)
                         if "content" in delta and delta["content"]:
                             chunk = delta["content"]
@@ -468,7 +500,10 @@ class Agent:
 
             print()  # salto de línea tras el stream
             content = "".join(content_chunks)
+            reasoning = "".join(reasoning_chunks)
             msg = {"role": "assistant", "content": content or ""}
+            if reasoning:
+                msg["reasoning_content"] = reasoning
             if tool_calls_by_index:
                 tool_calls = [tool_calls_by_index[i] for i in sorted(tool_calls_by_index)]
                 msg["tool_calls"] = tool_calls
@@ -486,6 +521,8 @@ class Agent:
             # Tool call → ejecutar y devolver resultado al LLM
             if finish == "tool_calls" or msg.get("tool_calls"):
                 assistant_msg = {"role": "assistant", "content": msg.get("content") or ""}
+                if msg.get("reasoning_content"):
+                    assistant_msg["reasoning_content"] = msg["reasoning_content"]
                 if msg.get("tool_calls"):
                     assistant_msg["tool_calls"] = msg["tool_calls"]
                 self.messages.append(assistant_msg)
@@ -544,7 +581,10 @@ class Agent:
             # Respuesta final (texto)
             if msg.get("content"):
                 final_response = self._clean(msg["content"])
-                self.messages.append({"role": "assistant", "content": final_response})
+                assistant_final = {"role": "assistant", "content": final_response}
+                if msg.get("reasoning_content"):
+                    assistant_final["reasoning_content"] = msg["reasoning_content"]
+                self.messages.append(assistant_final)
                 # If tools were used, store in procedural memory (only static knowledge)
                 had_tools = any(m["role"] == "tool" for m in self.messages[-5:])
                 had_dynamic = any("run_command" in m.get("content","") or "read_file" in m.get("content","")
@@ -570,7 +610,7 @@ class Agent:
             MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
             if THINK_LOCAL:
                 MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
-        SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _rules_common()
+        SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common()
         if self.messages and self.messages[0].get("role") == "system":
             self.messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
         return on
