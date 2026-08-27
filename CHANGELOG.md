@@ -11,6 +11,7 @@
   - `aios-install`: nuevo flag `--think 0|1`.
 - **Verificado empíricamente (VPS, llama.cpp b10655)**: con `/think`, el razonamiento de Qwen3 va en `delta.reasoning_content` (campo SEPARADO), NO inline en `delta.content`. El agente solo lee `content`/`tool_calls`, así que el razonamiento no se imprime ni contamina la respuesta; `_clean` queda como safety net.
 - **Fix context/threads en instalación a disco**: `aios-install` escribía `threads: 14` y `context: 32768` hardcodeados; ahora usa `_detect_cpu()` y `_auto_context(_detect_ram_gb())` (espejo de `setup.py`), coherente con el live y sin lanzar llama-server con `-c 32768` en máquinas ≤8 GB.
+- **Comando `/think` en caliente**: toggle del thinking sin salir del agente (como `/sound`); persiste en `config.yaml` y `agent.set_think()` regenera token + `max_tokens` + system prompt en runtime. Documentado en `shortcuts.txt` (aios-lfs).
 
 ## v3.9 - agosto 2026
 
