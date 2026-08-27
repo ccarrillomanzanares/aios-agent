@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.10 - agosto 2026
+
+### switch thinking local (ON/OFF) + context/threads relativos en instalación a disco
+
+- **Thinking mode local (Qwen3-8B)**: switch binario ON/OFF vía clave `local.think` en `config.yaml` (default OFF).
+  - `agent.py`: `THINK_LOCAL` (env `AIOS_LOCAL_THINK`) controla el token `/no_think` de la consulta, la regla "Do not use <think> tags" del system prompt y el `max_tokens` (mín. 2048 al pensar, porque el razonamiento consume tokens antes de la respuesta). `_quick_llm` sigue siempre con `/no_think`.
+  - `chat.py`: pasa `AIOS_LOCAL_THINK` al entorno antes de importar `agent`.
+  - `setup.py`: pregunta "Enable thinking mode? [y/N]" en live e install.
+  - `aios-install`: nuevo flag `--think 0|1`.
+- **Verificado empíricamente (VPS, llama.cpp b10655)**: con `/think`, el razonamiento de Qwen3 va en `delta.reasoning_content` (campo SEPARADO), NO inline en `delta.content`. El agente solo lee `content`/`tool_calls`, así que el razonamiento no se imprime ni contamina la respuesta; `_clean` queda como safety net.
+- **Fix context/threads en instalación a disco**: `aios-install` escribía `threads: 14` y `context: 32768` hardcodeados; ahora usa `_detect_cpu()` y `_auto_context(_detect_ram_gb())` (espejo de `setup.py`), coherente con el live y sin lanzar llama-server con `-c 32768` en máquinas ≤8 GB.
+
 ## v3.9 - agosto 2026
 
 ### fix: agente mudo (respuesta en blanco + prompt >)
