@@ -101,6 +101,8 @@ if API_KEY:
     CLOUD_HEADERS = {"X-API-Key": API_KEY} if AUTH_TYPE == "x-api-key" else {"Authorization": f"Bearer {API_KEY}"}
 else:
     CLOUD_HEADERS = {}
+# El ollama-hardened usa cert self-signed → desactivar verificación TLS solo en ese caso.
+VERIFY_TLS = AUTH_TYPE != "x-api-key"
 # Thinking mode local (binario). Qwen3 piensa por defecto; /no_think lo apaga.
 # OFF (por defecto) -> rápido; ON -> el modelo razona antes de responder (más preciso, más lento).
 THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true", "yes", "on")
@@ -262,7 +264,8 @@ class Agent:
             json={"messages": [{"role": "user", "content": f"/no_think {prompt}"}],
                   "max_tokens": tokens, "temperature": temp},
             headers=CLOUD_HEADERS,
-            timeout=15
+            timeout=15,
+            verify=VERIFY_TLS,
         )
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
@@ -412,7 +415,7 @@ class Agent:
                 payload["model"] = CLOUD_MODEL
 
             try:
-                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120, stream=True)
+                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120, stream=True, verify=VERIFY_TLS)
                 resp.raise_for_status()
             except Exception as e:
                 return f"LLM connection error: {e}"
