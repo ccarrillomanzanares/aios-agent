@@ -106,22 +106,48 @@ def _start_local_model(config):
 
     _render()
     ready = False
+    import threading, queue
+    q = queue.Queue()
+    _EOF = object()
+    recent = []  # últimas líneas, para volcarlas si falla el arranque
+
+    # Lector en segundo plano: drena el stdout SIN select. El combo
+    # select + readline con buffer dejaba la línea de "listening" atascada
+    # en el buffer de Python (select mira el fd crudo, no el buffer) y la
+    # barra quedaba clavada en 85% aunque el servidor ya escuchara.
+    def _llama_reader():
+        try:
+            for _line in proc.stdout:
+                q.put(_line)
+        finally:
+            q.put(_EOF)
+
+    threading.Thread(target=_llama_reader, daemon=True).start()
+
+    HEALTH_TIMEOUT = 900  # 15 min máx (en USB la carga tarda 8-15 min)
     while True:
-        r, _, _ = select.select([proc.stdout], [], [], 0.4)
-        if r:
-            line = proc.stdout.readline()
-            if not line:  # EOF: el servidor terminó antes de escuchar
+        try:
+            line = q.get(timeout=0.4)
+        except queue.Empty:
+            if not ready and time.time() - t0 > HEALTH_TIMEOUT:
                 break
-            low = line.lower()
-            if "loading model" in low:
-                label, pct = "Cargando modelo", 15
-            elif "initializing" in low or "threadpool init" in low:
-                label, pct = "Inicializando", 60
-            elif "model loaded" in low:
-                label, pct = "Modelo cargado", 85
-            elif "listening" in low:
-                ready = True
-                break
+            _render()
+            continue
+        if line is _EOF:  # el servidor terminó antes de escuchar
+            break
+        recent.append(line)
+        if len(recent) > 30:
+            recent.pop(0)
+        low = line.lower()
+        if "loading model" in low:
+            label, pct = "Cargando modelo", 15
+        elif "initializing" in low or "threadpool init" in low:
+            label, pct = "Inicializando", 60
+        elif "model loaded" in low:
+            label, pct = "Modelo cargado", 85
+        elif "listening" in low or "main loop" in low:
+            ready = True
+            break
         _render()
 
     if ready:
@@ -130,22 +156,15 @@ def _start_local_model(config):
     print()
 
     if not ready:
-        for line in proc.stdout:
-            sys.stdout.write(line)
-        proc.wait()
-        print("  ⚠ El modelo local no llegó a arrancar. Revisa el log de arriba.")
+        print("  ⚠ El modelo local no llegó a arrancar en %.0fs." % (time.time() - t0))
+        if recent:
+            print("  Últimas líneas del servidor:")
+            for _l in recent[-8:]:
+                sys.stdout.write("    " + _l.rstrip() + "\n")
         return
 
     print("  Modelo local listo (%.0fs)." % (time.time() - t0))
-
-    # Drenar la salida restante del servidor en segundo plano (no bloquear el pipe).
-    import threading
-
-    def _drain():
-        for _ in proc.stdout:
-            pass
-
-    threading.Thread(target=_drain, daemon=True).start()
+    # (el reader thread sigue drenando la salida del servidor en segundo plano)
 
 
 WARGAMES_QUOTES = [
