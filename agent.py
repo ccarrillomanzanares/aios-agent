@@ -93,6 +93,14 @@ def _cbreak_off(fd, old):
             pass
 
 
+def _out(s=""):
+    """Escribe a stdout convirtiendo LF en CRLF explicito (no depende de ONLCR
+    del tty). El input (_input_tic) ya escribe CRLF explicito; la salida del LLM
+    debe hacer lo mismo o el cursor no vuelve a la columna 0 -> efecto escalera."""
+    sys.stdout.write(s.replace("\n", chr(13) + "\n"))
+    sys.stdout.flush()
+
+
 API_KEY = os.environ.get("AIOS_API_KEY", "")
 AIOS_MODE = os.environ.get("AIOS_MODE", "local")
 CLOUD_MODEL = os.environ.get("AIOS_CLOUD_MODEL", "")
@@ -466,12 +474,12 @@ class Agent:
                             chunk = delta["content"]
                             content_chunks.append(chunk)
                             if skip_rest:
-                                print(chunk, end="", flush=True)
+                                _out(chunk)
                             else:
                                 for i, ch in enumerate(chunk):
-                                    print(ch, end="", flush=True)
+                                    _out(ch)
                                     if _skip_pressed():
-                                        print(chunk[i + 1:], end="", flush=True)
+                                        _out(chunk[i + 1:])
                                         skip_rest = True
                                         break
                                     if self.SOUND_ON:
@@ -505,7 +513,7 @@ class Agent:
                     stream_log.close()
                 _cbreak_off(fd_cb, old_cb)
 
-            print()  # salto de línea tras el stream
+            _out("\n")  # salto de línea tras el stream (CRLF explícito)
             content = "".join(content_chunks)
             reasoning = "".join(reasoning_chunks)
             msg = {"role": "assistant", "content": content or ""}
@@ -569,15 +577,15 @@ class Agent:
                             pass
 
                     result = execute_tool(name, args, context=self.messages)
-                    print(f"  ⚙ {name}({func.get('arguments','')})")
+                    _out(f"  ⚙ {name}({func.get('arguments','')})\n")
                     if name == "run_command":
                         r = json.loads(result)
                         out = (r.get('stdout', '') or '').rstrip()[:1000]
                         err = (r.get('stderr', '') or '').rstrip()[:300]
                         if out:
-                            print("     " + out.replace("\n", "\n     "))
+                            _out("     " + out.replace("\n", "\n     ") + "\n")
                         if err:
-                            print("     [stderr] " + err.replace("\n", "\n     "))
+                            _out("     [stderr] " + err.replace("\n", "\n     ") + "\n")
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", "call_0"),

@@ -496,8 +496,9 @@ def main():
         try:
             response = agent.run(query)
             # La respuesta ya se imprimió carácter a carácter durante el stream.
-            # Solo añadimos un salto final si el stream no lo dejó ya.
-            print()
+            # Solo añadimos un salto final (CRLF explícito) si el stream no lo dejó ya.
+            sys.stdout.write(chr(13) + "\n")
+            sys.stdout.flush()
         except KeyboardInterrupt:
             print("\n[Interrumpido]")
             continue
