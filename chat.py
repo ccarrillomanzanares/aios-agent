@@ -70,7 +70,7 @@ def _start_local_model(config):
         s.connect(("127.0.0.1", 8083))
         s.close()
         return  # Already running
-    except:
+    except Exception:
         pass
 
     model_path = Path("/usr/local/share/aios/models") / config["local"]["model"]
@@ -83,28 +83,69 @@ def _start_local_model(config):
     env = os.environ.copy()
     port = 8083
 
-    print(f"  Starting local model ({config['local']['model_name']}, CTX={ctx}, T={threads})...")
-    import subprocess
-    subprocess.Popen(
+    print(f"  Cargando modelo local ({config['local']['model_name']}, {ctx} ctx, {threads} threads)...")
+    import subprocess, time, select
+    proc = subprocess.Popen(
         ["llama-server", "-m", str(model_path),
          "--host", "127.0.0.1", "--port", str(port),
-         "--ctx-size", str(ctx), "-t", str(threads)],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+         "-c", str(ctx), "-t", str(threads)],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
     )
 
-    # Wait up to 30s for the server to respond
-    import urllib.request
-    for _ in range(30):
-        try:
-            resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=2)
-            if resp.status == 200:
-                print("  Local model ready.")
-                return
-        except:
+    # Progreso real: avanza con los hitos del log de llama-server + tiempo real.
+    # (no es un % de bytes; cada fase es un hito observable del arranque)
+    t0 = time.time()
+    label, pct = "Cargando modelo", 10
+    BAR = 22
+
+    def _render():
+        filled = int(BAR * pct / 100)
+        bar = "█" * filled + "░" * (BAR - filled)
+        sys.stdout.write(chr(13) + "  %-16s [%s] %3d%% (%4.0fs)   " % (label, bar, pct, time.time() - t0))
+        sys.stdout.flush()
+
+    _render()
+    ready = False
+    while True:
+        r, _, _ = select.select([proc.stdout], [], [], 0.4)
+        if r:
+            line = proc.stdout.readline()
+            if not line:  # EOF: el servidor terminó antes de escuchar
+                break
+            low = line.lower()
+            if "loading model" in low:
+                label, pct = "Cargando modelo", 15
+            elif "initializing" in low or "threadpool init" in low:
+                label, pct = "Inicializando", 60
+            elif "model loaded" in low:
+                label, pct = "Modelo cargado", 85
+            elif "listening" in low:
+                ready = True
+                break
+        _render()
+
+    if ready:
+        label, pct = "Listo", 100
+    _render()
+    print()
+
+    if not ready:
+        for line in proc.stdout:
+            sys.stdout.write(line)
+        proc.wait()
+        print("  ⚠ El modelo local no llegó a arrancar. Revisa el log de arriba.")
+        return
+
+    print("  Modelo local listo (%.0fs)." % (time.time() - t0))
+
+    # Drenar la salida restante del servidor en segundo plano (no bloquear el pipe).
+    import threading
+
+    def _drain():
+        for _ in proc.stdout:
             pass
-        import time
-        time.sleep(1)
-    print("  Warning: local model may not have started in time.")
+
+    threading.Thread(target=_drain, daemon=True).start()
 
 
 WARGAMES_QUOTES = [
