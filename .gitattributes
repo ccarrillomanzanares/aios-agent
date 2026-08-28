@@ -1,0 +1,4 @@
+# Forzar LF en scripts shell (el shebang se rompe con CRLF).
+# Los .py con CRLF son un tema aparte (se normalizarán en otra limpieza).
+*.sh text eol=lf
+aios-diag text eol=lf
