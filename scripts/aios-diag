@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# aios-diag — recopila diagnóstico de AIOS (sistema + logs + pantallazos),
+# lo comprime con timestamp y lo sube al VPS (cuenta de SOLO escritura).
+#
+# Uso:
+#   aios-diag            recopila + comprime + sube (si hay clave)
+#   aios-diag --local    recopila + comprime, sin subir
+#
+# Variables de entorno:
+#   AIOS_DIAG_USER (def: diag)   AIOS_DIAG_HOST (def: 31.220.80.78)
+#   AIOS_DIAG_KEY  (def: ~/.ssh/aios_diag)
+#
+# La subida usa rsync contra una cuenta dedicada 'diag' restringida con
+# rrsync (comando forzado) → SOLO puede escribir en una carpeta de entrada,
+# sin shell, sin sudo, sin lectura del VPS. Ninguna clave va en la ISO.
+
+set -u
+
+TS=$(date +%Y%m%d_%H%M%S)
+HOST=$(hostname 2>/dev/null || echo aios)
+OUT="$HOME/.aios-diag-work"          # temporal, se limpia al final
+STATE="$HOME/.aios-diag-state"       # persistente (marcador de pantallazos)
+MARKER="$STATE/last_marker"
+SHOTS_DIR="$HOME/screenshots"
+BUNDLE="$HOME/aios-diag-${TS}.tar.zst"
+
+DIAG_USER="${AIOS_DIAG_USER:-diag}"
+DIAG_HOST="${AIOS_DIAG_HOST:-31.220.80.78}"
+DIAG_KEY="${AIOS_DIAG_KEY:-$HOME/.ssh/aios_diag}"
+
+UPLOAD=1
+[ "${1:-}" = "--local" ] && UPLOAD=0
+
+mkdir -p "$OUT/files" "$OUT/screenshots" "$STATE"
+[ -f "$MARKER" ] || touch -d "1970-01-01 00:00:00" "$MARKER"
+
+run() { local name="$1"; shift; "$@" > "$OUT/files/$name.txt" 2>&1; }
+
+echo "Recopilando diagnóstico..."
+
+# ── sistema base ────────────────────────────────────────────────────────
+run uname         uname -a
+run os-release    cat /etc/os-release
+run date-uptime   sh -c 'date; echo; uptime'
+run mem           free -h
+run disk          df -h
+run loadavg       cat /proc/loadavg
+run cpu           lscpu
+run pci           lspci -nn
+run usb           lsusb
+run block         lsblk -f
+run ip-addr       ip addr
+run ip-route      ip route
+run wifi          sh -c 'iw dev 2>&1'
+run dns           sh -c 'resolvectl status 2>&1 || cat /etc/resolv.conf 2>&1'
+run procs         ps aux --sort=-%mem
+
+# ── errores / logs ──────────────────────────────────────────────────────
+run dmesg-tail    sh -c 'dmesg | tail -200 2>&1'
+run journal-err   journalctl -p err -b --no-pager
+run unit-failed   systemctl list-units --failed --no-pager
+run unit-running  systemctl list-units --state=running --no-pager
+
+# ── AIOS específico ─────────────────────────────────────────────────────
+run sven-list     sh -c 'sven list 2>&1'
+run sven-log      sh -c 'tail -200 /var/log/sven/sven.log 2>&1'
+run llama-status  systemctl status aios-llama --no-pager
+run agent-status  systemctl status aios-agent --no-pager
+run sync-status   systemctl status sven-sync --no-pager
+run stream-log    sh -c 'tail -500 /tmp/aios-stream.log 2>&1'
+run agent-files   sh -c 'ls -la /usr/local/bin/aios-agent/ /usr/local/bin/aios-agent/data/ /usr/local/bin/aios-agent/scripts/ 2>&1'
+run session-log   sh -c 'for f in /usr/local/bin/aios-agent/data/session_*.json /usr/local/bin/aios-agent/skills_memory_*.json; do echo "=== $f ==="; head -300 "$f" 2>&1; done'
+run i3-config     sh -c 'cat "$HOME/.config/i3/config" 2>&1'
+
+# ── config REDACTADO (claves/tokens) ────────────────────────────────────
+if [ -f "$HOME/.aios/config.yaml" ]; then
+    sed -E 's/^([[:space:]]*[-A-Za-z_]*(key|token|secret|pass)[-A-Za-z_]*[[:space:]]*:[[:space:]]*).*/\1***REDACTED***/I' \
+        "$HOME/.aios/config.yaml" > "$OUT/files/config-redacted.yaml" 2>/dev/null
+fi
+
+# ── pantallazos desde la última recolección ─────────────────────────────
+if [ -d "$SHOTS_DIR" ]; then
+    find "$SHOTS_DIR" -maxdepth 1 -type f -name "*.png" -newer "$MARKER" \
+        -exec cp {} "$OUT/screenshots/" \; 2>/dev/null
+fi
+N_SHOTS=$(ls "$OUT/screenshots" 2>/dev/null | wc -l)
+
+# ── empaquetar ──────────────────────────────────────────────────────────
+{
+    echo "AIOS diagnostic bundle"
+    echo "Fecha:  $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Host:   $HOST"
+    echo "User:   $(id -un 2>/dev/null)"
+    echo "Pantallazos: $N_SHOTS"
+} > "$OUT/README.txt"
+
+if tar --zstd -cf "$BUNDLE" -C "$OUT" . 2>/dev/null; then
+    :
+else
+    BUNDLE="${BUNDLE%.zst}.tar.gz"
+    tar czf "$BUNDLE" -C "$OUT" . 2>/dev/null
+fi
+
+# ── marcar pantallazos como recogidos ───────────────────────────────────
+touch "$MARKER"
+
+echo "✓ Bundle: $BUNDLE ($(du -h "$BUNDLE" 2>/dev/null | cut -f1))"
+
+# ── subir (si hay clave + red) ──────────────────────────────────────────
+if [ "$UPLOAD" = 1 ] && [ -f "$DIAG_KEY" ]; then
+    if rsync -e "ssh -i '$DIAG_KEY' -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
+              "$BUNDLE" "$DIAG_USER@$DIAG_HOST:./" 2>/dev/null; then
+        echo "✓ Subido a $DIAG_USER@$DIAG_HOST (solo escritura)"
+    else
+        echo "⚠ No se pudo subir (¿clave o red?). El bundle queda en local."
+    fi
+elif [ "$UPLOAD" = 1 ]; then
+    echo "ℹ Sin clave de subida ($DIAG_KEY). Bundle solo local."
+fi
+
+rm -rf "$OUT"
