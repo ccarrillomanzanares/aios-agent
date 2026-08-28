@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.14 - agosto 2026
+
+### agente: ejecuta tools de verdad (feedback Carlos)
+
+- **`import sys` en `agent.py`**: `_out()` y `_cbreak_on()` usaban `sys` sin importarlo → `NameError` que el `except` del stream se tragaba en silencio (el agente parecía "mudo"; al `shutdown` saltaba el error). Fix raíz.
+- **Tool visible antes de ejecutar**: el `⚙ tool(...)` se muestra ANTES de `execute_tool` — un comando largo ya no parece que "no hace nada".
+- **`run_command` con stdin correcto**: `/dev/null` por defecto (un prompt interactivo ya no bloquea en silencio) y auto-`y` para `sven install/upgrade/update` (el `:: Proceed? [Y/n]` ya no cuelga).
+- **Tool `list_desktop_apps`**: parsea `/usr/share/applications/*.desktop` — el agente responde "qué apps hay" buscando de verdad (p. ej. Firefox), no de memoria.
+- **Grounding**: "sven siempre con sudo" + "nunca termines el turno con voy-a-hacerlo; emite el tool_call en el mismo turno" + "usa list_desktop_apps".
+
+### carga del LLM local
+
+- **Barra de progreso real** en `chat.py` `_start_local_model`: fases reales del log de llama-server (`loading model` → `init` → `model loaded` → `listening`) con porcentaje y tiempo, en vez de 30s fijos. Si no arranca, vuelca el log capturado.
+
+### pantallazos y diagnóstico
+
+- **Printscreen (`Print`)**: `scrot` a `~/screenshots/shot-<timestamp>.png`; documentado en `shortcuts.txt` junto a los comandos de chat `/think /health /reset /stats`.
+- **`aios-diag`**: recopila diagnóstico (sistema + errores + logs AIOS + pantallazos desde la última recolección), redacta claves de `config.yaml`, comprime `tar.zst` con timestamp y sube por rsync a una cuenta `diag` de SOLO escritura (rrsync, sin shell/sudo). La clave no va en la ISO (`--local` = solo local).
+
 ## v3.13 - agosto 2026
 
 ### fixes de estabilidad (feedback Arnold / portátiles físicos)
