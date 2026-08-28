@@ -19,7 +19,7 @@ Agente SRE semiautónomo con function calling, diseñado para ejecutarse en loca
 │   tools + memoria procedural + compresión)         │
 ├──────────────────────────────────────────────────┤
 │  tools.py     memory.py    process.py  playbook.py │
-│  (11 tools)   (caché)      (PTY)       (YAML)     │
+│  (19 tools)   (caché)      (PTY)       (YAML)     │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -164,6 +164,14 @@ cloud:
 | `process_close` | Cierra proceso interactivo |
 | `process_list` | Lista procesos activos |
 | `web_search` | Búsqueda web via Firecrawl |
+| `list_desktop_apps` | Lista apps gráficas instaladas (parsea `.desktop`) |
+| `cloud_reasoning` | Razonamiento en cloud (modo cloud/hybrid) |
+| `get_context_usage` | Uso del contexto (mensajes/tokens) |
+| `screenshot` | Captura de pantalla (X11) |
+| `ocr` | OCR de imagen |
+| `xdotool_type` | Escribir texto vía xdotool |
+| `xdotool_key` | Pulsar teclas vía xdotool |
+| `xdotool_click` | Clic vía xdotool |
 
 ## Scripts auxiliares
 
@@ -173,6 +181,8 @@ cloud:
 | `scripts/launch_llama.py` | Lanzador legacy de llama-server; `chat.py` lo auto-arranca en v3.3, por lo que el servicio sigue siendo útil en background/ISO |
 | `scripts/firstboot.sh` | Wizard de primer arranque (setup + enable servicios) |
 | `aios-install` | Instala ISO AIOS LFS a disco duro |
+| `scripts/aios-diag` | Recopila diagnóstico (sistema + logs + pantallazos), comprime y sube al VPS (cuenta `diag` solo-escritura). `--local` = sin subir |
+| `aios-diag` | Wrapper en `/usr/local/bin` → `scripts/aios-diag` |
 | `setup.py` | Wizard de instalación y arranque en la ISO. Modo local fijado a Qwen3-8B, sin descarga automática, sin selección de modelo. Opciones: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK`. |
 
 ### setup.py — Cambios v3.3
