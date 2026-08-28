@@ -72,6 +72,9 @@ def _confirm_destructive(command: str, timeout: int = 10) -> bool:
 
 def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     """Execute a shell command. Returns JSON with stdout, stderr, exit_code, elapsed."""
+    # sven install/upgrade/sync tarda minutos (sync de BD + descarga + instalación): timeout generoso.
+    if any(kw in command for kw in ("sven install", "sven upgrade", "sven sync", "sven update")):
+        timeout = 600
     if _is_blocked_command(command):
         return json.dumps({"error": "Command blocked: dangerous operation", "exit_code": -1,
                           "stdout": "", "stderr": "Blocked for security reasons"}, ensure_ascii=False)
