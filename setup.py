@@ -156,6 +156,20 @@ def _read_line():
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
                 continue
+            if ch == "\x1b":             # secuencia escape (Delete, flechas)
+                import select
+                seq = ch
+                try:
+                    while select.select([fd], [], [], 0.02)[0]:
+                        seq += sys.stdin.read(1)
+                except Exception:
+                    pass
+                if seq in ("\x1b[3~", "\x1b[P"):   # Delete (xterm / rxvt)
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                continue
             if ch == "\x03":              # Ctrl+C
                 raise KeyboardInterrupt
             if ch == "\x04":              # Ctrl+D
@@ -489,6 +503,15 @@ def _iface_has_internet(iface=None, timeout=4):
             return True
         except Exception:
             continue
+    return False
+
+
+def _wait_internet(attempts=5, delay=3):
+    """Reintenta el check de internet con espera (el DHCP puede tardar tras asociar)."""
+    for _ in range(attempts):
+        if _iface_has_internet():
+            return True
+        time.sleep(delay)
     return False
 
 
@@ -1087,7 +1110,7 @@ def _live_flow(online):
             if _cloud_flow(theme):
                 _sp.run(["aios-theme", theme], capture_output=True)
                 wg("Setup complete. Starting the AIOS agent...")
-                return
+                return True
             wg("Cloud setup cancelled. Falling back to LOCAL.")
             m = "1"
 
@@ -1097,6 +1120,8 @@ def _live_flow(online):
     if _write_local_config(theme):
         _sp.run(["aios-theme", theme], capture_output=True)
         wg("Setup complete. Starting the AIOS agent...")
+        return True
+    return False
 
 
 def _install_flow(online):
@@ -1236,8 +1261,8 @@ def main():
             if opt == "y":
                 setup_wifi()
                 wg("")
-                wg("Checking internet connection again...")
-                online = _iface_has_internet()
+                wg("Waiting for the network to come up...")
+                online = _wait_internet()
                 if not online:
                     ip, gw = _net_summary()
                     wg("Still no internet connection.")
@@ -1249,8 +1274,8 @@ def main():
         if choice == "2":
             _install_flow(online)
         else:
-            _live_flow(online)
-        # al terminar el flujo (éxito, aborto o salida del live) → vuelve al menú
+            if _live_flow(online):
+                break  # setup completado → terminar setup.py (el autolaunch arranca el agente)
 
 
 if __name__ == "__main__":
