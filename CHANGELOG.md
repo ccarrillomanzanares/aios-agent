@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.13 - agosto 2026
+
+### fixes de estabilidad (feedback Arnold / portátiles físicos)
+
+- **Bucle live→menú**: `_live_flow` devuelve `True` al completar y `main()` hace `break` — antes "Setup complete" no terminaba y volvía al menú en bucle.
+- **Internet con reintento**: `_wait_internet()` espera al DHCP tras asociar el WiFi antes de declarar "no internet" (antes falso negativo inmediato).
+- **Delete/flechas en `_read_line`**: manejo de secuencias de escape (`\x1b`, Delete xterm/rxvt) en los inputs del formulario.
+- **sven timeout 600s**: `run_command` da timeout generoso a `sven install/upgrade/sync` (antes daba timeout a los minutos).
+- **Chat sin efecto escalera**: `_out()` escribe CRLF explícito en la salida del LLM (streaming, tools y salto final). Antes escribía salto de línea simple confiando en ONLCR del tty y el cursor no volvía a col 0 → cada prompt se desplazaba a la derecha.
+
 ## v3.12 - agosto 2026
 
 ### soporte ollama-hardened (Moonlight) como proveedor
