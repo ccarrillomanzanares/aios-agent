@@ -191,12 +191,14 @@ def _rules_common():
         "Always respond in the same language the user writes in.\n"
         "Be concise.\n"
         "For questions about the CURRENT state of the system (RAM, disk, processes, services, installed packages, network), ALWAYS check with a tool first — never answer from memory.\n"
+        "For 'what programs/apps are installed' or 'is X installed', use the list_desktop_apps tool (never answer from memory).\n"
         "If you run a command, show its output to the user.\n"
         "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
         "If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).\n"
         "If you don't know something, say so honestly: 'I don't know'.\n"
         + _no_think
         + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
+        "NEVER end your turn with a promise to act ('I'll do it now', 'vamos a hacerlo', 'let me...'). If you intend to run a tool, emit the tool call in the SAME turn immediately — do not wait for the user to say 'ok'.\n"
         "Example:\n"
         "  User: \"install WordPress with Docker and MariaDB\"\n"
         "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
@@ -205,6 +207,7 @@ def _rules_common():
 
 _AIOS_GROUNDING = """AIOS is Linux From Scratch (LFS), NOT Debian/Ubuntu/Arch/Fedora. Packages are managed ONLY with `sven`:
 - `sven install <pkg>` / `sven remove <pkg>` / `sven search <q>` / `sven update` / `sven upgrade`
+- `sven` requires root: ALWAYS run it with sudo (e.g. `sudo sven install docker`). It auto-confirms its prompts, so run it directly and wait for the result.
 - There is NO apt/apt-get, NO dnf/yum, NO pacman. Never suggest them.
 
 AIOS facts:
@@ -577,8 +580,10 @@ class Agent:
                         except:
                             pass
 
-                    result = execute_tool(name, args, context=self.messages)
+                    # Mostrar el tool ANTES de ejecutar (para que un comando largo
+                    # no parezca que "no hace nada" — el ⚙ se ve inmediatamente).
                     _out(f"  ⚙ {name}({func.get('arguments','')})\n")
+                    result = execute_tool(name, args, context=self.messages)
                     if name == "run_command":
                         r = json.loads(result)
                         out = (r.get('stdout', '') or '').rstrip()[:1000]

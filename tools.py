@@ -89,12 +89,19 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     max_attempts = 3
     current_command = command
 
+    # stdin: sven pide ":: Proceed? [Y/n]" → auto-confirmar; el resto → /dev/null
+    # (un prompt interactivo no debe bloquear la ejecución en silencio).
+    _auto_confirm = any(kw in command for kw in ("sven install", "sven upgrade", "sven update"))
+    stdin_arg = subprocess.PIPE if _auto_confirm else subprocess.DEVNULL
+    stdin_input = "y\ny\ny\ny\n" if _auto_confirm else None
+
     while attempts < max_attempts:
         attempts += 1
         elapsed = time.time() - t0
         remaining = max(0.1, timeout - elapsed)
         try:
-            r = subprocess.run(current_command, shell=True, capture_output=True, text=True, timeout=remaining)
+            r = subprocess.run(current_command, shell=True, capture_output=True, text=True,
+                               timeout=remaining, stdin=stdin_arg, input=stdin_input)
             stdout = r.stdout.strip()[:5000]
             stderr = r.stderr.strip()[:2000]
 
@@ -454,6 +461,44 @@ def xdotool_click(x: int, y: int) -> str:
 
 
 # Schemas for function calling
+def list_desktop_apps() -> str:
+    """List installed graphical/desktop applications (parses .desktop files)."""
+    import glob
+    apps = []
+    seen = set()
+    for pattern in ("/usr/share/applications/*.desktop", "/usr/local/share/applications/*.desktop"):
+        for f in sorted(glob.glob(pattern)):
+            name = exec_ = comment = ""
+            nodisplay = False
+            try:
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    section = False
+                    for line in fh:
+                        line = line.rstrip("\n")
+                        if line == "[Desktop Entry]":
+                            section = True
+                            continue
+                        if line.startswith("[") and line != "[Desktop Entry]":
+                            break
+                        if not section:
+                            continue
+                        if line.startswith("Name="):
+                            name = line[5:].strip()
+                        elif line.startswith("Exec="):
+                            exec_ = line[5:].strip()
+                        elif line.startswith("Comment="):
+                            comment = line[8:].strip()
+                        elif line.startswith("NoDisplay=true"):
+                            nodisplay = True
+                            break
+            except Exception:
+                continue
+            if name and not nodisplay and name not in seen:
+                seen.add(name)
+                apps.append({"name": name, "exec": exec_, "comment": comment})
+    return json.dumps({"count": len(apps), "apps": apps}, ensure_ascii=False)
+
+
 TOOLS = [
     {
         "type": "function",
@@ -469,6 +514,14 @@ TOOLS = [
                 },
                 "required": ["command"]
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_desktop_apps",
+            "description": "List installed graphical/desktop applications (parses .desktop files). Use to answer 'what GUI apps are installed' or 'is X installed'.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
     {
@@ -766,6 +819,7 @@ def get_context_usage(args: dict, context=None) -> str:
 def execute_tool(name: str, args: dict, context=None) -> str:
     handlers = {
         "run_command": run_command,
+        "list_desktop_apps": list_desktop_apps,
         "read_file": read_file,
         "write_file": write_file,
         "web_search": web_search,
