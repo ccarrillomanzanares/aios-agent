@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.15 - agosto 2026
+
+### fixes del arranque del LLM y del pantallazo (regresión de la barra de progreso)
+
+- **Carga del LLM clavada al 85%**: `_start_local_model` usaba `select` sobre el fd crudo + `readline` con buffer de Python. Cuando llama-server escribía `model loaded` y `listening` casi a la vez, `readline` leía las dos líneas al buffer pero devolvía solo la primera; `listening` quedaba atascada en el buffer (select mira el fd, no el buffer) y la barra se quedaba en 85% para siempre **aunque el servidor ya escuchara** (por eso 0% CPU y "no termina"). Fix: **hilo lector + cola** (sin select) que drena el stdout y detecta `listening` de verdad; timeout de 15 min y volcado de las últimas líneas si no arranca.
+- **Printscreen (`Print`)**: el `scrot` inline en i3 con `%` (strftime) + `&&` + comillas anidadas rompía el parser de i3 (`Could not translate string to key symbol`). Fix: script `scripts/screenshot.sh` dedicado, y binding a `/usr/local/bin/aios-agent/scripts/screenshot.sh`.
+
 ## v3.14 - agosto 2026
 
 ### agente: ejecuta tools de verdad (feedback Carlos)
