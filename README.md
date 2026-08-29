@@ -1,4 +1,4 @@
-# AIOS Agent v3.3
+# AIOS Agent
 
 SRE semi-autonomous agent with function calling, designed to run on local (CPU), cloud, or inside the live AIOS LFS ISO.
 
@@ -39,7 +39,7 @@ python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download('bartow
 python3 chat.py
 ```
 
-> **New in v3.3:** you no longer need to start `llama-server` manually. `chat.py` detects whether the local server is running and, if not, starts it itself with `LD_LIBRARY_PATH` pointing to `/usr/local/lib/llama`, waiting up to 30 seconds for it to respond.
+> **New:** you no longer need to start `llama-server` manually. `chat.py` detects whether the local server is running and, if not, starts it itself with `LD_LIBRARY_PATH` pointing to `/usr/local/lib/llama`, waiting up to 30 seconds for it to respond.
 
 ### AIOS LFS ISO
 
@@ -74,7 +74,7 @@ The live ISO includes the `aios-install` installer to write the system to hard d
 >
 > **Root cause:** `aios-install` generated the GRUB menu via `grub-mkconfig` inside the chroot. The resulting `grub.cfg` included `load_video`, `insmod all_video`, `gfxpayload=keep` and `terminal_output gfxterm`, which block the boot in VirtualBox.
 >
-> **Solution v3.3:** `aios-install` no longer runs `grub-mkconfig`. Instead it writes a fixed text-mode `grub.cfg`, simple, without UUID and without references to "Arch Linux":
+> **Solution:** `aios-install` no longer runs `grub-mkconfig`. Instead it writes a fixed text-mode `grub.cfg`, simple, without UUID and without references to "Arch Linux":
 >
 > ```cfg
 > set default=0
@@ -98,9 +98,9 @@ The graphical boot of the agent follows this sequential flow:
 
 The model service (`aios-llama.service`) does not start by default at boot; it is activated during setup when `local` or `hybrid` mode is chosen.
 
-### v3.3 changes in `chat.py` — auto-start of llama-server
+### `chat.py` — auto-start of llama-server
 
-From v3.3 on `chat.py` integrates `_start_local_model()` for `local`/`hybrid` mode:
+From now on `chat.py` integrates `_start_local_model()` for `local`/`hybrid` mode:
 
 1. Reads `~/.aios/config.yaml`.
 2. If `mode` is `local` or `hybrid`, checks whether `llama-server` is already responding at `http://127.0.0.1:8083`.
@@ -178,14 +178,14 @@ cloud:
 | Script | Description |
 |---|---|
 | `scripts/aios-session` | Graphical session startup in the ISO: detects whether `~/.aios/config.yaml` exists, runs setup if not, then launches `startx` → `i3` → `xterm` with the agent |
-| `scripts/launch_llama.py` | Legacy llama-server launcher; `chat.py` auto-starts it in v3.3, so the service remains useful in background/ISO |
+| `scripts/launch_llama.py` | Legacy llama-server launcher; `chat.py` auto-starts it, so the service remains useful in background/ISO |
 | `scripts/firstboot.sh` | First-boot wizard (setup + enable services) |
 | `aios-install` | Install AIOS LFS ISO to hard disk |
 | `scripts/aios-diag` | Collect diagnostics (system + logs + screenshots), compress and upload to VPS (`diag` write-only account). `--local` = do not upload |
 | `aios-diag` | Wrapper in `/usr/local/bin` → `scripts/aios-diag` |
 | `setup.py` | Installation and startup wizard in the ISO. Local mode fixed to Qwen3-8B, no automatic download, no model selection. Options: `1) Configure AIOS`, `2) Start AIOS (local)`, `3) Exit`, `4) INSTALL TO DISK`. |
 
-### setup.py — v3.3 changes
+### setup.py — changes
 
 - **Single model:** only allows Qwen3-8B (`Qwen_Qwen3-8B-Q4_K_M.gguf`). Selection between Qwen2.5-7B and Qwen3-8B was removed.
 - **No automatic download:** if the model does not exist in `/home/ccmai/models/` or `/usr/local/share/aios/models/`, `setup.py` reports the failure and **returns to the main menu** instead of trying to download it.
@@ -229,7 +229,7 @@ The `_start_local_model()` function in `chat.py` automates `llama-server` startu
 
 ### launch_llama.py — Legacy launcher
 
-`scripts/launch_llama.py` remains the executable used by `aios-llama.service`. From v3.3 on, its main responsibility is to keep `LD_LIBRARY_PATH=/usr/local/lib/llama` so `llama-server` finds `libllama-server-impl.so` when `ldconfig` has not been configured.
+`scripts/launch_llama.py` remains the executable used by `aios-llama.service`. From now on, its main responsibility is to keep `LD_LIBRARY_PATH=/usr/local/lib/llama` so `llama-server` finds `libllama-server-impl.so` when `ldconfig` has not been configured.
 
 ## Final system configuration in AIOS LFS ISO
 
@@ -246,7 +246,7 @@ FONT=ter-112n
 
 ### ldconfig / ld.so.conf.d
 
-From v3.3 on the llama.cpp shared library directory is configured so that `llama-server` and `chat.py` do not depend on exporting `LD_LIBRARY_PATH`:
+From now on the llama.cpp shared library directory is configured so that `llama-server` and `chat.py` do not depend on exporting `LD_LIBRARY_PATH`:
 
 ```bash
 # /etc/ld.so.conf.d/llama.conf
@@ -328,7 +328,7 @@ Result:
 
 ### ISO build with models >4 GB — `grub-mkrescue -iso-level 3`
 
-From v3.3 on ISO generation distinguishes two scenarios:
+From now on ISO generation distinguishes two scenarios:
 
 - **ISO without GGUF model:** generated with normal `grub-mkrescue`.
 - **ISO with GGUF model included:** if the image exceeds ~4 GB, add the `-iso-level 3` flag to `grub-mkrescue` to support large files (>4 GB) and avoid `xorriso` errors when packaging the model.
@@ -366,7 +366,7 @@ For `aios-install` and the live environment to work correctly, the ISO must incl
 └── ldconfig.service      # masked in live to avoid regenerating cache on each boot
 ```
 
-v3.3 changes:
+Changes:
 
 - **`chat.py` auto-start:** `chat.py` starts `llama-server` automatically if it is not running.
 - **`ld.so.conf.d/llama.conf`:** ldconfig knows `/usr/local/lib/llama` for `libllama-server-impl.so`.
@@ -374,7 +374,7 @@ v3.3 changes:
 - **`setup.py` simplified:** local mode fixed to Qwen3-8B; no automatic download; returns to menu if model is missing.
 - **ISO build with `-iso-level 3`:** supports ISOs with model >4 GB.
 
-v3.2 changes:
+Changes:
 
 - **`dbus.service` created and enabled:** lets graphical applications and services like the agent communicate over D-Bus.
 - **`ldconfig.service` masked for live:** prevents systemd from running `ldconfig` on every ISO boot, saving boot time.
@@ -426,12 +426,7 @@ To build or customize the live image containing this agent, see `README-aios-lfs
 
 ## Version history
 
-| Version | Date | Main changes |
-|---|---|---|
-| v3.3 | 2026-07-27 | chat.py auto-start llama-server; ld.so.conf.d/llama.conf; aios-install fixed text-mode grub.cfg; setup.py simplified (only Qwen3-8B, no download); ISO build with `-iso-level 3` for models >4 GB |
-| v3.2 | 2026-07-26 | setup.py: API key validation, retry loop, readline backspace fix; aios-session: X first, i3 with conditional exec; dbus.service; ldconfig.service masked; PATH+secure_path; aios-install without `--force` (GRUB 0x9000) |
-| v3.1 | 2026-07-24 | GRUB compiled from LFS 13.0-systemd with linker entry-point 0x9000 fix; ISO build with host `grub-mkrescue` |
-| v3.0 | 2026-07-21 | Wizard setup.py with INSTALL TO DISK option; aios-install v1.0; chat.py EOF/error wrapper |
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

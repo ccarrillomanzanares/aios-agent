@@ -350,6 +350,8 @@ WARGAMES_QUOTES = [
     "Welcome to the Desert of the Real.",
     "Unfortunately, no one can be told what the Matrix is. You have to see it for yourself.",
     "What is real? How do you define real?",
+    "You take the blue pill, the story ends, you wake up in your bed and believe whatever you want to believe. You take the red pill, you stay in Wonderland, and I show you how deep the rabbit hole goes.",
+    "Whoa. Déjà vu.",
     # Tron (1982)
     "Greetings, Programs!",
     "End of line.",

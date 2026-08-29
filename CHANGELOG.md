@@ -15,14 +15,14 @@
 - **Beep/tic did not sound**: `aplay --buffer-size=512 --period-size=512` (buffer == period) failed silently on some codecs; removed (device defaults). `aios-diag` now collects audio state (`aplay -l`, `/proc/asound/cards`, `amixer`, snd/hda errors).
 - **Loading bar in English**: the LLM progress bar text was in Spanish; switched to English (consistent with the rest of the printf).
 
-## v0.15 - August 2026
+## v0.15 - 2026-08-29 08:09
 
 ### fixes for LLM boot and screenshot (progress bar regression)
 
 - **LLM loading stuck at 85%**: `_start_local_model` used `select` on raw fd + `readline` with Python buffer. When llama-server wrote `model loaded` and `listening` almost together, `readline` read both lines into buffer but returned only the first; `listening` stayed stuck in the buffer (select watches the fd, not the buffer) and the bar stayed at 85% forever **even though the server was already listening** (hence 0% CPU and "does not finish"). Fix: **reader thread + queue** (no select) that drains stdout and detects `listening` for real; 15 min timeout and dump of the last lines if it doesn't start.
 - **Printscreen (`Print`)**: inline `scrot` in i3 with `%` (strftime) + `&&` + nested quotes broke the i3 parser (`Could not translate string to key symbol`). Fix: dedicated `scripts/screenshot.sh` script, and binding to `/usr/local/bin/aios-agent/scripts/screenshot.sh`.
 
-## v0.14 - August 2026
+## v0.14 - 2026-08-28 22:23
 
 ### agent: executes real tools (Carlos feedback)
 
@@ -41,7 +41,7 @@
 - **Printscreen (`Print`)**: `scrot` to `~/screenshots/shot-<timestamp>.png`; documented in `shortcuts.txt` along with the chat commands `/think /health /reset /stats`.
 - **`aios-diag`**: collects diagnostics (system + errors + AIOS logs + screenshots since last collection), redacts keys from `config.yaml`, compresses `tar.zst` with timestamp and uploads via rsync to a write-only `diag` account (rrsync, no shell/sudo). Key not included in ISO (`--local` = local only).
 
-## v0.13 - August 2026
+## v0.13 - 2026-08-28 08:47
 
 ### stability fixes (Arnold feedback / physical laptops)
 
@@ -51,7 +51,7 @@
 - **sven timeout 600s**: `run_command` gives a generous timeout to `sven install/upgrade/sync` (before it timed out after minutes).
 - **Chat without staircase effect**: `_out()` writes explicit CRLF in LLM output (streaming, tools and final newline). Before it wrote a simple newline relying on tty ONLCR and the cursor didn't return to col 0 → each prompt shifted right.
 
-## v0.12 - August 2026
+## v0.12 - 2026-08-27 19:53
 
 ### ollama-hardened support (Moonlight) as provider
 
@@ -60,7 +60,7 @@
 - **Fix reading key** of custom provider (`provider_env`).
 - **Hardened Caddyfile** (ollama-hardened repo): API routes → 401 without a valid key.
 
-## v0.11 - August 2026
+## v0.11 - 2026-08-27 19:23
 
 ### local LLM improvements (accuracy / anti-hallucination)
 
@@ -69,7 +69,7 @@
 - **Sampling per official Qwen3 doc**: `_sampling_params()` — thinking `temp 0.6/top_p 0.95/top_k 20/min_p 0`, no-thinking `0.7/0.8/20/0`; cloud keeps conservative temperature. A/B verified on VPS (b10655): same correct answer, no repetitions.
 - **Reasoning_content echo**: the agent captures and returns `reasoning_content` in multi-turn history (clean thinking in long conversations).
 
-## v0.10 - August 2026
+## v0.10 - 2026-08-27 17:49
 
 ### local thinking switch (ON/OFF) + relative context/threads in disk installation
 
@@ -82,7 +82,7 @@
 - **Fix context/threads in disk installation**: `aios-install` wrote hardcoded `threads: 14` and `context: 32768`; now uses `_detect_cpu()` and `_auto_context(_detect_ram_gb())` (mirror of `setup.py`), consistent with live and without launching llama-server with `-c 32768` on machines ≤8 GB.
 - **Hot `/think` command**: thinking toggle without leaving the agent (like `/sound`); persists in `config.yaml` and `agent.set_think()` regenerates token + `max_tokens` + system prompt at runtime. Documented in `shortcuts.txt` (aios-lfs).
 
-## v0.9 - August 2026
+## v0.9 - 2026-08-04 23:23
 
 ### fix: mute agent (blank response + prompt >)
 
@@ -94,7 +94,7 @@
   3. `agent.py`: single retry if the stream ends without finish_reason and without content ("⚠️ Empty stream (possible cut). Retrying...").
 - Verified on physical laptop (4 Aug 2026): after restarting the agent, it responds normally. Pending long-term confirmation of the coordinates case.
 
-## v0.8 - August 2026
+## v0.8 - 2026-08-04 09:08
 
 ### distro kernel (#5) - generic hardware
 
@@ -116,7 +116,7 @@
 - busybox: applet symlinks (`/bin/udhcpc`, `/sbin/udhcpc`) + default.script in `/usr/share/udhcpc` and `/etc/udhcpc` (Ubuntu busybox looks for compiled path `/etc/udhcpc/`).
 - MILESTONE: complete AIOS on real hardware - wifi at boot without cable, cloud agent works (4 Aug 2026).
 
-## v0.7 - August 2026
+## v0.7 - 2026-08-02 22:15
 
 ### physical milestone
 
@@ -134,7 +134,7 @@
 - Support Rufus ISO/FAT32 mode in the live initrd init script.
 - Compile and integrate kernel #5 with NVMe and UAS support.
 
-## v0.6 - August 2026
+## v0.6 - 2026-08-02 18:51
 
 ### aios-install v1.1.2
 
@@ -160,7 +160,7 @@
 - Reinstalling AIOS LFS to disk, boot from disk works correctly: the AIOS logo is shown and it reaches login.
 - Pending polish: GRUB still shows the `'Welcome to GRUB!'` message. Future improvement: `timeout_style=hidden` and `quiet_boot=1`.
 
-## v0.5 - August 2026
+## v0.5 - 2026-08-02 14:34
 
 ### aios-install
 
@@ -169,7 +169,7 @@
 - Removed `nokaslr` from the generated `grub.cfg`.
 - `print_box` centered on screen.
 
-## v0.4 - August 2026
+## v0.4 - 2026-08-02 14:34
 
 ### setup.py
 
@@ -180,7 +180,7 @@
 - `print_box` centered on screen using `os.get_terminal_size`, with horizontal and vertical padding.
 - Final setup message: `"Setup complete. Starting the AIOS agent..."`, reflecting the automatic step from setup to aios.
 
-## v0.3 — Fix bootloader GRUB on disk installations (VirtualBox)
+## v0.3 - 2026-07-26 21:28 — Fix bootloader GRUB on disk installations (VirtualBox)
 
 - `aios-install`: dynamic GRUB menu generation (`grub-mkconfig`) replaced by a fixed text-mode `grub.cfg`.
 - Motivation: `grub-mkconfig` generated a graphical menu (`load_video`, `insmod all_video`, `gfxpayload=keep`, `terminal_output gfxterm`, `menuentry "Arch GNU/Linux"`) that hung in VirtualBox showing `Loading Linux 6.18.10-lfs ...`.
@@ -192,7 +192,7 @@
 - UUIDs and "Arch Linux" references removed from the boot menu.
 - README.md updated with section "Fix v7: Graphical GRUB hangs in VirtualBox after disk installation".
 
-## v0.2 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
+## v0.2 - 2026-07-23 12:34 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
 - Definitive model fixed to Qwen2.5-7B-Instruct; discarded Qwen2.5-Coder-3B and other models <7B due to unreliable function calling.
 - 13 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`, `get_context_usage`.
@@ -207,7 +207,7 @@
 - Fixes: Docker `--format` no longer flagged destructive; local/hybrid endpoint corrected to `/v1/chat/completions`; API key hidden with `getpass`; N/16 cores shown; DeepSeek updated to V4 Flash and V4 Pro; Ollama Cloud added as provider; `.gitignore` updated with `gcc*`; liability disclaimer in README; minimum local RAM raised from 8 GB to 12 GB.
 - README.md and executive PDF updated.
 
-## v0.1 — SRE Agent with native function calling on Qwen3-8B
+## v0.1 - 2026-07-21 11:32 — SRE Agent with native function calling on Qwen3-8B
 
 - Complete repository rewrite.
 - Lightweight SRE agent with native function calling via llama.cpp server.
