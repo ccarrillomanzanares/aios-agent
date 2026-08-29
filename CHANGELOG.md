@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.16 - August 2026
+## v0.16 - 2026-08-29 09:06
 
 ### voice (TTS/STT) — independent `voice:` section from chat
 
