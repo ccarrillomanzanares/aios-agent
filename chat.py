@@ -409,9 +409,22 @@ def _cmd_health():
     print()
 
 
+def _write_voice_state(config):
+    """Persist voice state to data/voice_state.json (i3 bar VOX/MIC icon)."""
+    try:
+        vc = config.get("voice", {}) if isinstance(config, dict) else {}
+        p = Path("data") / "voice_state.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        p.write_text(json.dumps({"tts": vc.get("tts", "off"), "stt": vc.get("stt", "off")}))
+    except Exception:
+        pass
+
+
 def main():
     config = load_or_setup()
     _voice_engine = config.get("voice", {}).get("tts", "off") or "espeak"
+    _write_voice_state(config)
     mode = config.get("mode", "local")
 
     # Setup history
@@ -505,6 +518,7 @@ def main():
                 CONFIG_FILE.write_text(yaml.dump(config, default_flow_style=False))
             except Exception:
                 pass
+            _write_voice_state(config)
             print(f"  Voice output: {'ON' if vc.get('tts') not in (None, 'off') else 'OFF'} ({_voice_engine})")
             continue
 
