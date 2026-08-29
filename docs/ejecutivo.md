@@ -1,4 +1,4 @@
-# Executive Summary — aios-agent v2.4
+# Executive Summary — aios-agent
 
 ## Purpose
 
@@ -20,7 +20,7 @@
 | `systemd/aios-llama.service` | systemd service for the model server (disabled at boot). |
 | `systemd/aios-agent.service` | systemd service for the interactive agent (disabled). |
 
-## What's new in v2.4
+## What's new
 
 1. **Standard system paths**
    - Server: `/usr/local/bin/llama-server`
@@ -62,7 +62,7 @@
 
 ## Project status
 
-- Current version: **v2.4**
+- Current version: **v0.16**
 - Branch: `main`
 - Last updated: July 24, 2026
 - Repository: https://github.com/ccarrillomanzanares/aios-agent
