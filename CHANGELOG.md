@@ -1,14 +1,30 @@
 # Changelog
 
-## v0.17 - 2026-08-30 00:53
+## v0.17 - 2026-08-30 01:48
+
+### new features
+
+- **sudo with password**: `/sudo <password>` (cached in session) + `run_command` uses `sudo -S`; the agent accepts the password in local and cloud modes (no NOPASSWD needed).
+- **audio-detect.py**: autodetects the analog sound card and writes `asound.conf` dynamically — audio works on any hardware.
+
+### i18n
+
+- All comments and user-facing strings translated to English (agent, installer, README, docs, scripts). Fixes `<think>` tag corruption.
 
 ### quotes
 
-- **2 new Matrix quotes**: the full red pill / blue pill monologue and "Whoa. Déjà vu." added to the rotating quote pool (`chat.py` + `setup.py`).
+- **5 Terminator quotes** (T1 + T2) and **2 Matrix quotes** (the full red pill / blue pill monologue + "Whoa. Déjà vu."). Quote lists unified (`setup.py` was missing Blade Runner) + shuffle-cycle picker to avoid repeats.
 
-### docs
+### fixes
 
-- Changelog dates corrected from git history; README version-agnostic; `ejecutivo.pdf` regenerated from the translated markdown.
+- Don't auto-open Firefox for the API key (ask first).
+- Login cursor: remove `vt.global_cursor_default=0` from the disk GRUB entry.
+- Audio/voice/chat patches.
+- Restore `scripts/aios-diag` exec bit.
+
+### license
+
+- MIT license added.
 
 ## v0.16 - 2026-08-29 09:06
 
