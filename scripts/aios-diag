@@ -56,10 +56,44 @@ run dns           sh -c 'resolvectl status 2>&1 || cat /etc/resolv.conf 2>&1'
 run procs         ps aux --sort=-%mem
 
 # ── audio (beep/tic) ─────────────────────────────────────────────────────
-run alsa-cards    cat /proc/asound/cards
-run alsa-devices  aplay -l
-run alsa-mixer    sh -c 'amixer get Master 2>&1; amixer get PCM 2>&1'
-run alsa-errors   sh -c 'dmesg | grep -iE "snd|hda|audio|alsa" | tail -60 2>&1'
+run alsa-cards      cat /proc/asound/cards
+run alsa-devices    aplay -l
+run alsa-capture    arecord -l
+run alsa-conf       sh -c 'echo "== /etc/asound.conf =="; cat /etc/asound.conf 2>&1; echo; echo "== ~/.asoundrc =="; cat "$HOME/.asoundrc" 2>&1'
+run alsa-mixer      sh -c 'amixer -c 0 contents 2>&1 | grep -A5 -iE "Master|PCM|Capture|Mic|Beep|Headphone" | head -160'
+run alsa-errors     sh -c 'dmesg | grep -iE "snd|hda|audio|alsa" | tail -60 2>&1'
+run audio-play-test python3 -c "import math,struct,subprocess; pcm=b''.join(struct.pack('<h',int(8000*math.sin(2*math.pi*880*i/44100))) for i in range(4410)); p=subprocess.run(['aplay','-q','-f','S16_LE','-r','44100','-c','1'],input=pcm,timeout=10); print('aplay test exit:',p.returncode)"
+run audio-mic-test  sh -c 'python3 - <<"PY"
+import subprocess, wave, struct, math, os
+wav = "/tmp/aios-diag-mic.wav"
+try:
+    p = subprocess.run(["arecord","-q","-f","S16_LE","-r","16000","-c","1","-d","2",wav], timeout=10)
+    print("arecord exit:", p.returncode)
+except Exception as e:
+    print("arecord FAIL:", e); raise SystemExit
+if os.path.exists(wav):
+    w = wave.open(wav); n = w.getnframes()
+    d = w.readframes(n)
+    if d:
+        s = struct.unpack("<%dh" % (len(d)//2), d)
+        rms = math.sqrt(sum(x*x for x in s)/len(s))
+        print("mic: %.2fs RMS=%d %s" % (n/w.getframerate(), rms, "SILENCIO" if rms < 200 else "SEÑAL OK"))
+    else:
+        print("mic: sin datos")
+    os.remove(wav)
+PY'
+
+# ── voz / TTS / STT ─────────────────────────────────────────────────────
+run voice-config    sh -c 'echo "== config.yaml =="; grep -A6 "^voice:" "$HOME/.aios/config.yaml" 2>&1; echo; echo "== voice_state.json =="; cat /usr/local/bin/aios-agent/data/voice_state.json 2>&1'
+run tts-espeak      sh -c 'espeak-ng --version 2>&1 | head -3'
+run voice-procs     sh -c 'ps aux | grep -E "[e]speak-ng|[a]play|[c]hat.py|[l]lama-server" 2>&1'
+run vosk-module     python3 -c 'import vosk; print("vosk module OK")'
+run vosk-model      sh -c 'ls -la /usr/local/share/aios/ 2>&1; du -sh /usr/local/share/aios/vosk-model* 2>&1'
+
+# ── chat / agente (errores silenciosos, voz colgada) ────────────────────
+run chat-fixes      sh -c 'echo "== parches aplicados =="; grep -n "LLM connection error\|voice.stop\|_save_session()" /usr/local/bin/aios-agent/chat.py /usr/local/bin/aios-agent/voice.py 2>&1'
+run stream-errors   sh -c 'echo "== últimas líneas =="; tail -5 /tmp/aios-stream.log 2>&1; echo; echo "== contadores =="; for pat in "LLM connection error" "EXC" "Empty stream" "finish=length" "finish=tool_calls"; do printf "%-22s %s\n" "$pat:" "$(grep -c "$pat" /tmp/aios-stream.log 2>/dev/null)"; done'
+run busy-file       sh -c 'ls -la /tmp/aios-agent.busy 2>&1; echo "-- contenido:"; cat /tmp/aios-agent.busy 2>&1'
 
 # ── errores / logs ──────────────────────────────────────────────────────
 run dmesg-tail    sh -c 'dmesg | tail -200 2>&1'

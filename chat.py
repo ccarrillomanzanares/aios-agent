@@ -513,6 +513,11 @@ def main():
             else:
                 _voice_engine = vc["tts"]
                 vc["tts"] = "off"
+                try:
+                    import voice
+                    voice.stop()
+                except Exception:
+                    pass
             try:
                 import yaml
                 CONFIG_FILE.write_text(yaml.dump(config, default_flow_style=False))
@@ -602,6 +607,21 @@ def main():
             # Solo añadimos un salto final (CRLF explícito) si el stream no lo dejó ya.
             sys.stdout.write(chr(13) + "\n")
             sys.stdout.flush()
+            # run() devuelve SIN streamear los errores y respuestas vacías
+            # (conexión LLM, stream vacío, caché). Si no se imprimen, el usuario
+            # ve el prompt volver sin ninguna respuesta.
+            if response and response.startswith(("LLM connection error",
+                                                  "Error leyendo stream",
+                                                  "(empty model response)",
+                                                  "(no response)",
+                                                  "[cache]")):
+                print("  " + response)
+                sys.stdout.flush()
+            # Guardar sesión siempre (también en errores), para no perder el hilo.
+            try:
+                agent._save_session()
+            except Exception:
+                pass
             if config.get("voice", {}).get("tts", "off") not in (None, "off"):
                 try:
                     import voice

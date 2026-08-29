@@ -6,5 +6,7 @@ skills_memory.json
 gcc*
 .env
 
-# Memoria runtime del agente (local, cambia en cada prueba)
+# Memoria runtime del agente (cambia en cada prueba)
 skills_memory_local.json
+skills_memory_cloud.json
+*.bak*

@@ -17,6 +17,27 @@ import subprocess
 import threading
 import urllib.request
 
+_PROCS = []
+_LOCK = threading.Lock()
+
+
+def _track(p):
+    with _LOCK:
+        _PROCS.append(p)
+
+
+def stop():
+    """Interrumpe la voz en curso (mata espeak-ng/aplay activos)."""
+    with _LOCK:
+        procs = list(_PROCS)
+    for p in procs:
+        try:
+            p.terminate()
+        except Exception:
+            pass
+    with _LOCK:
+        _PROCS.clear()
+
 _LANGS = ("es", "fr", "de", "it", "pt", "en")
 
 
@@ -68,6 +89,7 @@ def _play_pcm(pcm, rate=24000):
         return
     p = subprocess.Popen(["aplay", "-q", "-f", "S16_LE", "-r", str(rate), "-c", "1"],
                          stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    _track(p)
     p.communicate(pcm)
 
 
@@ -92,6 +114,7 @@ def speak(text, config):
 
 def _speak_sync(tts, text, lang):
     try:
+        stop()
         if tts == "espeak":
             _espeak(text, lang)
         elif tts == "gemini":
@@ -106,8 +129,11 @@ def _espeak(text, lang):
     v = _espeak_lang(lang)
     p1 = subprocess.Popen(["espeak-ng", "-v", v, "--stdout", text],
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    _track(p1)
+    p2 = subprocess.Popen(["aplay", "-q"], stdin=p1.stdout, stderr=subprocess.DEVNULL)
+    _track(p2)
     try:
-        subprocess.run(["aplay", "-q"], stdin=p1.stdout, stderr=subprocess.DEVNULL)
+        p2.wait()
     finally:
         if p1.stdout:
             p1.stdout.close()
