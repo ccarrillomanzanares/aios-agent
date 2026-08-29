@@ -193,7 +193,7 @@ def _rules_common():
         "For 'what programs/apps are installed' or 'is X installed', use the list_desktop_apps tool (never answer from memory).\n"
         "If you run a command, show its output to the user.\n"
         "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
-        "If a command fails with Permission denied or Operation not permitted, retry it with sudo (passwordless sudo is available).\n"
+        "If a command fails with Permission denied or Operation not permitted, retry it with sudo. sudo needs a password: if a sudo command returns 'sudo requires a password', tell the user to run /sudo <password> first, then retry.\n"
         "If you don't know something, say so honestly: 'I don't know'.\n"
         + _no_think
         + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"

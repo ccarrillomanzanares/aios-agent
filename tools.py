@@ -15,6 +15,21 @@ from playbook import run_playbook
 from process import process_start, process_send, process_close, process_list
 
 
+# Cache del password de sudo (solo sesión): run_command lo pasa a sudo -S.
+# El usuario lo fija con /sudo <password> en el chat; nunca se persiste a disco.
+_SUDO_PASSWORD = None
+
+
+def set_sudo_password(pw):
+    """Guarda el password de sudo para esta sesión (se pasa a sudo -S)."""
+    global _SUDO_PASSWORD
+    _SUDO_PASSWORD = pw
+
+
+def has_sudo_password():
+    return bool(_SUDO_PASSWORD)
+
+
 def _is_blocked_command(command: str) -> bool:
     """Return True if command matches an unconditionally blocked dangerous pattern."""
     lower = command.lower()
@@ -89,11 +104,25 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     max_attempts = 3
     current_command = command
 
-    # stdin: sven pide ":: Proceed? [Y/n]" → auto-confirmar; el resto → /dev/null
-    # (un prompt interactivo no debe bloquear la ejecución en silencio).
+    # sudo: en disco pide password. Se pasa a "sudo -S" y se alimenta el password
+    # por stdin. Si no hay password cacheado, se devuelve un error claro (el
+    # agente debe pedir al usuario que haga /sudo <password>).
+    uses_sudo = bool(re.search(r"\bsudo\b", current_command))
+    if uses_sudo and not _SUDO_PASSWORD:
+        return json.dumps({"stdout": "", "stderr": "sudo requires a password — set it first with /sudo <password>",
+                           "exit_code": -1, "elapsed": 0.0}, ensure_ascii=False)
+    if uses_sudo:
+        current_command = re.sub(r"\bsudo\b", "sudo -S", current_command, count=1)
+
+    # stdin: sven pide ":: Proceed? [Y/n]" → auto-confirmar; sudo -S lee el password.
     _auto_confirm = any(kw in command for kw in ("sven install", "sven upgrade", "sven update"))
-    stdin_arg = subprocess.PIPE if _auto_confirm else subprocess.DEVNULL
-    stdin_input = "y\ny\ny\ny\n" if _auto_confirm else None
+    stdin_parts = []
+    if uses_sudo:
+        stdin_parts.append(_SUDO_PASSWORD + "\n")
+    if _auto_confirm:
+        stdin_parts.append("y\ny\ny\ny\n")
+    stdin_arg = subprocess.PIPE if stdin_parts else subprocess.DEVNULL
+    stdin_input = "".join(stdin_parts) if stdin_parts else None
 
     while attempts < max_attempts:
         attempts += 1

@@ -540,6 +540,25 @@ def main():
                 print("  (No speech detected, or speech-to-text is not configured)")
                 continue
 
+        if query.lower().startswith("/sudo"):
+            pw = query[5:].strip()
+            if not pw:
+                try:
+                    import getpass
+                    pw = getpass.getpass("  Sudo password: ").strip()
+                except Exception:
+                    pw = input("  Sudo password: ").strip()
+            if pw:
+                try:
+                    import tools
+                    tools.set_sudo_password(pw)
+                    print("  Sudo password set (session only, not persisted).")
+                except Exception as e:
+                    print(f"  Error: {e}")
+            else:
+                print("  No password provided.")
+            continue
+
         if query.lower() == "/think":
             if mode not in ("local", "hybrid"):
                 print("  Thinking mode is a local-model feature (not available in cloud).")
