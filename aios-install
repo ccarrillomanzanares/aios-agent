@@ -237,7 +237,7 @@ def install_grub(target, disk, root_part):
 set timeout=0
 
 menuentry "AIOS LFS" {{
-    linux /boot/vmlinuz-6.18.10-lfs root={root_part} rw console=tty0 quiet loglevel=3 systemd.show_status=false vt.global_cursor_default=0
+    linux /boot/vmlinuz-6.18.10-lfs root={root_part} rw console=tty0 quiet loglevel=3 systemd.show_status=false
     initrd /boot/initrd.img
 }}
 """)
