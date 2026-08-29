@@ -42,8 +42,7 @@ def _open_audio():
     try:
         import subprocess as _sp
         _AUDIO = _sp.Popen(
-            ["aplay", "-q", "-f", "S16_LE", "-r", "44100", "-c", "1",
-             "--buffer-size=512", "--period-size=512", "-"],
+            ["aplay", "-q", "-f", "S16_LE", "-r", "44100", "-c", "1", "-"],
             stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         )
         # Warm-up: force the device open (0.2 s of silence) before first real tic

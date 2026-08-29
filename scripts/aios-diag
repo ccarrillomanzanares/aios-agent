@@ -55,6 +55,12 @@ run wifi          sh -c 'iw dev 2>&1'
 run dns           sh -c 'resolvectl status 2>&1 || cat /etc/resolv.conf 2>&1'
 run procs         ps aux --sort=-%mem
 
+# ── audio (beep/tic) ─────────────────────────────────────────────────────
+run alsa-cards    cat /proc/asound/cards
+run alsa-devices  aplay -l
+run alsa-mixer    sh -c 'amixer get Master 2>&1; amixer get PCM 2>&1'
+run alsa-errors   sh -c 'dmesg | grep -iE "snd|hda|audio|alsa" | tail -60 2>&1'
+
 # ── errores / logs ──────────────────────────────────────────────────────
 run dmesg-tail    sh -c 'dmesg | tail -200 2>&1'
 run journal-err   journalctl -p err -b --no-pager
