@@ -7,6 +7,21 @@
 - **Carga del LLM clavada al 85%**: `_start_local_model` usaba `select` sobre el fd crudo + `readline` con buffer de Python. Cuando llama-server escribía `model loaded` y `listening` casi a la vez, `readline` leía las dos líneas al buffer pero devolvía solo la primera; `listening` quedaba atascada en el buffer (select mira el fd, no el buffer) y la barra se quedaba en 85% para siempre **aunque el servidor ya escuchara** (por eso 0% CPU y "no termina"). Fix: **hilo lector + cola** (sin select) que drena el stdout y detecta `listening` de verdad; timeout de 15 min y volcado de las últimas líneas si no arranca.
 - **Printscreen (`Print`)**: el `scrot` inline en i3 con `%` (strftime) + `&&` + comillas anidadas rompía el parser de i3 (`Could not translate string to key symbol`). Fix: script `scripts/screenshot.sh` dedicado, y binding a `/usr/local/bin/aios-agent/scripts/screenshot.sh`.
 
+## v3.16 - agosto 2026
+
+### voz (TTS/STT) — sección `voice:` independiente del chat
+
+- **Config**: sección `voice:` en `config.yaml` (tts/stt/tts_lang), separada de `cloud:` (chat). El setup (live e `aios-install`) deja elegir TTS (off/espeak/gemini/openai), STT (off/vosk/gemini/openai) e idioma; las claves de voz van a `~/.aios/.env` aparte de la de chat (`GOOGLE_API_KEY`/`OPENAI_API_KEY` vs `DEEPSEEK_API_KEY`).
+- **TTS** (`voice.py`): espeak-ng local (sin clave), Gemini `gemini-2.5-flash-tts` y OpenAI `gpt-4o-mini-tts` (cloud). Omite bloques de código/tablas para no deletrearlos y habla en hilo (no bloquea el chat). `espeak-ng` instalado vía sven.
+- **STT** (`voice.py`): vosk local, Gemini y OpenAI cloud (graba con `arecord`).
+- **Comandos**: `/voice` (alterna la voz, persiste) y `/mic` (graba + transcribe + envía como mensaje).
+- **Icono**: bloque `VOX/MIC` en la barra i3 (verde=activo, atenuado=off) leyendo `data/voice_state.json`.
+
+### fixes
+
+- **Beep/tic no sonaba**: `aplay --buffer-size=512 --period-size=512` (buffer == periodo) fallaba en silencio en algunos codecs; quitados (valores por defecto del dispositivo). `aios-diag` ahora recoge el estado de audio (aplay -l, /proc/asound/cards, amixer, errores snd/hda).
+- **Barra de carga en inglés**: el texto de la barra de progreso del LLM estaba en español; pasado a inglés (consistente con el resto del printf).
+
 ## v3.14 - agosto 2026
 
 ### agente: ejecuta tools de verdad (feedback Carlos)
