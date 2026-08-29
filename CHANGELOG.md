@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.17 - 2026-08-30 00:53
+
+### quotes
+
+- **2 new Matrix quotes**: the full red pill / blue pill monologue and "Whoa. Déjà vu." added to the rotating quote pool (`chat.py` + `setup.py`).
+
+### docs
+
+- Changelog dates corrected from git history; README version-agnostic; `ejecutivo.pdf` regenerated from the translated markdown.
+
 ## v0.16 - 2026-08-29 09:06
 
 ### voice (TTS/STT) — independent `voice:` section from chat
