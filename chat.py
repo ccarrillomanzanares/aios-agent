@@ -411,6 +411,7 @@ def _cmd_health():
 
 def main():
     config = load_or_setup()
+    _voice_engine = config.get("voice", {}).get("tts", "off") or "espeak"
     mode = config.get("mode", "local")
 
     # Setup history
@@ -492,6 +493,34 @@ def main():
             print(f"  Typewriter sound: {'ON' if agent.SOUND_ON else 'OFF'}")
             continue
 
+        if query.lower() == "/voice":
+            vc = config.setdefault("voice", {})
+            if vc.get("tts", "off") in (None, "off"):
+                vc["tts"] = _voice_engine
+            else:
+                _voice_engine = vc["tts"]
+                vc["tts"] = "off"
+            try:
+                import yaml
+                CONFIG_FILE.write_text(yaml.dump(config, default_flow_style=False))
+            except Exception:
+                pass
+            print(f"  Voice output: {'ON' if vc.get('tts') not in (None, 'off') else 'OFF'} ({_voice_engine})")
+            continue
+
+        if query.lower() == "/mic":
+            try:
+                import voice
+                text = voice.listen(config)
+            except Exception:
+                text = None
+            if text:
+                print(f"You: {text}")
+                query = text  # fall through to agent.run(query)
+            else:
+                print("  (No speech detected, or speech-to-text is not configured)")
+                continue
+
         if query.lower() == "/think":
             if mode not in ("local", "hybrid"):
                 print("  Thinking mode is a local-model feature (not available in cloud).")
@@ -559,6 +588,12 @@ def main():
             # Solo añadimos un salto final (CRLF explícito) si el stream no lo dejó ya.
             sys.stdout.write(chr(13) + "\n")
             sys.stdout.flush()
+            if config.get("voice", {}).get("tts", "off") not in (None, "off"):
+                try:
+                    import voice
+                    voice.speak(response, config)
+                except Exception:
+                    pass
         except KeyboardInterrupt:
             print("\n[Interrupted]")
             continue
