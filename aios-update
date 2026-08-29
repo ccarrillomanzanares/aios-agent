@@ -1,11 +1,11 @@
 #!/bin/bash
 # ============================================================
-#  aios-update — actualiza los componentes de AIOS
-#  (agente + scripts + configs) desde los repos oficiales.
-#  Uso: sudo aios-update        (requiere internet)
-#  Seguro: solo toca archivos gestionados por el proyecto AIOS,
-#  NUNCA paquetes de sven ni archivos del sistema. Los archivos
-#  anteriores se guardan en /var/backups/aios-update/<fecha>/.
+#  aios-update — updates AIOS components
+#  (agent + scripts + configs) from the official repos.
+#  Usage: sudo aios-update        (requires internet)
+#  Safe: only touches files managed by the AIOS project,
+#  NEVER sven packages or system files. Previous files
+#  are saved in /var/backups/aios-update/<date>/.
 # ============================================================
 set -u
 
@@ -13,22 +13,22 @@ CACHE=/var/cache/aios-update
 BACKUP=/var/backups/aios-update
 REPO_AGENT=https://github.com/ccarrillomanzanares/aios-agent.git
 REPO_LFS=https://github.com/ccarrillomanzanares/aios-lfs.git
-FECHA=$(date +%Y%m%d-%H%M)
+DATE=$(date +%Y%m%d-%H%M)
 
-# Colores discretos
+# Subtle colors
 GRN='\033[0;32m'; YEL='\033[1;33m'; CYA='\033[0;36m'; RST='\033[0m'
 
 say()  { printf "${CYA}[aios-update]${RST} %s\n" "$*"; }
 ok()   { printf "${GRN}  ✓ %s${RST}\n" "$*"; }
 warn() { printf "${YEL}  ⚠ %s${RST}\n" "$*"; }
 
-# Comprobar root
+# Check root
 if [ "$(id -u)" -ne 0 ]; then
   echo "aios-update requires root (run: sudo aios-update)" >&2
   exit 1
 fi
 
-# Comprobar red rápida (sin depender de curl/ping)
+# Check network quickly (no curl/ping dependency)
 if ! git ls-remote "$REPO_AGENT" HEAD >/dev/null 2>&1; then
   echo "ERROR: cannot reach $REPO_AGENT — check your internet connection." >&2
   exit 1
@@ -36,8 +36,8 @@ fi
 
 say "Updating AIOS from the official repositories..."
 
-# 1. Clonar/actualizar los repos (copia de trabajo)
-mkdir -p "$CACHE" "$BACKUP/$FECHA"
+# 1. Clone/update repos (working copy)
+mkdir -p "$CACHE" "$BACKUP/$DATE"
 if [ ! -d "$CACHE/aios-agent/.git" ]; then
   git clone --depth 1 "$REPO_AGENT" "$CACHE/aios-agent" -q || { echo "ERROR cloning aios-agent" >&2; exit 1; }
   ok "cloned aios-agent"
@@ -51,11 +51,11 @@ else
   git -C "$CACHE/aios-lfs" pull --ff-only -q || warn "aios-lfs pull failed (continuing with local copy)"
 fi
 
-# 2. Manifiesto: (origen en cache, destino en el sistema)
+# 2. Manifest: (source in cache, destination in the system)
 #    agent = aios-agent repo · lfs = aios-lfs repo (configs/)
-#    Mapeo verificado contra el árbol (26 Ago 2026)
+#    Mapping verified against the tree (Aug 26 2026)
 MANIFEST=(
-  # --- Núcleo del agente (raíz del repo aios-agent → /usr/local/bin/aios-agent/) ---
+  # --- Agent core (aios-agent repo root → /usr/local/bin/aios-agent/) ---
   "agent/agent.py        /usr/local/bin/aios-agent/agent.py"
   "agent/chat.py         /usr/local/bin/aios-agent/chat.py"
   "agent/setup.py        /usr/local/bin/aios-agent/setup.py"
@@ -63,21 +63,21 @@ MANIFEST=(
   "agent/memory.py       /usr/local/bin/aios-agent/memory.py"
   "agent/playbook.py     /usr/local/bin/aios-agent/playbook.py"
   "agent/process.py      /usr/local/bin/aios-agent/process.py"
-  # --- Instalador y scripts de sistema (raíz/scripts del repo → /usr/local/bin/) ---
+  # --- Installer and system scripts (repo root/scripts → /usr/local/bin/) ---
   "agent/aios-install        /usr/local/bin/aios-install"
   "agent/aios-theme          /usr/local/bin/aios-theme"
   "agent/aios-xterm          /usr/local/bin/aios-xterm"
   "agent/scripts/aios-keyboard /usr/local/bin/aios-keyboard"
   "agent/scripts/aios-session  /usr/local/bin/aios-session"
   "agent/aios-update         /usr/local/bin/aios-update"
-  # --- Scripts auxiliares (scripts/ → aios-agent/scripts/) ---
+  # --- Helper scripts (scripts/ → aios-agent/scripts/) ---
   "agent/scripts/firstboot.sh    /usr/local/bin/aios-agent/scripts/firstboot.sh"
   "agent/scripts/launch_llama.py /usr/local/bin/aios-agent/scripts/launch_llama.py"
   "agent/scripts/grabar.sh           /usr/local/bin/aios-agent/scripts/grabar.sh"
   "agent/scripts/toggle-grabacion.sh /usr/local/bin/aios-agent/scripts/toggle-grabacion.sh"
   "agent/scripts/parar_grabacion.sh  /usr/local/bin/aios-agent/scripts/parar_grabacion.sh"
   "agent/scripts/instalar-grabacion.sh /usr/local/bin/aios-agent/scripts/instalar-grabacion.sh"
-  # --- Configs (repo aios-lfs, configs/ → /home/aios/.config/) ---
+  # --- Configs (aios-lfs repo, configs/ → /home/aios/.config/) ---
   "lfs/configs/home/aios/.config/i3/config              /home/aios/.config/i3/config"
   "lfs/configs/home/aios/.config/i3/shortcuts.txt       /home/aios/.config/i3/shortcuts.txt"
   "lfs/configs/home/aios/.config/i3/status.py           /home/aios/.config/i3/status.py"
@@ -86,8 +86,8 @@ MANIFEST=(
 
 changed=0; same=0
 for entry in "${MANIFEST[@]}"; do
-  # read -r colapsa los espacios de alineacion del manifest (fix 26 Ago:
-  # ${entry#* } dejaba los espacios pegados a dst -> [ -f ] falso -> nunca actualizaba)
+  # read -r collapses manifest alignment spaces (fix Aug 26:
+  # ${entry#* } used to leave spaces stuck to dst -> [ -f ] false -> never updated)
   read -r src dst <<< "$entry"
   case "$src" in
     agent/*) file="$CACHE/aios-agent/${src#agent/}" ;;
@@ -100,10 +100,10 @@ for entry in "${MANIFEST[@]}"; do
     continue
   fi
 
-  # Cambió: backup + copia + permisos
+  # Changed: backup + copy + permissions
   if [ -f "$dst" ]; then
-    mkdir -p "$BACKUP/$FECHA/$(dirname "${dst#/}")"
-    cp -a "$dst" "$BACKUP/$FECHA/${dst#/}"
+    mkdir -p "$BACKUP/$DATE/$(dirname "${dst#/}")"
+    cp -a "$dst" "$BACKUP/$DATE/${dst#/}"
   fi
   mkdir -p "$(dirname "$dst")"
   cp "$file" "$dst"
@@ -112,21 +112,21 @@ for entry in "${MANIFEST[@]}"; do
   ok "updated ${dst}"
 done
 
-# 3. Reinicio/avisos
+# 3. Restart/notices
 agent_touched=0
 for f in /usr/local/bin/aios-agent/agent.py /usr/local/bin/aios-agent/chat.py /usr/local/bin/aios-agent/setup.py; do
-  if [ -f "$BACKUP/$FECHA${f}" ]; then agent_touched=1; fi
+  if [ -f "$BACKUP/$DATE${f}" ]; then agent_touched=1; fi
 done
 i3_touched=0
 for f in /home/aios/.config/i3/config /home/aios/.config/i3/status.py; do
-  if [ -f "$BACKUP/$FECHA${f}" ]; then i3_touched=1; fi
+  if [ -f "$BACKUP/$DATE${f}" ]; then i3_touched=1; fi
 done
 
 echo ""
 if [ "$changed" -eq 0 ]; then
   ok "AIOS is already up to date ($same files checked, no changes)."
 else
-  ok "$changed file(s) updated, $same unchanged. Backups in $BACKUP/$FECHA/"
+  ok "$changed file(s) updated, $same unchanged. Backups in $BACKUP/$DATE/"
   if [ "$agent_touched" -eq 1 ]; then
     warn "The agent code changed — restart the AIOS chat to apply it (close it and open AIOS again)."
   fi

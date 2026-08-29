@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# aios-diag — recopila diagnóstico de AIOS (sistema + logs + pantallazos),
-# lo comprime con timestamp y lo sube al VPS (cuenta de SOLO escritura).
+# aios-diag — collects AIOS diagnostics (system + logs + screenshots),
+# compresses them with a timestamp and uploads them to the VPS (write-only account).
 #
-# Uso:
-#   aios-diag            recopila + comprime + sube (si hay clave)
-#   aios-diag --local    recopila + comprime, sin subir
+# Usage:
+#   aios-diag            collect + compress + upload (if key exists)
+#   aios-diag --local    collect + compress, no upload
 #
-# Variables de entorno:
+# Environment variables:
 #   AIOS_DIAG_USER (def: diag)   AIOS_DIAG_HOST (def: 31.220.80.78)
 #   AIOS_DIAG_KEY  (def: ~/.ssh/aios_diag)
 #
-# La subida usa rsync contra una cuenta dedicada 'diag' restringida con
-# rrsync (comando forzado) → SOLO puede escribir en una carpeta de entrada,
-# sin shell, sin sudo, sin lectura del VPS. Ninguna clave va en la ISO.
+# The upload uses rsync against a dedicated 'diag' account restricted with
+# rrsync (forced command) → it can ONLY write into an inbound folder,
+# with no shell, no sudo, no read access to the VPS. No key is embedded in the ISO.
 
 set -u
 
 TS=$(date +%Y%m%d_%H%M%S)
 HOST=$(hostname 2>/dev/null || echo aios)
-OUT="$HOME/.aios-diag-work"          # temporal, se limpia al final
-STATE="$HOME/.aios-diag-state"       # persistente (marcador de pantallazos)
+OUT="$HOME/.aios-diag-work"          # temporary, cleaned up at the end
+STATE="$HOME/.aios-diag-state"       # persistent (screenshot marker)
 MARKER="$STATE/last_marker"
 SHOTS_DIR="$HOME/screenshots"
 BUNDLE="$HOME/aios-diag-${TS}.tar.zst"
@@ -36,9 +36,9 @@ mkdir -p "$OUT/files" "$OUT/screenshots" "$STATE"
 
 run() { local name="$1"; shift; "$@" > "$OUT/files/$name.txt" 2>&1; }
 
-echo "Recopilando diagnóstico..."
+echo "Collecting diagnostics..."
 
-# ── sistema base ────────────────────────────────────────────────────────
+# ── base system ─────────────────────────────────────────────────────────
 run uname         uname -a
 run os-release    cat /etc/os-release
 run date-uptime   sh -c 'date; echo; uptime'
@@ -55,7 +55,7 @@ run wifi          sh -c 'iw dev 2>&1'
 run dns           sh -c 'resolvectl status 2>&1 || cat /etc/resolv.conf 2>&1'
 run procs         ps aux --sort=-%mem
 
-# ── audio (beep/tic) ─────────────────────────────────────────────────────
+# ── audio (beep/tick) ──────────────────────────────────────────────────
 run alsa-cards      cat /proc/asound/cards
 run alsa-devices    aplay -l
 run alsa-capture    arecord -l
@@ -77,31 +77,31 @@ if os.path.exists(wav):
     if d:
         s = struct.unpack("<%dh" % (len(d)//2), d)
         rms = math.sqrt(sum(x*x for x in s)/len(s))
-        print("mic: %.2fs RMS=%d %s" % (n/w.getframerate(), rms, "SILENCIO" if rms < 200 else "SEÑAL OK"))
+        print("mic: %.2fs RMS=%d %s" % (n/w.getframerate(), rms, "SILENCE" if rms < 200 else "SIGNAL OK"))
     else:
-        print("mic: sin datos")
+        print("mic: no data")
     os.remove(wav)
 PY'
 
-# ── voz / TTS / STT ─────────────────────────────────────────────────────
+# ── voice / TTS / STT ──────────────────────────────────────────────────
 run voice-config    sh -c 'echo "== config.yaml =="; grep -A6 "^voice:" "$HOME/.aios/config.yaml" 2>&1; echo; echo "== voice_state.json =="; cat /usr/local/bin/aios-agent/data/voice_state.json 2>&1'
 run tts-espeak      sh -c 'espeak-ng --version 2>&1 | head -3'
 run voice-procs     sh -c 'ps aux | grep -E "[e]speak-ng|[a]play|[c]hat.py|[l]lama-server" 2>&1'
 run vosk-module     python3 -c 'import vosk; print("vosk module OK")'
 run vosk-model      sh -c 'ls -la /usr/local/share/aios/ 2>&1; du -sh /usr/local/share/aios/vosk-model* 2>&1'
 
-# ── chat / agente (errores silenciosos, voz colgada) ────────────────────
-run chat-fixes      sh -c 'echo "== parches aplicados =="; grep -n "LLM connection error\|voice.stop\|_save_session()" /usr/local/bin/aios-agent/chat.py /usr/local/bin/aios-agent/voice.py 2>&1'
-run stream-errors   sh -c 'echo "== últimas líneas =="; tail -5 /tmp/aios-stream.log 2>&1; echo; echo "== contadores =="; for pat in "LLM connection error" "EXC" "Empty stream" "finish=length" "finish=tool_calls"; do printf "%-22s %s\n" "$pat:" "$(grep -c "$pat" /tmp/aios-stream.log 2>/dev/null)"; done'
-run busy-file       sh -c 'ls -la /tmp/aios-agent.busy 2>&1; echo "-- contenido:"; cat /tmp/aios-agent.busy 2>&1'
+# ── chat / agent (silent errors, hung voice) ───────────────────────────
+run chat-fixes      sh -c 'echo "== applied patches =="; grep -n "LLM connection error\|voice.stop\|_save_session()" /usr/local/bin/aios-agent/chat.py /usr/local/bin/aios-agent/voice.py 2>&1'
+run stream-errors   sh -c 'echo "== last lines =="; tail -5 /tmp/aios-stream.log 2>&1; echo; echo "== counters =="; for pat in "LLM connection error" "EXC" "Empty stream" "finish=length" "finish=tool_calls"; do printf "%-22s %s\n" "$pat:" "$(grep -c "$pat" /tmp/aios-stream.log 2>/dev/null)"; done'
+run busy-file       sh -c 'ls -la /tmp/aios-agent.busy 2>&1; echo "-- contents:"; cat /tmp/aios-agent.busy 2>&1'
 
-# ── errores / logs ──────────────────────────────────────────────────────
+# ── errors / logs ──────────────────────────────────────────────────────
 run dmesg-tail    sh -c 'dmesg | tail -200 2>&1'
 run journal-err   journalctl -p err -b --no-pager
 run unit-failed   systemctl list-units --failed --no-pager
 run unit-running  systemctl list-units --state=running --no-pager
 
-# ── AIOS específico ─────────────────────────────────────────────────────
+# ── AIOS specific ─────────────────────────────────────────────────────
 run sven-list     sh -c 'sven list 2>&1'
 run sven-log      sh -c 'tail -200 /var/log/sven/sven.log 2>&1'
 run llama-status  systemctl status aios-llama --no-pager
@@ -112,26 +112,26 @@ run agent-files   sh -c 'ls -la /usr/local/bin/aios-agent/ /usr/local/bin/aios-a
 run session-log   sh -c 'for f in /usr/local/bin/aios-agent/data/session_*.json /usr/local/bin/aios-agent/skills_memory_*.json; do echo "=== $f ==="; head -300 "$f" 2>&1; done'
 run i3-config     sh -c 'cat "$HOME/.config/i3/config" 2>&1'
 
-# ── config REDACTADO (claves/tokens) ────────────────────────────────────
+# ── REDACTED config (keys/tokens) ──────────────────────────────────────
 if [ -f "$HOME/.aios/config.yaml" ]; then
     sed -E 's/^([[:space:]]*[-A-Za-z_]*(key|token|secret|pass)[-A-Za-z_]*[[:space:]]*:[[:space:]]*).*/\1***REDACTED***/I' \
         "$HOME/.aios/config.yaml" > "$OUT/files/config-redacted.yaml" 2>/dev/null
 fi
 
-# ── pantallazos desde la última recolección ─────────────────────────────
+# ── screenshots since last collection ──────────────────────────────────
 if [ -d "$SHOTS_DIR" ]; then
     find "$SHOTS_DIR" -maxdepth 1 -type f -name "*.png" -newer "$MARKER" \
         -exec cp {} "$OUT/screenshots/" \; 2>/dev/null
 fi
 N_SHOTS=$(ls "$OUT/screenshots" 2>/dev/null | wc -l)
 
-# ── empaquetar ──────────────────────────────────────────────────────────
+# ── package ────────────────────────────────────────────────────────────
 {
     echo "AIOS diagnostic bundle"
-    echo "Fecha:  $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Date:   $(date '+%Y-%m-%d %H:%M:%S')"
     echo "Host:   $HOST"
     echo "User:   $(id -un 2>/dev/null)"
-    echo "Pantallazos: $N_SHOTS"
+    echo "Screenshots: $N_SHOTS"
 } > "$OUT/README.txt"
 
 if tar --zstd -cf "$BUNDLE" -C "$OUT" . 2>/dev/null; then
@@ -141,21 +141,21 @@ else
     tar czf "$BUNDLE" -C "$OUT" . 2>/dev/null
 fi
 
-# ── marcar pantallazos como recogidos ───────────────────────────────────
+# ── mark screenshots as collected ──────────────────────────────────────
 touch "$MARKER"
 
 echo "✓ Bundle: $BUNDLE ($(du -h "$BUNDLE" 2>/dev/null | cut -f1))"
 
-# ── subir (si hay clave + red) ──────────────────────────────────────────
+# ── upload (if key + network) ──────────────────────────────────────────
 if [ "$UPLOAD" = 1 ] && [ -f "$DIAG_KEY" ]; then
     if rsync -e "ssh -i '$DIAG_KEY' -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
               "$BUNDLE" "$DIAG_USER@$DIAG_HOST:./" 2>/dev/null; then
-        echo "✓ Subido a $DIAG_USER@$DIAG_HOST (solo escritura)"
+        echo "✓ Uploaded to $DIAG_USER@$DIAG_HOST (write-only)"
     else
-        echo "⚠ No se pudo subir (¿clave o red?). El bundle queda en local."
+        echo "⚠ Could not upload (key or network?). Bundle remains local."
     fi
 elif [ "$UPLOAD" = 1 ]; then
-    echo "ℹ Sin clave de subida ($DIAG_KEY). Bundle solo local."
+    echo "ℹ No upload key ($DIAG_KEY). Bundle is local only."
 fi
 
 rm -rf "$OUT"

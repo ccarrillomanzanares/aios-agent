@@ -1,68 +1,68 @@
-# Resumen Ejecutivo — aios-agent v2.4
+# Executive Summary — aios-agent v2.4
 
-## Propósito
+## Purpose
 
-`aios-agent` es un asistente SRE (Site Reliability Engineering) ligero que utiliza **function calling nativo** sobre un modelo local Qwen servido por llama.cpp. Opera 100% offline en modo local, con opción a modelos cloud en modo cloud/híbrido. Ejecuta comandos Linux, lee y escribe archivos, gestiona procesos interactivos, consulta la web y aprende de la experiencia mediante memoria procedural.
+`aios-agent` is a lightweight SRE (Site Reliability Engineering) assistant that uses **native function calling** on a local Qwen model served by llama.cpp. It operates 100% offline in local mode, with an option for cloud models in cloud/hybrid mode. It runs Linux commands, reads and writes files, manages interactive processes, consults the web and learns from experience through procedural memory.
 
-## Componentes principales
+## Main components
 
-| Archivo | Función |
+| File | Function |
 |---------|---------|
-| `agent.py` | Orquestador de function calling, compresión de contexto y sesiones persistentes. |
-| `tools.py` | Definición y handlers de herramientas (shell, lectura, escritura, web, git, MCP, procesos). |
-| `chat.py` | Bucle interactivo, carga de config y selección de modo. |
-| `memory.py` | Memoria procedural persistente por modo (ProcMEM). |
-| `process.py` | Gestión de procesos interactivos vía PTY. |
-| `setup.py` | Asistente de configuración inicial (local/cloud/híbrido). |
-| `aios-install` | Instalador de la ISO AIOS LFS a disco duro. |
-| `scripts/launch_llama.py` | Lanzador de llama-server; no crea config, arranca solo en local/híbrido. |
-| `scripts/firstboot.sh` | Configuración de primer arranque. |
-| `systemd/aios-llama.service` | Servicio systemd del servidor de modelos (deshabilitado en boot). |
-| `systemd/aios-agent.service` | Servicio systemd del agente interactivo (deshabilitado). |
+| `agent.py` | Function calling orchestrator, context compression and persistent sessions. |
+| `tools.py` | Tool definitions and handlers (shell, read, write, web, git, MCP, processes). |
+| `chat.py` | Interactive loop, config loading and mode selection. |
+| `memory.py` | Persistent procedural memory per mode (ProcMEM). |
+| `process.py` | Interactive process management via PTY. |
+| `setup.py` | Initial configuration wizard (local/cloud/hybrid). |
+| `aios-install` | Installer of the AIOS LFS ISO to hard disk. |
+| `scripts/launch_llama.py` | llama-server launcher; does not create config, only starts in local/hybrid. |
+| `scripts/firstboot.sh` | First-boot configuration. |
+| `systemd/aios-llama.service` | systemd service for the model server (disabled at boot). |
+| `systemd/aios-agent.service` | systemd service for the interactive agent (disabled). |
 
-## Novedades de la v2.4
+## What's new in v2.4
 
-1. **Rutas estándar de sistema**
-   - Servidor: `/usr/local/bin/llama-server`
-   - Modelos: `/usr/local/share/aios/models/`
-   - Código del agente: `/usr/local/bin/aios-agent/`
-   - Configuración: `~/.aios/config.yaml`
-   - Claves API: `~/.aios/.env`
+1. **Standard system paths**
+   - Server: `/usr/local/bin/llama-server`
+   - Models: `/usr/local/share/aios/models/`
+   - Agent code: `/usr/local/bin/aios-agent/`
+   - Configuration: `~/.aios/config.yaml`
+   - API keys: `~/.aios/.env`
 
-2. **Instalador a disco duro (`aios-install`)**
-   - Particiona GPT, formatea ext4 y copia el sistema live.
-   - Instala GRUB, genera `/etc/fstab` por UUID.
-   - Genera `~/.aios/config.yaml` para el usuario `aios`.
+2. **Install-to-disk (`aios-install`)**
+   - GPT partitioning, ext4 formatting and copies the live system.
+   - Installs GRUB, generates `/etc/fstab` by UUID.
+   - Generates `~/.aios/config.yaml` for the `aios` user.
 
-3. **Systemd refinado (lazy start)**
-   - `aios-llama.service`: deshabilitado en boot; `setup.py` lo habilita y arranca solo si el modo elegido es `local` o `hybrid`.
-   - `aios-agent.service`: deshabilitado por defecto porque requiere terminal interactiva.
-   - `sshd`: deshabilitado en la ISO, sin host keys fijas; se arranca manualmente si se requiere acceso remoto.
+3. **Refined systemd (lazy start)**
+   - `aios-llama.service`: disabled at boot; `setup.py` enables and starts it only if the chosen mode is `local` or `hybrid`.
+   - `aios-agent.service`: disabled by default because it requires an interactive terminal.
+   - `sshd`: disabled in the ISO, with no fixed host keys; start it manually if remote access is required.
 
-4. **launch_llama.py pasivo**
-   - No crea `~/.aios/config.yaml` por defecto.
-   - Sale limpio con código 0 si no existe config o si el modo es `cloud`.
-   - Arranca el servidor solo cuando `mode` es `local` o `hybrid`.
+4. **Passive launch_llama.py**
+   - Does not create `~/.aios/config.yaml` by default.
+   - Exits cleanly with code 0 if no config exists or if mode is `cloud`.
+   - Starts the server only when `mode` is `local` or `hybrid`.
 
-5. **Referencia a AIOS LFS**
-   - Este agente se incluye en la ISO `aios-lfs`: https://github.com/ccarrillomanzanares/aios-lfs.
+5. **Reference to AIOS LFS**
+   - This agent is included in the `aios-lfs` ISO: https://github.com/ccarrillomanzanares/aios-lfs.
 
-## Seguridad
+## Security
 
-- Bloqueo de comandos peligrosos (`rm -rf /`, `dd`, `mkfs`, `fdisk`).
-- Confirmación interactiva para comandos destructivos.
-- Bloqueo de escritura en rutas de sistema críticas.
-- Restricciones en operaciones git (no `reset`, `rebase`, `merge`, `stash`, ni borrado de ramas).
+- Blocking of dangerous commands (`rm -rf /`, `dd`, `mkfs`, `fdisk`).
+- Interactive confirmation for destructive commands.
+- Write blocking on critical system paths.
+- Restrictions on git operations (no `reset`, `rebase`, `merge`, `stash`, or branch deletion).
 
-## Requisitos y despliegue
+## Requirements and deployment
 
 - Python 3.10+, `requests`, `pyyaml`.
-- llama.cpp server en `127.0.0.1:8083` para modo local/híbrido.
-- Para instalar a disco: ejecutar `aios-install` desde el entorno live de AIOS LFS.
+- llama.cpp server at `127.0.0.1:8083` for local/hybrid mode.
+- To install to disk: run `aios-install` from the AIOS LFS live environment.
 
-## Estado del proyecto
+## Project status
 
-- Versión actual: **v2.4**
-- Rama: `main`
-- Última actualización: 24 de julio de 2026
-- Repositorio: https://github.com/ccarrillomanzanares/aios-agent
+- Current version: **v2.4**
+- Branch: `main`
+- Last updated: July 24, 2026
+- Repository: https://github.com/ccarrillomanzanares/aios-agent

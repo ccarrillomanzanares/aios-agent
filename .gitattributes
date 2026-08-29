@@ -1,4 +1,4 @@
-# Forzar LF en scripts shell (el shebang se rompe con CRLF).
-# Los .py con CRLF son un tema aparte (se normalizarán en otra limpieza).
+# Force LF in shell scripts (shebang breaks with CRLF).
+# .py with CRLF are a separate issue (they will be normalized in another cleanup).
 *.sh text eol=lf
 aios-diag text eol=lf
