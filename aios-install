@@ -343,7 +343,7 @@ def _auto_context(ram_gb):
     return 65536
 
 
-def setup_aios_config(target, mode="local", theme="wargames", layout=None, think=False):
+def setup_aios_config(target, mode="local", theme="wargames", layout=None, think=False, voice=None):
     aios_home = Path(target) / "home" / "aios" / ".aios"
     aios_home.mkdir(parents=True, exist_ok=True)
     uid = os.stat(Path(target) / "home" / "aios").st_uid
@@ -401,10 +401,21 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None, think
             "think": think,
         },
         "cloud": {"provider": None, "model": None},
+        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto"},
     }
     import yaml
     with open(aios_home / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+    # Copiar el .env del live (claves de voz cloud: GOOGLE/OPENAI_API_KEY) para
+    # que los motores cloud de voz funcionen también en el disco.
+    live_env = Path("/home/aios/.aios/.env")
+    if not live_env.exists():
+        live_env = Path.home() / ".aios" / ".env"
+    if live_env.exists():
+        with open(live_env, "rb") as f:
+            data = f.read()
+        with open(aios_home / ".env", "wb") as f:
+            f.write(data)
     for f in aios_home.iterdir():
         os.chown(f, uid, gid)
     print("  ~/.aios/config.yaml created")
@@ -650,6 +661,8 @@ def main():
     theme = "wargames"
     layout = None
     think = False
+    tts = "off"
+    stt = "off"
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -664,6 +677,12 @@ def main():
             i += 2
         elif args[i] == "--think" and i + 1 < len(args):
             think = args[i + 1] in ("1", "true", "yes", "on")
+            i += 2
+        elif args[i] == "--tts" and i + 1 < len(args):
+            tts = args[i + 1]
+            i += 2
+        elif args[i] == "--stt" and i + 1 < len(args):
+            stt = args[i + 1]
             i += 2
         else:
             i += 1
@@ -715,7 +734,7 @@ def main():
     generate_fstab(target, root_part)
     enable_services(target)
     configure_system(target)
-    setup_aios_config(target, mode, theme, layout, think)
+    setup_aios_config(target, mode, theme, layout, think, {"tts": tts, "stt": stt, "tts_lang": "auto"})
     apply_theme(target, theme)
     persisted_ifaces = persist_wifi(target)
     persist_ntp(target)

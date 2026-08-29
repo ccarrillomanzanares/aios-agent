@@ -966,10 +966,95 @@ def _legacy_box(title, lines):
 
 
 # ---------------------------------------------------------------------------
+# Voz (TTS/STT) — local y cloud
+# ---------------------------------------------------------------------------
+
+VOICE_ENV = {
+    "gemini": "GOOGLE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+
+def _upsert_env(key_name, value):
+    """Add/update a KEY=value line in ~/.aios/.env (keeps the rest)."""
+    env_path = CONFIG_DIR / ".env"
+    lines = []
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                if not line.startswith(f"{key_name}="):
+                    lines.append(line)
+    lines.append(f"{key_name}={value}\n")
+    with open(env_path, "w") as f:
+        f.writelines(lines)
+
+
+def _voice_flow():
+    """Pick voice output (TTS) and input (STT); ask for the API key of cloud
+    engines (Gemini/OpenAI) and save it to .env, separate from the chat key.
+    Returns {"tts": ..., "stt": ..., "tts_lang": "auto"}."""
+    wg("")
+    wg("VOICE (optional) - the agent can talk and listen")
+    wg("")
+    wg("Voice output (text-to-speech):")
+    wg("  1) Off")
+    wg("  2) Local robotic voice (espeak-ng)     [offline]")
+    wg("  3) Cloud natural voice (Google Gemini) [API key]")
+    wg("  4) Cloud natural voice (OpenAI)        [API key]")
+    tts_map = {"1": "off", "2": "espeak", "3": "gemini", "4": "openai"}
+    while True:
+        t = wg_input("  Select (1-4) [2]: ").strip() or "2"
+        if t in tts_map:
+            break
+        wg("  Invalid option. Choose 1-4.")
+    tts = tts_map[t]
+
+    wg("")
+    wg("Voice input (speech-to-text):")
+    wg("  1) Off   2) Local (vosk)   3) Gemini   4) OpenAI")
+    stt_map = {"1": "off", "2": "vosk", "3": "gemini", "4": "openai"}
+    while True:
+        s = wg_input("  Select (1-4) [2]: ").strip() or "2"
+        if s in stt_map:
+            break
+        wg("  Invalid option. Choose 1-4.")
+    stt = stt_map[s]
+
+    # One key per cloud provider (shared between TTS and STT).
+    for eng in sorted({tts, stt}):
+        if eng not in VOICE_ENV:
+            continue
+        env_name = VOICE_ENV[eng]
+        prov_name = "Google Gemini" if eng == "gemini" else "OpenAI"
+        url = CLOUD_KEY_URLS.get(prov_name, "")
+        wg("")
+        wg(f"{prov_name} API key is required for voice ({eng}).")
+        if url:
+            wg(f"  Get one at: {url}")
+        key = wg_input(f"  {prov_name} API key (Enter to turn off {eng} voice): ").strip()
+        if not key:
+            if tts == eng:
+                tts = "off"
+            if stt == eng:
+                stt = "off"
+            continue
+        wg("  Testing key...")
+        base_url = CLOUD_ENDPOINTS.get(prov_name, "")
+        valid = validate_api_key(prov_name, key, base_url)
+        if valid is True:
+            wg(f"  {prov_name} key valid. Saved.")
+        else:
+            wg("  Could not verify the key (no internet or wrong key). Saving anyway.")
+        _upsert_env(env_name, key)
+
+    return {"tts": tts, "stt": stt, "tts_lang": "auto"}
+
+
+# ---------------------------------------------------------------------------
 # Flujos
 # ---------------------------------------------------------------------------
 
-def _write_local_config(theme="wargames"):
+def _write_local_config(theme="wargames", voice=None):
     """Write config.yaml in local mode and start the llama service."""
     import yaml
     model_path = Path("/usr/local/share/aios/models") / LOCAL_MODELS[0]["file"]
@@ -995,6 +1080,7 @@ def _write_local_config(theme="wargames"):
             "think": think,
         },
         "cloud": {"provider": None, "model": None},
+        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto"},
     }
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
@@ -1004,7 +1090,7 @@ def _write_local_config(theme="wargames"):
     return True
 
 
-def _write_cloud_config(prov_data, model, key, theme="wargames"):
+def _write_cloud_config(prov_data, model, key, theme="wargames", voice=None):
     """Write cloud config + API key in .env."""
     import yaml
     config = {
@@ -1025,24 +1111,16 @@ def _write_cloud_config(prov_data, model, key, theme="wargames"):
             "auth_type": prov_data.get("auth_type", "bearer"),
             "provider_env": prov_data.get("env", ""),
         },
+        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto"},
     }
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
-    env_path = CONFIG_DIR / ".env"
-    env_lines = []
-    if env_path.exists():
-        with open(env_path) as f:
-            for line in f:
-                if not line.startswith(f"{prov_data['env']}="):
-                    env_lines.append(line)
-    env_lines.append(f"{prov_data['env']}={key}\n")
-    with open(env_path, "w") as f:
-        f.writelines(env_lines)
+    _upsert_env(prov_data["env"], key)
     return True
 
 
-def _cloud_flow(theme="wargames"):
+def _cloud_flow(theme="wargames", voice=None):
     """Cloud flow: firefox with the provider + provider + API key + validation."""
     prov_data, model = select_provider_and_model()
     if not (prov_data and model):
@@ -1067,14 +1145,14 @@ def _cloud_flow(theme="wargames"):
         valid = validate_api_key(prov_data["name"], key, prov_data.get("base_url"), prov_data.get("auth_type", "bearer"))
         if valid is True:
             wg("API key is valid.")
-            return _write_cloud_config(prov_data, model, key, theme)
+            return _write_cloud_config(prov_data, model, key, theme, voice)
         elif valid is False:
             wg("Invalid API key. Check and try again.")
             continue
         else:
             retry = wg_input("(Could not verify API key. Use anyway? (Y/n): ").strip().lower()
             if retry != "n":
-                return _write_cloud_config(prov_data, model, key, theme)
+                return _write_cloud_config(prov_data, model, key, theme, voice)
             continue
 
 
@@ -1096,28 +1174,29 @@ def _live_flow(online):
             break
         wg("Invalid option. Please choose 1 or 2.")
 
-    if m == "2":
-        if not online:
-            wg("Cloud mode requires internet (none detected).")
-            opt = wg_input("Use LOCAL mode instead? (Y/n): ").strip().lower()
-            if opt in ("", "y", "yes"):
-                wg("Switching to LOCAL.")
-                m = "1"
-            else:
-                return  # volver al menú
-        else:
-            theme = _select_theme()
-            if _cloud_flow(theme):
-                _sp.run(["aios-theme", theme], capture_output=True)
-                wg("Setup complete. Starting the AIOS agent...")
-                return True
-            wg("Cloud setup cancelled. Falling back to LOCAL.")
+    if m == "2" and not online:
+        wg("Cloud mode requires internet (none detected).")
+        opt = wg_input("Use LOCAL mode instead? (Y/n): ").strip().lower()
+        if opt in ("", "y", "yes"):
+            wg("Switching to LOCAL.")
             m = "1"
+        else:
+            return  # volver al menú
+
+    # Modo definitivo: tema y voz se eligen UNA vez.
+    theme = _select_theme()
+    voice = _voice_flow()
+
+    if m == "2":
+        if _cloud_flow(theme, voice):
+            _sp.run(["aios-theme", theme], capture_output=True)
+            wg("Setup complete. Starting the AIOS agent...")
+            return True
+        wg("Cloud setup cancelled. Falling back to LOCAL.")
 
     wg("")
     wg("LOCAL mode - Qwen3-8B (Q4_K_M)")
-    theme = _select_theme()
-    if _write_local_config(theme):
+    if _write_local_config(theme, voice):
         _sp.run(["aios-theme", theme], capture_output=True)
         wg("Setup complete. Starting the AIOS agent...")
         return True
@@ -1152,14 +1231,16 @@ def _install_flow(online):
             m = "1"
         else:
             return  # volver al menú
+
+    # Modo definitivo: tema y voz UNA vez.
+    theme = _select_theme()
+    voice = _voice_flow()
+
     if m == "2" and online:
-        theme = _select_theme()
-        if _cloud_flow(theme):
+        if _cloud_flow(theme, voice):
             mode = "cloud"
         else:
             wg("Cloud setup cancelled. Falling back to LOCAL.")
-    if mode != "cloud":
-        theme = _select_theme()
 
     # Thinking mode local: OFF por defecto. Solo se pregunta en modo local.
     think = False
@@ -1174,7 +1255,8 @@ def _install_flow(online):
     wg("")
     wg("Launching the installer...")
     ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme, "--layout", _KB_LAYOUT,
-                   "--think", "1" if think else "0"])
+                   "--think", "1" if think else "0",
+                   "--tts", voice["tts"], "--stt", voice["stt"]])
     if ret.returncode == 2:
         wg("Installation cancelled.")
         wg_input("Press Enter to return to the menu...")
