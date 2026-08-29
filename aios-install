@@ -33,8 +33,8 @@ def ask(question, default=""):
         sys.exit(1)
 
 def _read_line(prompt=""):
-    """Lee una linea con backspace correcto y prompt protegido (fix 25 Ago).
-    Raw mode + gestion manual: backspace borra del buffer (nunca el prompt)."""
+    """Read a line with correct backspace and protected prompt (fix 25 Aug).
+    Raw mode + manual handling: backspace removes from the buffer (never the prompt)."""
     import termios
     import tty
     if prompt:
@@ -71,10 +71,10 @@ def _read_line(prompt=""):
 
 
 def _fix_erase():
-    """Fijar el erase char del tty a DEL (0x7f) — los prompts canonicos
-    (getpass del instalador, sudo, login) no borran con backspace si el erase
-    no coincide con la tecla (bug '^ y letras', 26 Ago 2026). Cubre tambien el
-    xterm del setup, que no lee .bashrc ni /etc/profile."""
+    """Set the tty erase character to DEL (0x7f) — canonical installer prompts
+    (getpass, sudo, login) do not erase with backspace if the erase char does
+    not match the key (bug '^ and letters', 26 Aug 2026). Also covers the
+    setup xterm, which does not read .bashrc or /etc/profile."""
     try:
         import termios
         fd = sys.stdin.fileno()
@@ -93,8 +93,8 @@ def ask_typed(question, expected):
     return ask(f"{question} (type '{expected}' to confirm)").strip().lower() == expected.lower()
 
 def _vlen(s):
-    """Longitud VISIBLE: quita ANSI, cuenta 2 columnas para ancho doble (emoji/CJK).
-    len() sobrecuenta ANSI y subcuenta ancho doble → texto pegado a la pared."""
+    """VISIBLE length: strip ANSI, count 2 columns for double-wide (emoji/CJK).
+    len() overcounts ANSI and undercounts double-wide → text glued to the edge."""
     import re, unicodedata
     s = re.sub(r"\x1b\[[0-9;]*m", "", s)
     total = 0
@@ -152,7 +152,7 @@ def select_disk(disks):
         choice = ask(f"Select disk [1-{len(disks)}]", "").strip()
         if not choice:
             print("\n  No disk selected. Installation cancelled.")
-            sys.exit(2)   # cancelación → setup.py vuelve al menú
+            sys.exit(2)   # cancellation → setup.py returns to menu
         if choice.isdigit() and 1 <= int(choice) <= len(disks):
             return disks[int(choice) - 1]
         for d in disks:
@@ -189,8 +189,8 @@ def copy_system(target):
         "--exclude=/media/*", "--exclude=/lost+found",
         "--exclude=/swapfile",
     ]
-    # Muestra el archivo que se esta copiando, uno tras otro, en la misma linea
-    # (rsync --out-format=%f emite una linea por archivo con su ruta)
+    # Show the file currently being copied, one after another, on the same line
+    # (rsync --out-format=%f emits one line per file with its path)
     cmd = ["/usr/bin/rsync", "-aHAX", "--out-format=%f"] + excludes + ["/", target]
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -208,7 +208,7 @@ def copy_system(target):
         shown = name if len(name) <= 50 else "..." + name[-47:]
         out = f"\r  [{n:>7}] {shown}"
         if len(out) < last_len:
-            out += " " * (last_len - len(out))   # limpiar el resto de la linea anterior
+            out += " " * (last_len - len(out))   # clear the rest of the previous line
         print(out, end="", flush=True)
         last_len = len(out)
     p.wait()
@@ -300,9 +300,9 @@ def configure_system(target):
 """)
 
 def _live_layout():
-    """Lee el layout de teclado elegido en el live (keyboard: en ~/.aios/config.yaml).
-    El instalador corre como root (Path.home()=/root) -> probar primero la ruta real
-    del usuario aios. Devuelve None si no hay elección."""
+    """Read the keyboard layout chosen in live mode (keyboard: in ~/.aios/config.yaml).
+    The installer runs as root (Path.home()=/root) → try the real aios user path
+    first. Returns None if there is no choice."""
     candidates = ["/home/aios/.aios/config.yaml", str(Path.home() / ".aios" / "config.yaml")]
     for p in candidates:
         try:
@@ -317,12 +317,12 @@ def _live_layout():
     return None
 
 def _detect_cpu():
-    """Threads recomendados (87.5% de los cores) — espejo de setup.py detect_cpu()."""
+    """Recommended threads (87.5% of cores) — mirror of setup.py detect_cpu()."""
     return max(1, int((os.cpu_count() or 4) * 0.875))
 
 
 def _detect_ram_gb():
-    """RAM total en GB desde /proc/meminfo — espejo de setup.py detect_ram_gb()."""
+    """Total RAM in GB from /proc/meminfo — mirror of setup.py detect_ram_gb()."""
     try:
         with open("/proc/meminfo") as f:
             for line in f:
@@ -335,7 +335,7 @@ def _detect_ram_gb():
 
 
 def _auto_context(ram_gb):
-    """Contexto según RAM (espejo de setup.py auto_context): <=8->8K, <=16->32K, >16->64K."""
+    """Context by RAM (mirror of setup.py auto_context): <=8->8K, <=16->32K, >16->64K."""
     if ram_gb <= 8:
         return 8192
     elif ram_gb <= 16:
@@ -348,10 +348,10 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None, think
     aios_home.mkdir(parents=True, exist_ok=True)
     uid = os.stat(Path(target) / "home" / "aios").st_uid
     gid = os.stat(Path(target) / "home" / "aios").st_gid
-    # Layout: el elegido en el live (--layout) o el persistido en su config.yaml
+    # Layout: the one chosen in live mode (--layout) or persisted in its config.yaml
     if not layout:
         layout = _live_layout()
-    # Modo cloud: copiar config + API key ya configurados en el live por el setup
+    # Cloud mode: copy config + API key already configured in live mode by setup
     if mode == "cloud":
         live_cfg = Path("/home/aios/.aios/config.yaml")
         if not live_cfg.exists():
@@ -371,7 +371,7 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None, think
                 data = f.read()
             with open(aios_home / ".env", "wb") as f:
                 f.write(data)
-        # Asegurar keyboard: en el config copiado (cuando el instalador recibe --layout)
+        # Ensure keyboard: in the copied config (when the installer receives --layout)
         if copied and layout:
             try:
                 import yaml
@@ -406,8 +406,8 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None, think
     import yaml
     with open(aios_home / "config.yaml", "w") as f:
         yaml.dump(config, f, default_flow_style=False)
-    # Copiar el .env del live (claves de voz cloud: GOOGLE/OPENAI_API_KEY) para
-    # que los motores cloud de voz funcionen también en el disco.
+    # Copy live .env (cloud voice keys: GOOGLE/OPENAI_API_KEY) so
+    # cloud voice engines also work on the installed disk.
     live_env = Path("/home/aios/.aios/.env")
     if not live_env.exists():
         live_env = Path.home() / ".aios" / ".env"
@@ -421,8 +421,8 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None, think
     print("  ~/.aios/config.yaml created")
 
 def apply_theme(target, theme):
-    """Genera colors.conf de i3 en el sistema instalado con el tema elegido.
-    aios-theme corre en el chroot (escribe como root) -> chown a uid/gid de aios."""
+    """Generate i3 colors.conf in the installed system with the chosen theme.
+    aios-theme runs in the chroot (writes as root) → chown to aios uid/gid."""
     if not (Path(target) / "usr/local/bin/aios-theme").exists():
         return
     run(["chroot", target, "/usr/bin/env", "HOME=/home/aios",
@@ -435,18 +435,18 @@ def apply_theme(target, theme):
             os.chown(p, uid, gid)
 
 def persist_keyboard(target, layout):
-    """Persiste layout de teclado + fuente GRANDE de login en el disco (/etc/vconsole.conf).
+    """Persist keyboard layout + LARGE login font on the disk (/etc/vconsole.conf).
 
-    El disco arranca con login de consola -> KEYMAP=<layout elegido> + FONT=ter-232n
-    (fuente ~triple, decision Carlos 26 Ago: SOLO para el login del DISCO; el live
-    usa autologin y mantiene la fuente del arbol ter-112n).
-    Preserva el resto de lineas. Solo actua si layout es un keymap valido en el arbol:
-    /usr/share/kbd/keymaps/**/<layout>.map.gz (si no, avisa y deja el actual).
-    systemd-vconsole-setup lo aplica en cada arranque -> login con teclado y fuente grandes.
-    X11 lo aplica aios-keyboard desde keyboard: en ~/.aios/config.yaml (setup_aios_config)."""
+    The disk boots to a console login → KEYMAP=<chosen layout> + FONT=ter-232n
+    (~triple font, Carlos decision 26 Aug: ONLY for the DISK login; the live
+    uses autologin and keeps the tree's ter-112n font).
+    Preserves other lines. Only acts if layout is a valid keymap in the tree:
+    /usr/share/kbd/keymaps/**/<layout>.map.gz (otherwise warns and keeps current).
+    systemd-vconsole-setup applies it at every boot → login with keyboard and large font.
+    X11 is applied by aios-keyboard from keyboard: in ~/.aios/config.yaml (setup_aios_config)."""
     if not layout:
         return
-    # Validar que el keymap existe en el sistema instalado
+    # Validate that the keymap exists in the installed system
     import glob
     found = glob.glob(f"{target}/usr/share/kbd/keymaps/**/{layout}.map.gz", recursive=True)
     if not found:
@@ -463,10 +463,10 @@ def persist_keyboard(target, layout):
     lines.append(f"KEYMAP={layout}")
     lines.append("FONT=ter-232n")
     vc.write_text("\n".join(lines) + "\n")
-    print(f"  Keyboard layout {layout} + FONT=ter-232n persisted (login disco)")
+    print(f"  Keyboard layout {layout} + FONT=ter-232n persisted (disk login)")
 
 def persist_ntp(target):
-    """Copia la config NTP del live (si se configuro) y habilita systemd-timesyncd en el disco."""
+    """Copy live NTP config (if configured) and enable systemd-timesyncd on the disk."""
     src = "/etc/systemd/timesyncd.conf"
     try:
         if not Path(src).exists():
@@ -548,7 +548,7 @@ def harden_login(target):
     The LIVE keeps autologin + NOPASSWD; only the disk is hardened.
     MUST run after set_passwords() (aios needs a password for sudo)."""
     # 1. sudo: remove the NOPASSWD file for wheel (file-based, no globs —
-    #    the 19-Ago lesson: globbing sudoers.d broke the installer)
+    #    the 19-Aug lesson: globbing sudoers.d broke the installer)
     sudo_np = Path(target) / "etc/sudoers.d/wheel-nopasswd"
     if sudo_np.exists():
         sudo_np.unlink()
@@ -571,7 +571,7 @@ def add_user_groups(target):
     """Add 'aios' to the standard desktop groups (video/audio/input/...).
 
     Without these, X cannot open /dev/dri/card0 (video), input devices
-    (input), or ALSA (audio) -> black screen / no keyboard / no sound.
+    (input), or ALSA (audio) → black screen / no keyboard / no sound.
     Groups are created if missing (groupadd -f), so this works on any
     hardware/installation, not just the reference laptop.
     """
@@ -656,7 +656,7 @@ exec /bin/busybox switch_root /root /sbin/init
 
 def main():
     import sys
-    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] [--think 0|1] - modo del agente en el sistema instalado
+    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] [--think 0|1] - agent mode on the installed system
     mode = "local"
     theme = "wargames"
     layout = None

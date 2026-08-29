@@ -1,4 +1,4 @@
-"""Voz AIOS: TTS (hablar) y STT (escuchar), local y cloud.
+"""AIOS voice: TTS (speak) and STT (listen), local and cloud.
 
 Config (config.yaml):
   voice:
@@ -6,7 +6,7 @@ Config (config.yaml):
     stt: off | vosk  | gemini | openai
     tts_lang: auto | es | en | fr | de | it | pt
 
-Claves (en ~/.aios/.env, cargadas por chat.py a os.environ):
+Keys (in ~/.aios/.env, loaded by chat.py into os.environ):
   GOOGLE_API_KEY  (gemini)
   OPENAI_API_KEY  (openai)
 """
@@ -27,7 +27,7 @@ def _track(p):
 
 
 def stop():
-    """Interrumpe la voz en curso (mata espeak-ng/aplay activos)."""
+    """Interrupt current voice (kills active espeak-ng/aplay)."""
     with _LOCK:
         procs = list(_PROCS)
     for p in procs:
@@ -46,7 +46,7 @@ _LANGS = ("es", "fr", "de", "it", "pt", "en")
 # ---------------------------------------------------------------------------
 
 def _skip_code(text):
-    """Quita bloques de código/comandos y tablas para no deletrearlos."""
+    """Remove code/command blocks and tables so they are not spelled out."""
     lines = []
     in_code = False
     for ln in text.splitlines():
@@ -60,13 +60,13 @@ def _skip_code(text):
                          "git ", "curl ", "wget ", "systemctl ", "ssh ", "scp ")):
             continue
         if s.startswith(("|", "+", "-")) and ("|" in s or s.startswith("---")):
-            continue  # tablas markdown
+            continue  # markdown tables
         lines.append(s)
     return " ".join(lines).strip()
 
 
 def _detect_lang(text):
-    """Idioma por marcas tipográficas (default en)."""
+    """Language by typographical marks (default en)."""
     if any(c in text for c in "ñáéíóú¿¡"):
         return "es"
     if any(c in text for c in "àâçèêëîïôùûüœ"):
@@ -94,11 +94,11 @@ def _play_pcm(pcm, rate=24000):
 
 
 # ---------------------------------------------------------------------------
-# TTS (hablar)
+# TTS (speak)
 # ---------------------------------------------------------------------------
 
 def speak(text, config):
-    """Habla el texto con el motor TTS configurado (en hilo, no bloquea el chat)."""
+    """Speak the text with the configured TTS engine (in a thread, does not block chat)."""
     voice = config.get("voice", {}) if isinstance(config, dict) else {}
     tts = voice.get("tts", "off")
     if tts in (None, "off"):
@@ -122,7 +122,7 @@ def _speak_sync(tts, text, lang):
         elif tts == "openai":
             _openai_tts(text, lang)
     except Exception:
-        pass  # la voz nunca debe romper el chat
+        pass  # voice must never break the chat
 
 
 def _espeak(text, lang):
@@ -176,11 +176,11 @@ def _openai_tts(text, lang):
 
 
 # ---------------------------------------------------------------------------
-# STT (escuchar)
+# STT (listen)
 # ---------------------------------------------------------------------------
 
 def listen(config):
-    """Graba un mensaje con el micro y lo transcribe. Devuelve el texto o None."""
+    """Record a message with the microphone and transcribe it. Returns the text or None."""
     voice = config.get("voice", {}) if isinstance(config, dict) else {}
     stt = voice.get("stt", "off")
     if stt in (None, "off"):
@@ -219,7 +219,7 @@ def _vosk_stt(wav):
     model = Model(model_path)
     rec = KaldiRecognizer(model, 16000)
     with open(wav, "rb") as f:
-        f.read(44)  # saltar cabecera WAV
+        f.read(44)  # skip WAV header
         while True:
             chunk = f.read(4000)
             if not chunk:

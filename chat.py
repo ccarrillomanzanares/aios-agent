@@ -3,7 +3,7 @@
 Loads config from ~/.aios/config.yaml on first run.
 Supports local, cloud, and hybrid modes."""
 import readline
-# Backspace fiable: cubre ^H y DEL (los dos codigos que envian los terminales)
+# Reliable backspace: covers ^H and DEL (the two codes sent by terminals)
 readline.parse_and_bind('"\\C-h": backward-delete-char')
 readline.parse_and_bind('"\\C-?": backward-delete-char')
 import os
@@ -92,8 +92,8 @@ def _start_local_model(config):
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
     )
 
-    # Progreso real: avanza con los hitos del log de llama-server + tiempo real.
-    # (no es un % de bytes; cada fase es un hito observable del arranque)
+    # Real progress: advances with observable llama-server startup milestones plus wall time.
+    # (Not a percentage of bytes; each phase is an observable boot milestone.)
     t0 = time.time()
     label, pct = "Loading model", 10
     BAR = 22
@@ -109,12 +109,12 @@ def _start_local_model(config):
     import threading, queue
     q = queue.Queue()
     _EOF = object()
-    recent = []  # últimas líneas, para volcarlas si falla el arranque
+    recent = []  # last lines, for debug dump if startup fails
 
-    # Lector en segundo plano: drena el stdout SIN select. El combo
-    # select + readline con buffer dejaba la línea de "listening" atascada
-    # en el buffer de Python (select mira el fd crudo, no el buffer) y la
-    # barra quedaba clavada en 85% aunque el servidor ya escuchara.
+    # Background reader: drains stdout WITHOUT select. The combination of
+    # select + readline with buffering left the "listening" line stuck
+    # in Python's buffer (select watches the raw fd, not the buffer), so
+    # the bar froze at 85% even though the server was already listening.
     def _llama_reader():
         try:
             for _line in proc.stdout:
@@ -124,7 +124,7 @@ def _start_local_model(config):
 
     threading.Thread(target=_llama_reader, daemon=True).start()
 
-    HEALTH_TIMEOUT = 900  # 15 min máx (en USB la carga tarda 8-15 min)
+    HEALTH_TIMEOUT = 900  # 15 min max (USB loading takes 8-15 min)
     while True:
         try:
             line = q.get(timeout=0.4)
@@ -133,7 +133,7 @@ def _start_local_model(config):
                 break
             _render()
             continue
-        if line is _EOF:  # el servidor terminó antes de escuchar
+        if line is _EOF:  # server finished before listening
             break
         recent.append(line)
         if len(recent) > 30:
@@ -164,7 +164,7 @@ def _start_local_model(config):
         return
 
     print("  Local model ready (%.0fs)." % (time.time() - t0))
-    # (el reader thread sigue drenando la salida del servidor en segundo plano)
+    # (reader thread keeps draining server output in the background)
 
 
 WARGAMES_QUOTES = [
@@ -205,13 +205,13 @@ WARGAMES_QUOTES = [
 
 
 THEME_ANSI = {
-    "wargames": "32",  # verde
-    "amber": "33",     # ambar
-    "white": "37",     # blanco
-    "cyan": "36",      # cian
+    "wargames": "32",  # green
+    "amber": "33",     # amber
+    "white": "37",     # white
+    "cyan": "36",      # cyan
 }
 def _read_theme():
-    """Lee theme: del config.yaml (parser naive)."""
+    """Read theme: from config.yaml (naive parser)."""
     try:
         with open(Path.home() / ".aios" / "config.yaml") as f:
             for line in f:
@@ -226,7 +226,7 @@ _last_quote = None
 
 
 def _pick_quote():
-    """Frase aleatoria sin repetir la inmediatamente anterior (como la web)."""
+    """Random quote, never the same as the immediately previous one (like the website)."""
     global _last_quote
     import random
     q = random.choice(WARGAMES_QUOTES)
@@ -237,7 +237,7 @@ def _pick_quote():
 
 
 def _greet():
-    """Cabecera BBS + frase de pelicula (rotativa). Sin hexagono (el arte del arranque se mantiene)."""
+    """BBS header + rotating movie quote. No hexagon (boot art is kept elsewhere)."""
     import random
     from agent import _tic, _open_audio, _skip_pressed, _cbreak_on, _cbreak_off
     _open_audio()
@@ -263,8 +263,8 @@ _input_hist_idx = 0
 
 
 def _input_tic(prompt="> "):
-    """Lectura de linea con tic por tecla (maquina de escribir) e historial (flechas).
-    El sonido se controla con /sound (agent.SOUND_ON)."""
+    """Line input with tic per key (typewriter) and history (arrow keys).
+    Sound is controlled by /sound (agent.SOUND_ON)."""
     import termios, tty, agent
     global _input_history, _input_hist_idx
     fd = sys.stdin.fileno()
@@ -293,7 +293,7 @@ def _input_tic(prompt="> "):
                     sys.stdout.flush()
                     if agent.SOUND_ON:
                         agent._tic()
-            elif ch == "\x1b":  # ESC: secuencia de flechas
+            elif ch == "\x1b":  # ESC: arrow sequence
                 seq = sys.stdin.read(2)
                 if seq == "[A" and idx > 0:  # up
                     idx -= 1
@@ -323,7 +323,7 @@ def _input_tic(prompt="> "):
 
 
 def _check_internet(timeout=4):
-    """True si hay conexion a internet (socket a varios destinos)."""
+    """True if there is an internet connection (socket to several destinations)."""
     import socket
     for host, port in (("1.1.1.1", 443), ("8.8.8.8", 53), ("example.com", 443)):
         try:
@@ -336,7 +336,7 @@ def _check_internet(timeout=4):
 
 
 def _cmd_health():
-    """Estado del sistema en formato wargames."""
+    """System status in Wargames format."""
     import subprocess, shutil, glob
     lines = []
     try:
@@ -353,12 +353,12 @@ def _cmd_health():
                 d[k] = int(v.split()[0])
         total = d["MemTotal"]
         avail = d.get("MemAvailable", d["MemFree"])
-        lines.append(f"MEM   {avail/1048576:.1f}/{total/1048576:.1f} GB libre")
+        lines.append(f"MEM   {avail/1048576:.1f}/{total/1048576:.1f} GB free")
     except Exception:
         pass
     try:
         t, u, f = shutil.disk_usage("/")
-        lines.append(f"DISK  {u/1e9:.1f}/{t/1e9:.1f} GB ({f/1e9:.0f} GB libres)")
+        lines.append(f"DISK  {u/1e9:.1f}/{t/1e9:.1f} GB ({f/1e9:.0f} GB free)")
     except Exception:
         pass
     try:
@@ -391,14 +391,14 @@ def _cmd_health():
                         ips.append(f"{iface}:{part.split('/')[0]}")
             except Exception:
                 pass
-        lines.append("NET   " + (" ".join(ips) if ips else "sin IP"))
+        lines.append("NET   " + (" ".join(ips) if ips else "no IP"))
     except Exception:
         pass
     try:
         r = subprocess.run(["journalctl", "-p", "err", "-n", "3", "--no-pager", "-q"],
                            capture_output=True, text=True, timeout=5)
         errs = [l for l in r.stdout.splitlines() if l.strip()]
-        lines.append(f"ERR   {len(errs)} recientes")
+        lines.append(f"ERR   {len(errs)} recent")
         for e in errs[:3]:
             lines.append("      " + e[:90])
     except Exception:
@@ -470,8 +470,8 @@ def main():
             if env_var:
                 os.environ[env_var] = api_key
 
-    # Thinking switch del modelo local (aplica a local y hybrid). Debe ir ANTES de
-    # importar agent, porque agent.py lee AIOS_LOCAL_THINK al importarse.
+    # Local model thinking switch (applies to local and hybrid). Must run BEFORE
+    # importing agent, because agent.py reads AIOS_LOCAL_THINK when imported.
     if mode in ("local", "hybrid"):
         os.environ["AIOS_LOCAL_THINK"] = "true" if config.get("local", {}).get("think", False) else "false"
 
@@ -622,21 +622,21 @@ def main():
 
         try:
             response = agent.run(query)
-            # La respuesta ya se imprimió carácter a carácter durante el stream.
-            # Solo añadimos un salto final (CRLF explícito) si el stream no lo dejó ya.
+            # The response was already printed character by character during the stream.
+            # We only add a final newline (explicit CRLF) if the stream did not leave one.
             sys.stdout.write(chr(13) + "\n")
             sys.stdout.flush()
-            # run() devuelve SIN streamear los errores y respuestas vacías
-            # (conexión LLM, stream vacío, caché). Si no se imprimen, el usuario
-            # ve el prompt volver sin ninguna respuesta.
+            # run() returns errors and empty responses without streaming
+            # (LLM connection error, empty stream, cache). If they are not printed,
+            # the prompt returns with no visible reply.
             if response and response.startswith(("LLM connection error",
-                                                  "Error leyendo stream",
+                                                  "Error reading LLM stream",
                                                   "(empty model response)",
                                                   "(no response)",
                                                   "[cache]")):
                 print("  " + response)
                 sys.stdout.flush()
-            # Guardar sesión siempre (también en errores), para no perder el hilo.
+            # Always save session (even on errors) to keep context.
             try:
                 agent._save_session()
             except Exception:
@@ -657,13 +657,13 @@ if __name__ == "__main__":
     try:
         main()
     except EOFError:
-        pass  # stdin cerrado (pipe)
+        pass  # stdin closed (pipe)
     except Exception as e:
         import sys, traceback
         print(f"\n  ERROR: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
         try:
-            input("\n  Presiona Enter para cerrar...")
+            input("\n  Press Enter to close...")
         except:
             pass
         sys.exit(1)

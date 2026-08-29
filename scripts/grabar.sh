@@ -1,6 +1,6 @@
 #!/bin/bash
-# Graba pantalla completa indefinidamente, desligado de la terminal.
-# Parada: kill -INT $(cat /tmp/grabar.pid)  o  scripts/parar_grabacion.sh
+# Record full screen indefinitely, detached from the terminal.
+# Stop: kill -INT $(cat /tmp/grabar.pid)  or  scripts/parar_grabacion.sh
 OUT=/tmp/grabacion.mp4
 LOG=/tmp/grabar.log
 rm -f "$OUT" "$LOG"
@@ -9,4 +9,4 @@ setsid nohup ffmpeg -y -nostdin -loglevel error \
   -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p "$OUT" \
   > "$LOG" 2>&1 &
 echo $! > /tmp/grabar.pid
-echo "Grabando. PID=$(cat /tmp/grabar.pid). Para parar: kill -INT \$(cat /tmp/grabar.pid)"
+echo "Recording. PID=$(cat /tmp/grabar.pid). To stop: kill -INT \$(cat /tmp/grabar.pid)"

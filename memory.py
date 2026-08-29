@@ -1,6 +1,6 @@
-"""Memoria procedural ligera para el agente SRE.
+"""Lightweight procedural memory for the SRE agent.
 
-Aprende soluciones de la experiencia sin modificar el LLM.
+Learns solutions from experience without modifying the LLM.
 Based on the ProcMEM pattern (arXiv 2602.01869) and Claude Agent Skills.
 """
 import json
@@ -50,14 +50,14 @@ class ProceduralMemory:
     def find(self, query: str, llm_call) -> str | None:
         """Look up a cached solution. Returns None if missing."""
         key = self._normalize_key(query, llm_call)
-        # Búsqueda exacta
+        # Exact match
         for s in self.skills:
             if s.get("key") == key:
                 s["hits"] = s.get("hits", 0) + 1
                 s["last_used"] = time.time()
                 self._save()
                 return s["solution"]
-        # Búsqueda por similitud
+        # Similarity match
         for s in self.skills:
             if self._simple_sim(key, s.get("key", "")) > SIMILARITY_THRESHOLD:
                 s["hits"] = s.get("hits", 0) + 1
@@ -72,7 +72,7 @@ class ProceduralMemory:
             key = self._normalize_key(query, llm_call)
         except Exception:
             key = query.lower()
-        # Evitar duplicados
+        # Avoid duplicates
         for s in self.skills:
             if s.get("key") == key:
                 s["solution"] = solution
@@ -88,7 +88,7 @@ class ProceduralMemory:
             "created": time.time(),
             "last_used": time.time(),
         })
-        # Limitar a 200 entradas, eliminar las menos usadas
+        # Limit to 200 entries, drop least used
         if len(self.skills) > 200:
             self.skills.sort(key=lambda s: s.get("hits", 0))
             self.skills = self.skills[-200:]

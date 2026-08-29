@@ -7,7 +7,7 @@ LLAMA_BIN = "/usr/bin/llama-server"
 MODELS_DIR = Path("/usr/local/share/aios/models")
 
 def main():
-    # No crear config. Si no existe, salir (el wizard de chat.py lo creara)
+    # Do not create config. If it does not exist, exit (chat.py wizard will create it)
     if not CONFIG_FILE.exists():
         print("[aios-llama] No config yet. Setup will run on first login.", flush=True)
         sys.exit(0)

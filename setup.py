@@ -1,12 +1,12 @@
 """AIOS Agent - Boot menu (Wargames style) and first-run setup.
 
-Reescrito 8 Ago 2026 (Carlos): menu estilo Wargames, sin cajas, sonido
-"tic" generado por el propio ordenador (tono sintetizado via aplay, sin
-archivos), saludo solo al primer arranque, flujo live/install + local/cloud,
-check de internet con propuesta de WiFi (setup_wifi intacta - no cambiar).
+Rewritten 8 Aug 2026 (Carlos): Wargames-style menu, no boxes, computer-
+generated "tic" sound (synthesized tone via aplay, no files), greeting only on
+first boot, live/install + local/cloud flow, internet check with WiFi proposal
+(setup_wifi is kept unchanged - do not change).
 """
 import readline
-# Backspace fiable: cubre ^H y DEL (los dos codigos que envian los terminales)
+# Reliable backspace: covers ^H and DEL (the two codes sent by terminals)
 readline.parse_and_bind('"\\C-h": backward-delete-char')
 readline.parse_and_bind('"\\C-?": backward-delete-char')
 import getpass
@@ -28,16 +28,15 @@ from pathlib import Path
 # Wargames effect
 # ---------------------------------------------------------------------------
 
-_AUDIO = None          # proceso aplay persistente (genera el "tic")
-_TICK_MS = 0.05        # 20 chars/s ~= 3x velocidad de tecleo humano
+_AUDIO = None          # persistent aplay process (generates the "tic")
+_TICK_MS = 0.05        # 20 chars/s ~= 3x human typing speed
 
 
 def _open_audio():
-    """Abrir aplay persistente por stdin (sin archivos: PCM sintetizado).
-    Buffer/period minimos (512 frames ~= 11.6 ms) para que el tic suene
-    inmediatamente. Warm-up: 0.2 s de silencio para que ALSA abra el
-    dispositivo ANTES del primer tic (si no, los primeros tics se acumulan
-    en el pipe y suenan tarde)."""
+    """Open persistent aplay through stdin (no files: synthesized PCM).
+    Minimal buffer/period (512 frames ~= 11.6 ms) so the tic sounds
+    immediately. Warm-up: 0.2 s of silence so ALSA opens the device BEFORE the
+    first real tic (otherwise the first tics pile up in the pipe and sound late)."""
     global _AUDIO
     try:
         import subprocess as _sp
@@ -67,8 +66,8 @@ def _close_audio():
 
 
 def _tic():
-    """Reproducir un 'tic' por caracter: 850 Hz, 35 ms (>= periodo ALSA),
-    decaimiento suave -> suena individual y continuo, sin agruparse."""
+    """Play a 'tic' per character: 850 Hz, 35 ms (>= ALSA period),
+    smooth decay -> sounds individual and continuous, not bunched."""
     if _AUDIO is None or _AUDIO.poll() is not None:
         return
     sr, dur, freq = 44100, 0.035, 850.0
@@ -86,7 +85,7 @@ def _tic():
 
 
 def _skip_pressed():
-    """True si el usuario pulso ESPACIO durante el typewriter (lo consume). No bloquea."""
+    """True if the user pressed SPACE during the typewriter (consumes it). Non-blocking."""
     try:
         import select
         if select.select([0], [], [], 0)[0]:
@@ -97,8 +96,8 @@ def _skip_pressed():
 
 
 def _cbreak_on():
-    """Activa modo cbreak (cada tecla al instante, sin echo) si hay tty.
-    Devuelve (fd, old) para restaurar con _cbreak_off, o (None, None)."""
+    """Enable cbreak mode (each key is available instantly, no echo) if there is a tty.
+    Returns (fd, old) to restore with _cbreak_off, or (None, None)."""
     try:
         import termios, tty
         fd = sys.stdin.fileno()
@@ -119,10 +118,10 @@ def _cbreak_off(fd, old):
 
 
 def _fix_erase():
-    """Fijar el erase char del tty a DEL (0x7f) — el backspace de prompts
-    canonicos (getpass, sudo, login) no borra si el erase no coincide con la
-    tecla (bug '^ y letras', 26 Ago 2026). Cubre tambien el xterm del setup,
-    que no lee .bashrc ni /etc/profile."""
+    """Set the tty erase character to DEL (0x7f) — canonical prompts
+    (getpass, sudo, login) do not erase with backspace if the erase char does
+    not match the key (bug '^ and letters', 26 Aug 2026). Also covers the setup
+    xterm, which does not read .bashrc or /etc/profile."""
     try:
         import termios
         fd = sys.stdin.fileno()
@@ -134,10 +133,10 @@ def _fix_erase():
 
 
 def _read_line():
-    """Lee una linea con backspace correcto y el prompt protegido (fix 25 Ago).
+    """Read a line with correct backspace and protected prompt (fix 25 Aug).
 
-    Usa raw mode + gestion manual del teclado: el backspace borra del buffer
-    (nunca el prompt), sin caracteres '^' extra; Ctrl+C interrumpe."""
+    Uses raw mode + manual keyboard handling: backspace removes from the buffer
+    (never the prompt), no stray '^' characters; Ctrl+C interrupts."""
     import termios
     import tty
     fd = sys.stdin.fileno()
@@ -155,7 +154,7 @@ def _read_line():
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
                 continue
-            if ch == "\x1b":             # secuencia escape (Delete, flechas)
+            if ch == "\x1b":             # escape sequence (Delete, arrows)
                 import select
                 seq = ch
                 try:
@@ -185,8 +184,8 @@ def _read_line():
 
 
 def wg(text, delay=_TICK_MS):
-    """Imprimir texto caracter a caracter (estilo Wargames) + tic por char.
-    Si el usuario pulsa ESPACIO, se escribe el resto del texto de golpe."""
+    """Print text character by character (Wargames style) + tic per char.
+    If the user presses SPACE, write the rest of the text at once."""
     s = str(text)
     fd_cb, old_cb = _cbreak_on()
     try:
@@ -206,7 +205,7 @@ def wg(text, delay=_TICK_MS):
 
 
 def wg_input(prompt, delay=_TICK_MS):
-    """Prompt con efecto Wargames y lectura de una linea (ESPACIO = escribir prompt completo)."""
+    """Prompt with Wargames effect and line input (SPACE = write full prompt)."""
     s = str(prompt)
     fd_cb, old_cb = _cbreak_on()
     try:
@@ -223,8 +222,8 @@ def wg_input(prompt, delay=_TICK_MS):
         _cbreak_off(fd_cb, old_cb)
     sys.stdout.flush()
     try:
-        # Descartar entrada pendiente (p.ej. Enter residual del subproceso) para
-        # que el prompt espere SIEMPRE la tecla del usuario (fix 25 Ago).
+        # Discard pending input (e.g. residual Enter from a subprocess) so
+        # the prompt always waits for the user's key (fix 25 Aug).
         try:
             import termios
             termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
@@ -242,9 +241,9 @@ def _apply_layout(code):
     except Exception:
         pass
     try:
-        # Forzar Backspace de la consola a DEL (0x7f) con cualquier layout:
-        # algunos keymaps (fr/es) mandan ^H (0x08) y el backspace no borra
-        # en prompts canonicos (sudo/getpass) -> "caracteres ^ y letras" (26 Ago).
+        # Force console Backspace to DEL (0x7f) for any layout:
+        # some keymaps (fr/es) send ^H (0x08) and backspace does not erase
+        # in canonical prompts (sudo/getpass) → "^ and letters" characters (26 Aug).
         _run(["sudo", "bash", "-c", "echo 'keycode 14 = Delete' | loadkeys"])
     except Exception:
         pass
@@ -281,7 +280,7 @@ def _select_layout():
 
 
 # ---------------------------------------------------------------------------
-# Utilidades (heredadas del setup anterior - funcionan, no tocar)
+# Utilities (inherited from previous setup - they work, do not touch)
 # ---------------------------------------------------------------------------
 
 CLOUD_ENDPOINTS = {
@@ -294,7 +293,7 @@ CLOUD_ENDPOINTS = {
     "OpenRouter": "https://openrouter.ai/api/v1",
 }
 
-# Paginas donde obtener la API key de cada proveedor (para firefox)
+# Pages where to get each provider's API key (for firefox)
 CLOUD_KEY_URLS = {
     "DeepSeek": "https://platform.deepseek.com/api_keys",
     "OpenAI": "https://platform.openai.com/api-keys",
@@ -308,7 +307,7 @@ CLOUD_KEY_URLS = {
 CONFIG_DIR = Path.home() / ".aios"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
-_KB_LAYOUT = "us"   # layout de teclado elegido en el primer arranque (persistido en config.yaml)
+_KB_LAYOUT = "us"   # keyboard layout chosen on first boot (persisted in config.yaml)
 
 WPA_DIR = Path("/etc/wpa_supplicant")
 SYSTEMD_DIR = Path("/etc/systemd/system")
@@ -332,7 +331,7 @@ THEMES = {
     "cyan": ("#00cccc", "Cyan - modern"),
 }
 
-# Frases miticas de Wargames (1983) - saludo rotativo
+# Iconic WarGames (1983) quotes - rotating greeting
 WARGAMES_QUOTES = [
     # WarGames (1983)
     "Greetings, Professor Falken",
@@ -367,7 +366,7 @@ _last_quote = None
 
 
 def _pick_quote():
-    """Frase aleatoria sin repetir la inmediatamente anterior (como la web)."""
+    """Random quote, never the same as the immediately previous one (like the website)."""
     global _last_quote
     q = random.choice(WARGAMES_QUOTES)
     while q == _last_quote and len(WARGAMES_QUOTES) > 1:
@@ -435,8 +434,8 @@ def detect_ram_gb():
 
 
 def _check_local_requirements():
-    """Compara los recursos del equipo con el minimo para Qwen3-8B local.
-    Devuelve una linea con el veredicto (podria funcionar / mejor no lo pruebes)."""
+    """Compare machine resources with the minimum for Qwen3-8B local.
+    Returns a line with the verdict (could work / better not try it)."""
     try:
         cores = os.cpu_count() or 4
         ram = detect_ram_gb()
@@ -471,9 +470,9 @@ def _get_own_ip(iface):
 
 
 def _iface_has_internet(iface=None, timeout=4):
-    """Check de conectividad: TCP a IPs directas + dominios, y DNS UDP como
-    último recurso (redes que filtran TCP saliente). Sin falsos negativos por
-    destinos filtrados: basta con que UNO funcione."""
+    """Connectivity check: TCP to direct IPs + domains, and DNS UDP as a
+    last resort (networks that filter outgoing TCP). No false negatives from
+    filtered destinations: one working destination is enough."""
     import socket
     targets = [
         ("1.1.1.1", 443), ("1.0.0.1", 443), ("8.8.8.8", 53),
@@ -486,7 +485,7 @@ def _iface_has_internet(iface=None, timeout=4):
             return True
         except Exception:
             continue
-    # Último recurso: DNS UDP (a veces el TCP saliente está filtrado pero el UDP no)
+    # Last resort: DNS UDP (sometimes outgoing TCP is filtered but UDP is not)
     for server in ("1.1.1.1", "8.8.8.8", "208.67.222.222"):
         try:
             import struct
@@ -506,7 +505,7 @@ def _iface_has_internet(iface=None, timeout=4):
 
 
 def _wait_internet(attempts=5, delay=3):
-    """Reintenta el check de internet con espera (el DHCP puede tardar tras asociar)."""
+    """Retry internet check with delay (DHCP may take time after associating)."""
     for _ in range(attempts):
         if _iface_has_internet():
             return True
@@ -515,8 +514,8 @@ def _wait_internet(attempts=5, delay=3):
 
 
 def _net_summary():
-    """Devuelve (ip, gateway) visibles — para diagnosticar el 'no internet'.
-    Usa rutas absolutas de ip (Debian/Ubuntu lo ponen en /usr/sbin, fuera del PATH)."""
+    """Return visible (ip, gateway) — for diagnosing 'no internet'.
+    Uses absolute ip paths (Debian/Ubuntu places it in /usr/sbin, outside PATH)."""
     ip, gw = "", ""
     ip_bin = next((p for p in ("/usr/sbin/ip", "/usr/bin/ip", "/sbin/ip") if os.path.exists(p)), None)
     if ip_bin is None:
@@ -543,8 +542,8 @@ def _net_summary():
 
 
 def _ensure_dns():
-    """Asegurar nameservers en /etc/resolv.conf (udhcpc no los escribe:
-    sin DNS, el check y toda la red fallan aunque haya IP)."""
+    """Ensure nameservers in /etc/resolv.conf (udhcpc does not write them:
+    without DNS, the check and all networking fail even if there is an IP)."""
     try:
         p = Path("/etc/resolv.conf")
         txt = p.read_text() if p.exists() else ""
@@ -556,7 +555,7 @@ def _ensure_dns():
 
 
 # ---------------------------------------------------------------------------
-# WiFi wizard (heredado del setup anterior - FUNCIONA, NO CAMBIAR)
+# WiFi wizard (inherited from previous setup - WORKS, DO NOT CHANGE)
 # ---------------------------------------------------------------------------
 
 def setup_wifi():
@@ -729,7 +728,7 @@ def setup_wifi():
     connected = _iface_has_internet(iface)
 
     if connected:
-        _ensure_dns()  # udhcpc no escribe resolv.conf: sin DNS la red parece muerta
+        _ensure_dns()  # udhcpc does not write resolv.conf: without DNS the network looks dead
         if SYSTEMD_DIR.exists():
             _run_sudo(["systemctl", "enable", f"wpa_supplicant@{iface}"])
             _run_sudo(["systemctl", "start", f"wpa_supplicant@{iface}"])
@@ -760,7 +759,7 @@ def setup_wifi():
 
 
 # ---------------------------------------------------------------------------
-# Cloud flow (heredado del setup anterior - reutilizado sin cajas)
+# Cloud flow (inherited from previous setup - reused without boxes)
 # ---------------------------------------------------------------------------
 
 def validate_api_key(provider, api_key, base_url=None, auth_type="bearer"):
@@ -861,7 +860,7 @@ PROVIDERS = [
     {
         "name": "Ollama Hardened",
         "models": [
-            ("hf.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF:Q3_K_M", "Moonlight-16B-A3B Q3_K_M - 16B MoE (3B activos)"),
+            ("hf.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF:Q3_K_M", "Moonlight-16B-A3B Q3_K_M - 16B MoE (3B active)"),
         ],
         "env": "OLLAMA_HARDENED_API_KEY",
         "context_limit": 8192,
@@ -878,7 +877,7 @@ PROVIDERS = [
 
 
 def select_provider_and_model():
-    """Provider selection (sin cajas). Returns (provider, model) or (None, None)."""
+    """Provider selection (no boxes). Returns (provider, model) or (None, None)."""
     while True:
         wg("")
         wg("Select the cloud provider:")
@@ -911,8 +910,8 @@ def select_provider_and_model():
                 wg("Model name cannot be empty.")
                 continue
             wg("  Auth type:")
-            wg("    b) Bearer  (Authorization: Bearer <key>  — most providers)")
-            wg("    x) X-API-Key  (header X-API-Key: <key>  — Ollama hardened)")
+            wg("    b) Bearer  (Authorization: Bearer ***  — most providers)")
+            wg("    x) X-API-Key  (header X-API-Key: ***  — Ollama hardened)")
             auth_opt = wg_input("  Select (b/x): ").strip().lower()
             auth_type = "x-api-key" if auth_opt == "x" else "bearer"
             prov = {"name": name, "models": [(model, model)], "env": "OTHER_API_KEY",
@@ -956,8 +955,8 @@ def select_provider_and_model():
 
 
 def _legacy_box(title, lines):
-    """Presentacion simple SIN CAJAS (estilo Wargames) para el wizard wifi.
-    El mecanismo de setup_wifi no se toca: solo cambia el dibujo."""
+    """Simple presentation WITHOUT BOXES (Wargames style) for the wifi wizard.
+    The setup_wifi mechanism is not touched: only the drawing changes."""
     wg("")
     wg(title)
     for l in lines:
@@ -965,7 +964,7 @@ def _legacy_box(title, lines):
 
 
 # ---------------------------------------------------------------------------
-# Voz (TTS/STT) — local y cloud
+# Voice (TTS/STT) — local and cloud
 # ---------------------------------------------------------------------------
 
 VOICE_ENV = {
@@ -1050,7 +1049,7 @@ def _voice_flow():
 
 
 # ---------------------------------------------------------------------------
-# Flujos
+# Flows
 # ---------------------------------------------------------------------------
 
 def _write_local_config(theme="wargames", voice=None):
@@ -1064,7 +1063,7 @@ def _write_local_config(theme="wargames", voice=None):
 
     ram_gb = detect_ram_gb()
     ctx = auto_context(ram_gb)
-    # Thinking mode local: OFF por defecto (rápido). ON razona antes de responder.
+    # Local thinking mode: OFF by default (fast). ON reasons before answering.
     think_opt = wg_input("Enable thinking mode? (slower, more precise) [y/N]: ").strip().lower()
     think = think_opt in ("y", "yes")
     config = {
@@ -1125,8 +1124,8 @@ def _cloud_flow(theme="wargames", voice=None):
     if not (prov_data and model):
         return False
 
-    # No abrir Firefox por defecto: el usuario puede tener la key a mano.
-    # Imprimimos la URL y preguntamos si quiere que se la abramos.
+    # Do not open Firefox by default: the user may already have the key at hand.
+    # Print the URL and ask if they want us to open it.
     fx = _which("firefox")
     url = CLOUD_KEY_URLS.get(prov_data["name"])
     if url:
@@ -1161,7 +1160,7 @@ def _cloud_flow(theme="wargames", voice=None):
 
 
 def _live_flow(online):
-    """Modo live: proponer local o cloud."""
+    """Live mode: propose local or cloud."""
     wg("")
     wg("AIOS live mode.")
     wg("How do you want to use the agent?")
@@ -1185,9 +1184,9 @@ def _live_flow(online):
             wg("Switching to LOCAL.")
             m = "1"
         else:
-            return  # volver al menú
+            return  # back to menu
 
-    # Modo definitivo: tema y voz se eligen UNA vez.
+    # Final mode: theme and voice are chosen ONCE.
     theme = _select_theme()
     voice = _voice_flow()
 
@@ -1208,7 +1207,7 @@ def _live_flow(online):
 
 
 def _install_flow(online):
-    """Modo instalar: local o cloud, luego aios-install --mode."""
+    """Install mode: local or cloud, then aios-install --mode."""
     wg("")
     wg("Installing AIOS to the hard disk.")
     wg("How do you want to use the agent on the installed system?")
@@ -1234,9 +1233,9 @@ def _install_flow(online):
             wg("Switching to LOCAL.")
             m = "1"
         else:
-            return  # volver al menú
+            return  # back to menu
 
-    # Modo definitivo: tema y voz UNA vez.
+    # Final mode: theme and voice ONCE.
     theme = _select_theme()
     voice = _voice_flow()
 
@@ -1246,7 +1245,7 @@ def _install_flow(online):
         else:
             wg("Cloud setup cancelled. Falling back to LOCAL.")
 
-    # Thinking mode local: OFF por defecto. Solo se pregunta en modo local.
+    # Local thinking mode: OFF by default. Only asked in local mode.
     think = False
     if mode == "local":
         think_opt = wg_input("Enable thinking mode? (slower, more precise) [y/N]: ").strip().lower()
@@ -1277,9 +1276,9 @@ def _install_flow(online):
 
 
 def setup_ntp(standalone=True):
-    """Configurar hora automatica via servidor NTP externo (systemd-timesyncd).
-    standalone=False: llamado desde el flujo de instalacion (sin Enter final)."""
-    print_box = _legacy_box  # keep original visual, it works (fix 25 Ago: NameError)
+    """Configure automatic time via external NTP server (systemd-timesyncd).
+    standalone=False: called from the install flow (no final Enter prompt)."""
+    print_box = _legacy_box  # keep original visual, it works (fix 25 Aug: NameError)
     print_box("NTP SETUP", ["", "  Automatic time sync via external NTP server.", ""])
     server = input("  NTP server [pool.ntp.org]: ").strip() or "pool.ntp.org"
     _run(["sudo", "tee", "/etc/systemd/timesyncd.conf"],
@@ -1306,19 +1305,19 @@ def main():
     _open_audio()
     clear()
 
-    # Saludo (primer arranque) - frase de película + bienvenida + ayuda (25 Ago)
+    # Greeting (first boot) - movie quote + welcome + help (25 Aug)
     wg(_pick_quote())
     time.sleep(0.4)
     wg("You have just booted Artificial Intelligence Operating System.")
     wg("Press F1 or Super+F1 (Super = the Windows key) to view the keyboard shortcuts")
     wg("")
 
-    # Layout de teclado (primer arranque) — aplica TTY + X11 y se persiste
+    # Keyboard layout (first boot) — applies TTY + X11 and is persisted
     global _KB_LAYOUT
     _KB_LAYOUT = _select_layout()
     wg("")
 
-    # Menu principal (bucle: tras live o instalación vuelve al menú; solo "0" sale)
+    # Main menu (loop: after live or install it returns to menu; only "0" exits)
     while True:
         wg("What would you like to do?")
         wg("")
@@ -1337,7 +1336,7 @@ def main():
             wg("Invalid option. Please choose 0, 1 or 2.")
             continue
 
-        # Check de internet
+        # Internet check
         wg("")
         wg("Checking internet connection...")
         online = _iface_has_internet()
@@ -1361,7 +1360,7 @@ def main():
             _install_flow(online)
         else:
             if _live_flow(online):
-                break  # setup completado → terminar setup.py (el autolaunch arranca el agente)
+                break  # setup completed → exit setup.py (autolaunch starts the agent)
 
 
 if __name__ == "__main__":

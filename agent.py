@@ -61,7 +61,7 @@ def _tic():
 
 
 def _skip_pressed():
-    """True si el usuario pulso ESPACIO durante el typewriter (lo consume). No bloquea."""
+    """True if the user pressed SPACE during the typewriter (consumes it). Non-blocking."""
     try:
         import select
         if select.select([0], [], [], 0)[0]:
@@ -72,8 +72,8 @@ def _skip_pressed():
 
 
 def _cbreak_on():
-    """Activa modo cbreak (cada tecla al instante, sin echo) si hay tty.
-    Devuelve (fd, old) para restaurar con _cbreak_off, o (None, None)."""
+    """Enable cbreak mode (each key is available instantly, no echo) if there is a tty.
+    Returns (fd, old) to restore with _cbreak_off, or (None, None)."""
     try:
         import termios, tty
         fd = sys.stdin.fileno()
@@ -94,9 +94,9 @@ def _cbreak_off(fd, old):
 
 
 def _out(s=""):
-    """Escribe a stdout convirtiendo LF en CRLF explicito (no depende de ONLCR
-    del tty). El input (_input_tic) ya escribe CRLF explicito; la salida del LLM
-    debe hacer lo mismo o el cursor no vuelve a la columna 0 -> efecto escalera."""
+    """Write to stdout converting LF to explicit CRLF (does not depend on ONLCR
+    of the tty). The input (_input_tic) already writes explicit CRLF; LLM output
+    must do the same or the cursor will not return to column 0 -> staircase effect."""
     sys.stdout.write(s.replace("\n", chr(13) + "\n"))
     sys.stdout.flush()
 
@@ -109,10 +109,10 @@ if API_KEY:
     CLOUD_HEADERS = {"X-API-Key": API_KEY} if AUTH_TYPE == "x-api-key" else {"Authorization": f"Bearer {API_KEY}"}
 else:
     CLOUD_HEADERS = {}
-# El ollama-hardened usa cert self-signed → desactivar verificación TLS solo en ese caso.
+# Ollama-hardened uses self-signed cert → disable TLS verification only in that case.
 VERIFY_TLS = AUTH_TYPE != "x-api-key"
-# Thinking mode local (binario). Qwen3 piensa por defecto; /no_think lo apaga.
-# OFF (por defecto) -> rápido; ON -> el modelo razona antes de responder (más preciso, más lento).
+# Thinking mode local (binary). Qwen3 thinks by default; /no_think turns it off.
+# OFF (default) -> fast; ON -> model reasons before answering (more accurate, slower).
 THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true", "yes", "on")
 
 MAX_TOKENS = 512
@@ -124,7 +124,7 @@ _cloud_context = int(os.environ.get("AIOS_CLOUD_CONTEXT", "128000"))
 
 
 def _ram_gb():
-    """RAM total en GB (redondeado) desde /proc/meminfo — mismo criterio que setup.py/status.py."""
+    """Total RAM in GB (rounded) from /proc/meminfo — same criterion as setup.py/status.py."""
     try:
         with open("/proc/meminfo", "r") as f:
             for line in f:
@@ -137,7 +137,7 @@ def _ram_gb():
 
 
 def _auto_context(ram_gb):
-    """Auto-select context por RAM (espejo de setup.py auto_context)."""
+    """Auto-select context by RAM (mirror of setup.py auto_context)."""
     if ram_gb <= 8:
         return 8192
     elif ram_gb <= 16:
@@ -146,20 +146,20 @@ def _auto_context(ram_gb):
         return 65536
 
 
-# Contexto local REAL según RAM del equipo (antes hardcodeado a 32K — bug latente
-# en portátiles ≤8GB donde el servidor solo tiene 8K y la compresión usaba 32K)
+# Real local context according to the machine's RAM (was hardcoded to 32K — latent bug
+# on ≤8GB laptops where the server only has 8K and compression used 32K)
 _LOCAL_CONTEXT = _auto_context(_ram_gb())
 
-# max_tokens relativo: cloud necesita margen para reasoning_content (DeepSeek gasta
-# cientos de tokens pensando; 512 se agotaba → "respuesta vacía" con finish=length);
-# local = 1/8 del contexto por RAM (deja 7/8 para system+tools+historial)
+# Relative max_tokens: cloud needs margin for reasoning_content (DeepSeek can spend
+# hundreds of tokens thinking; 512 ran out → "empty response" with finish=length);
+# local = 1/8 of RAM-derived context (leaves 7/8 for system+tools+history)
 if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
     MAX_TOKENS = 4096
 else:
     MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
     if THINK_LOCAL:
-        # El razonamiento (<think>) consume tokens ANTES de la respuesta visible;
-        # con poco presupuesto el modelo corta en finish=length y devuelve vacío.
+        # Reasoning (thinking) consumes tokens BEFORE the visible response;
+        # with a small budget the model stops at finish=length and returns empty.
         MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
 
 MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.50)
@@ -183,8 +183,8 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _rules_common():
-    # Solo decimos "no pienses" cuando el thinking está apagado. Si está encendido,
-    # dejamos que Qwen3 razone (más preciso); el bloque <think> se limpia en _clean().
+    # Only say "do not think" when thinking is off. When it is on, let Qwen3 reason
+    # (more accurate); the thinking block is cleaned in _clean().
     _no_think = "" if THINK_LOCAL else "Do not use <think> tags.\n"
     return (
         "Always respond in the same language the user writes in.\n"
@@ -246,8 +246,8 @@ Update AIOS itself: run 'aios-update' (updates agent, scripts and configs; requi
 SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common()
 
 def _sampling_params():
-    """Sampling: Qwen3 local sigue la doc oficial (thinking 0.6/0.95; no-thinking 0.7/0.8).
-    Cloud mantiene temperatura conservadora — los modelos cloud ya vienen calibrados."""
+    """Sampling: Qwen3 local follows official docs (thinking 0.6/0.95; no-thinking 0.7/0.8).
+    Cloud keeps conservative temperature — cloud models are already calibrated."""
     if os.environ.get("AIOS_MODE") == "cloud":
         return {"temperature": TEMPERATURE}
     if THINK_LOCAL:
@@ -318,15 +318,15 @@ class Agent:
 
     @staticmethod
     def _sanitize_messages(msgs):
-        """Limpia el historial para que la API lo acepte (400 Bad Request si no):
-        1. Assistant con tool_calls DEBE ir seguido de tool messages con cada tool_call_id.
-           Si falta alguno, se elimina el assistant huérfano (esté donde esté).
-        2. Tool messages sin su assistant previo se eliminan.
-        3. Dos user seguidos se colapsan (se queda el último).
+        """Clean the history so the API accepts it (400 Bad Request if not):
+        1. Assistant with tool_calls MUST be followed by tool messages for each tool_call_id.
+           If any are missing, the orphan assistant is removed (wherever it is).
+        2. Tool messages without their preceding assistant are removed.
+        3. Consecutive user messages are collapsed (last one kept).
         """
         out = []
         pending_ids = set()
-        orphan_idx = None  # índice en `out` del último assistant con tool_calls sin resolver
+        orphan_idx = None  # index in `out` of the last assistant with unresolved tool_calls
         for m in msgs:
             role = m.get("role")
             if role == "assistant" and m.get("tool_calls"):
@@ -337,22 +337,22 @@ class Agent:
                 if m.get("tool_call_id") in pending_ids:
                     pending_ids.discard(m["tool_call_id"])
                     if not pending_ids:
-                        orphan_idx = None  # resuelto
+                        orphan_idx = None  # resolved
                     out.append(m)
                 else:
-                    continue  # tool sin assistant previo → descartar
+                    continue  # tool without preceding assistant → discard
             else:
-                # Llega un user/assistant normal con tool_calls sin resolver →
-                # el assistant huérfano anterior se elimina
+                # A user/normal assistant arrives while tool_calls are unresolved →
+                # the orphan assistant is removed
                 if pending_ids and orphan_idx is not None:
                     out.pop(orphan_idx)
                     pending_ids = set()
                     orphan_idx = None
                 if role == "user" and out and out[-1].get("role") == "user":
-                    out[-1] = m  # colapsar user consecutivos
+                    out[-1] = m  # collapse consecutive users
                 else:
                     out.append(m)
-        # Si al final quedan tool_calls sin respuesta, quitar el assistant huérfano
+        # If tool_calls remain unanswered at the end, remove the orphan assistant
         if pending_ids and orphan_idx is not None:
             out.pop(orphan_idx)
         return out
@@ -362,11 +362,11 @@ class Agent:
         if SESSION_FILE.exists():
             try:
                 old = json.loads(SESSION_FILE.read_text())
-                # Mantener system prompt original, concatenar historial cargado
+                # Keep original system prompt, concatenate loaded history
                 loaded_messages = [m for m in old if m["role"] != "system"]
                 loaded_messages = self._sanitize_messages(loaded_messages)
                 self.messages.extend(loaded_messages)
-                # Comprimir si el historial cargado es muy largo
+                # Compress if loaded history is very long
                 texts = [m.get("content", "") for m in self.messages]
                 if self._count_tokens(texts) > MAX_HISTORY_TOKENS:
                     self._compress()
@@ -374,7 +374,7 @@ class Agent:
                 pass
 
     def _clean(self, text: str) -> str:
-        """Limpia think blocks y normaliza."""
+        """Clean think blocks and normalize."""
         text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
         return text
 
@@ -397,10 +397,10 @@ class Agent:
         """Process a query with the function calling loop. First checks procedural memory."""
         if _AUDIO is None:
             _open_audio()
-        # Comprimir historial si es necesario
+        # Compress history if needed
         self._compress()
 
-        # 1. Buscar en caché procedural (deshabilitado en modo cloud puro)
+        # 1. Check procedural cache (disabled in pure cloud mode)
         if AIOS_MODE != "cloud":
             cached = self.memory.find(query, self._quick_llm)
             if cached:
@@ -412,8 +412,8 @@ class Agent:
         final_response = ""
         empty_retries = 0
         for _ in range(MAX_TURNS):
-            # Sanitizar antes de cada POST: si una tool call quedó huérfana (stream
-            # cortado o excepción a mitad), la API devolvería 400 Bad Request.
+            # Sanitize before each POST: if a tool call was left orphaned (stream
+            # cut or exception mid-way), the API would return 400 Bad Request.
             self.messages = [self.messages[0]] + self._sanitize_messages(self.messages[1:])
             payload = {
                 "messages": self.messages,
@@ -439,14 +439,14 @@ class Agent:
             fd_cb, old_cb = None, None
 
             try:
-                # Log crudo del stream (diagnóstico del bug de respuesta vacía)
+                # Raw stream log (diagnostics for the empty-response bug)
                 try:
                     stream_log = open("/tmp/aios-stream.log", "a", encoding="utf-8", errors="replace")
                     stream_log.write(f"\n--- {time.strftime('%H:%M:%S')} mode={AIOS_MODE} ---\n")
                 except Exception:
                     stream_log = None
 
-                skip_rest = False  # espacio durante el typewriter -> imprimir el resto de golpe
+                skip_rest = False  # space during typewriter -> print the rest at once
                 fd_cb, old_cb = _cbreak_on()
 
                 for raw_line in resp.iter_lines():
@@ -469,7 +469,7 @@ class Agent:
                         delta = choice.get("delta", {})
                         if choice.get("finish_reason"):
                             finish_reason = choice["finish_reason"]
-                        # Razonamiento del modelo (thinking) — se guarda para devolverlo en el turno
+                        # Model reasoning (thinking) — stored to return it this turn
                         if "reasoning_content" in delta and delta["reasoning_content"]:
                             reasoning_chunks.append(delta["reasoning_content"])
                         # Live text (typewriter)
@@ -488,7 +488,7 @@ class Agent:
                                     if self.SOUND_ON:
                                         _tic()
                                     time.sleep(0.02)
-                        # Tool calls fragmentadas por índice
+                        # Tool calls fragmented by index
                         if "tool_calls" in delta:
                             for tc_delta in delta["tool_calls"]:
                                 idx = tc_delta.get("index", 0)
@@ -510,13 +510,13 @@ class Agent:
             except Exception as e:
                 if stream_log:
                     stream_log.write(f"--- EXC {type(e).__name__}: {e} ---\n")
-                return f"Error leyendo stream del LLM: {e}"
+                return f"Error reading LLM stream: {e}"
             finally:
                 if stream_log:
                     stream_log.close()
                 _cbreak_off(fd_cb, old_cb)
 
-            _out("\n")  # salto de línea tras el stream (CRLF explícito)
+            _out("\n")  # newline after the stream (explicit CRLF)
             content = "".join(content_chunks)
             reasoning = "".join(reasoning_chunks)
             msg = {"role": "assistant", "content": content or ""}
@@ -527,16 +527,16 @@ class Agent:
                 msg["tool_calls"] = tool_calls
             finish = finish_reason or ""
 
-            # Stream terminó sin contenido: reintentar UNA vez si (a) se cortó sin
-            # finish_reason (conexión rota a mitad de tool call) o (b) finish=length
-            # con content vacío (el modelo agotó max_tokens solo razonando — DeepSeek
-            # reasoning_content). Con max_tokens ya ampliado esto es poco común.
+            # Stream ended with no content: retry once if (a) it was cut without
+            # finish_reason (connection broke mid-tool-call) or (b) finish=length
+            # with empty content (model exhausted max_tokens only reasoning — DeepSeek
+            # reasoning_content). With max_tokens already increased this is rare.
             if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1:
                 empty_retries += 1
                 print("\n  Empty stream (possible cut or exhausted reasoning). Retrying...")
                 continue
 
-            # Tool call → ejecutar y devolver resultado al LLM
+            # Tool call → execute and return result to LLM
             if finish == "tool_calls" or msg.get("tool_calls"):
                 assistant_msg = {"role": "assistant", "content": msg.get("content") or ""}
                 if msg.get("reasoning_content"):
@@ -553,12 +553,12 @@ class Agent:
                     except json.JSONDecodeError:
                         args = {}
 
-                    # Anti-bucle: detect repeated tool calls (mismo tool + mismo comando base)
+                    # Anti-loop: detect repeated tool calls (same tool + same base command)
                     _last_call = getattr(self, '_last_tool', None)
                     _repeat_count = getattr(self, '_tool_repeat_count', 0)
                     _base = args.get('command', '')
                     if isinstance(_base, str) and _base.strip():
-                        _base = _base.strip().split()[0]   # comando base (p.ej. 'ls')
+                        _base = _base.strip().split()[0]   # base command (e.g. 'ls')
                     _same = bool(_last_call and _last_call['name'] == name and _last_call['base'] == _base)
                     if _same:
                         self._tool_repeat_count = _repeat_count + 1
@@ -579,8 +579,8 @@ class Agent:
                         except:
                             pass
 
-                    # Mostrar el tool ANTES de ejecutar (para que un comando largo
-                    # no parezca que "no hace nada" — el ⚙ se ve inmediatamente).
+                    # Show the tool BEFORE executing (so a long command does not
+                    # look like it "does nothing" — the ⚙ is visible immediately).
                     _out(f"  ⚙ {name}({func.get('arguments','')})\n")
                     result = execute_tool(name, args, context=self.messages)
                     if name == "run_command":
@@ -596,9 +596,9 @@ class Agent:
                         "tool_call_id": tc.get("id", "call_0"),
                         "content": result
                     })
-                continue  # siguiente iteración: LLM procesa el resultado
+                continue  # next iteration: LLM processes the result
 
-            # Respuesta final (texto)
+            # Final answer (text)
             if msg.get("content"):
                 final_response = self._clean(msg["content"])
                 assistant_final = {"role": "assistant", "content": final_response}
@@ -620,7 +620,7 @@ class Agent:
         return final_response or "(no response)"
 
     def set_think(self, on: bool) -> bool:
-        """Activa/desactiva el thinking en caliente (token + max_tokens + system prompt)."""
+        """Enable/disable thinking on the fly (token + max_tokens + system prompt)."""
         global THINK_LOCAL, MAX_TOKENS, SYSTEM_PROMPT
         THINK_LOCAL = on
         self.think = on
@@ -636,5 +636,5 @@ class Agent:
         return on
 
     def reset(self):
-        """Reinicia la conversación."""
+        """Reset the conversation."""
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]

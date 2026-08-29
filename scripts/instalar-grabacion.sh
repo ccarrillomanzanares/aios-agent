@@ -1,6 +1,6 @@
 #!/bin/bash
-# Instala la grabación de pantalla: copia scripts a ~/.local/bin y
-# añade el atajo $mod+Print al config de i3 (idempotente).
+# Install screen recording: copy scripts to ~/.local/bin and add the $mod+Print
+# shortcut to the i3 config (idempotent).
 set -e
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
@@ -14,18 +14,18 @@ install -m 755 "$SRC/toggle-grabacion.sh" "$BIN_DIR/toggle-grabacion.sh"
 
 if [ -f "$I3_CONFIG" ]; then
   if grep -q "toggle-grabacion" "$I3_CONFIG"; then
-    echo "✓ El atajo ya está en el config de i3."
+    echo "✓ Shortcut already in i3 config."
   else
-    # Insertar antes del primer bindsym F1 si existe, si no al final
+    # Insert before the first bindsym F1 if it exists, otherwise append
     if grep -q '^bindsym F1 ' "$I3_CONFIG"; then
       sed -i "/^bindsym F1 /i $ATALLO" "$I3_CONFIG"
     else
       echo "$ATALLO" >> "$I3_CONFIG"
     fi
-    echo "✓ Atajo añadido: $ATALLO"
+    echo "✓ Shortcut added: $ATALLO"
   fi
-  DISPLAY="${DISPLAY:-:0}" i3-msg reload > /dev/null 2>&1 && echo "✓ i3 recargado."
+  DISPLAY="${DISPLAY:-:0}" i3-msg reload > /dev/null 2>&1 && echo "✓ i3 reloaded."
 else
-  echo "⚠ No se encontró $I3_CONFIG — añade manualmente: $ATALLO"
+  echo "⚠ Could not find $I3_CONFIG — add manually: $ATALLO"
 fi
-echo "✔ Grabación de pantalla instalada. Usa Mod+Print para iniciar/parar."
+echo "✔ Screen recording installed. Use Mod+Print to start/stop."

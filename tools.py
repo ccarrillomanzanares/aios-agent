@@ -15,13 +15,13 @@ from playbook import run_playbook
 from process import process_start, process_send, process_close, process_list
 
 
-# Cache del password de sudo (solo sesión): run_command lo pasa a sudo -S.
-# El usuario lo fija con /sudo <password> en el chat; nunca se persiste a disco.
+# sudo password cache (session only): run_command passes it to sudo -S.
+# The user sets it with /sudo <password> in chat; never persisted to disk.
 _SUDO_PASSWORD = None
 
 
 def set_sudo_password(pw):
-    """Guarda el password de sudo para esta sesión (se pasa a sudo -S)."""
+    """Store the sudo password for this session (passed to sudo -S)."""
     global _SUDO_PASSWORD
     _SUDO_PASSWORD = pw
 
@@ -87,7 +87,7 @@ def _confirm_destructive(command: str, timeout: int = 10) -> bool:
 
 def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     """Execute a shell command. Returns JSON with stdout, stderr, exit_code, elapsed."""
-    # sven install/upgrade/sync tarda minutos (sync de BD + descarga + instalación): timeout generoso.
+    # sven install/upgrade/sync takes minutes (DB sync + download + install): generous timeout.
     if any(kw in command for kw in ("sven install", "sven upgrade", "sven sync", "sven update")):
         timeout = 600
     if _is_blocked_command(command):
@@ -104,9 +104,9 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     max_attempts = 3
     current_command = command
 
-    # sudo: en disco pide password. Se pasa a "sudo -S" y se alimenta el password
-    # por stdin. Si no hay password cacheado, se devuelve un error claro (el
-    # agente debe pedir al usuario que haga /sudo <password>).
+    # sudo: on disk it asks for a password. Pass it to "sudo -S" through stdin.
+    # If no password is cached, return a clear error (the agent must ask the
+    # user to run /sudo <password>).
     uses_sudo = bool(re.search(r"\bsudo\b", current_command))
     if uses_sudo and not _SUDO_PASSWORD:
         return json.dumps({"stdout": "", "stderr": "sudo requires a password — set it first with /sudo <password>",
@@ -114,7 +114,7 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     if uses_sudo:
         current_command = re.sub(r"\bsudo\b", "sudo -S", current_command, count=1)
 
-    # stdin: sven pide ":: Proceed? [Y/n]" → auto-confirmar; sudo -S lee el password.
+    # stdin: sven asks ":: Proceed? [Y/n]" → auto-confirm; sudo -S reads the password.
     _auto_confirm = any(kw in command for kw in ("sven install", "sven upgrade", "sven update"))
     stdin_parts = []
     if uses_sudo:
