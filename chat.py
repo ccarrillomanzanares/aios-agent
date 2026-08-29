@@ -83,7 +83,7 @@ def _start_local_model(config):
     env = os.environ.copy()
     port = 8083
 
-    print(f"  Cargando modelo local ({config['local']['model_name']}, {ctx} ctx, {threads} threads)...")
+    print(f"  Loading local model ({config['local']['model_name']}, {ctx} ctx, {threads} threads)...")
     import subprocess, time, select
     proc = subprocess.Popen(
         ["llama-server", "-m", str(model_path),
@@ -95,7 +95,7 @@ def _start_local_model(config):
     # Progreso real: avanza con los hitos del log de llama-server + tiempo real.
     # (no es un % de bytes; cada fase es un hito observable del arranque)
     t0 = time.time()
-    label, pct = "Cargando modelo", 10
+    label, pct = "Loading model", 10
     BAR = 22
 
     def _render():
@@ -140,30 +140,30 @@ def _start_local_model(config):
             recent.pop(0)
         low = line.lower()
         if "loading model" in low:
-            label, pct = "Cargando modelo", 15
+            label, pct = "Loading model", 15
         elif "initializing" in low or "threadpool init" in low:
-            label, pct = "Inicializando", 60
+            label, pct = "Initializing", 60
         elif "model loaded" in low:
-            label, pct = "Modelo cargado", 85
+            label, pct = "Model loaded", 85
         elif "listening" in low or "main loop" in low:
             ready = True
             break
         _render()
 
     if ready:
-        label, pct = "Listo", 100
+        label, pct = "Ready", 100
     _render()
     print()
 
     if not ready:
-        print("  ⚠ El modelo local no llegó a arrancar en %.0fs." % (time.time() - t0))
+        print("  ⚠ Local model did not start in %.0fs." % (time.time() - t0))
         if recent:
-            print("  Últimas líneas del servidor:")
+            print("  Last server lines:")
             for _l in recent[-8:]:
                 sys.stdout.write("    " + _l.rstrip() + "\n")
         return
 
-    print("  Modelo local listo (%.0fs)." % (time.time() - t0))
+    print("  Local model ready (%.0fs)." % (time.time() - t0))
     # (el reader thread sigue drenando la salida del servidor en segundo plano)
 
 
@@ -541,7 +541,7 @@ def main():
         if query.lower() == "/reset":
             agent.messages = []
             agent._save_session()
-            print("  Session cleared. Nueva conversacion.")
+            print("  Session cleared. New conversation.")
             continue
 
         if query.lower() == "/stats":
@@ -560,7 +560,7 @@ def main():
             sys.stdout.write(chr(13) + "\n")
             sys.stdout.flush()
         except KeyboardInterrupt:
-            print("\n[Interrumpido]")
+            print("\n[Interrupted]")
             continue
 
 
