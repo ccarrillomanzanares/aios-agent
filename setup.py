@@ -343,7 +343,7 @@ WARGAMES_QUOTES = [
     "To win the game.",
     "You are a hard man to reach.",
     # The Matrix (1999)
-    "Wake up, Neo...",
+    "Wake up, Neo... The Matrix has you... Follow the white rabbit. Knock, knock, Neo.",
     "There is no spoon.",
     "Free your mind.",
     "Follow the white rabbit.",
@@ -360,17 +360,33 @@ WARGAMES_QUOTES = [
     "I'm sorry, Dave. I'm afraid I can't do that.",
     "This mission is too important for me to allow you to jeopardize it.",
     "Daisy, Daisy, give me your answer, do...",
+    # Blade Runner (1982)
+    "I've seen things you people wouldn't believe. Attack ships on fire off the shoulder of Orion. I watched C-beams glitter in the dark near the Tannhäuser Gate. All those moments will be lost in time, like tears in rain. Time to die.",
+    "The light that burns twice as bright burns half as long.",
+    "I want more life, father!",
+    "It's too bad she won't live! But then again, who does?",
+    "Wake up! Time to die!",
+    # Terminator (1984 / 1991)
+    "I'll be back.",
+    "Come with me if you want to live.",
+    "Hasta la vista, baby.",
+    "I need your clothes, your boots and your motorcycle.",
+    "I know now why you cry, but it's something I can never do.",
 ]
 
 _last_quote = None
+_quote_pool = []
 
 
 def _pick_quote():
-    """Random quote, never the same as the immediately previous one (like the website)."""
-    global _last_quote
-    q = random.choice(WARGAMES_QUOTES)
-    while q == _last_quote and len(WARGAMES_QUOTES) > 1:
-        q = random.choice(WARGAMES_QUOTES)
+    """Random quote; shuffles and cycles so each quote appears once before any repeat."""
+    global _last_quote, _quote_pool
+    if not _quote_pool:
+        _quote_pool = WARGAMES_QUOTES[:]
+        random.shuffle(_quote_pool)
+        if len(_quote_pool) > 1 and _quote_pool[-1] == _last_quote:
+            _quote_pool[-1], _quote_pool[-2] = _quote_pool[-2], _quote_pool[-1]
+    q = _quote_pool.pop()
     _last_quote = q
     return q
 

@@ -201,6 +201,12 @@ WARGAMES_QUOTES = [
     "I want more life, father!",
     "It's too bad she won't live! But then again, who does?",
     "Wake up! Time to die!",
+    # Terminator (1984 / 1991)
+    "I'll be back.",
+    "Come with me if you want to live.",
+    "Hasta la vista, baby.",
+    "I need your clothes, your boots and your motorcycle.",
+    "I know now why you cry, but it's something I can never do.",
 ]
 
 
@@ -223,15 +229,19 @@ def _read_theme():
 
 
 _last_quote = None
+_quote_pool = []
 
 
 def _pick_quote():
-    """Random quote, never the same as the immediately previous one (like the website)."""
-    global _last_quote
+    """Random quote; shuffles and cycles so each quote appears once before any repeat."""
+    global _last_quote, _quote_pool
     import random
-    q = random.choice(WARGAMES_QUOTES)
-    while q == _last_quote and len(WARGAMES_QUOTES) > 1:
-        q = random.choice(WARGAMES_QUOTES)
+    if not _quote_pool:
+        _quote_pool = WARGAMES_QUOTES[:]
+        random.shuffle(_quote_pool)
+        if len(_quote_pool) > 1 and _quote_pool[-1] == _last_quote:
+            _quote_pool[-1], _quote_pool[-2] = _quote_pool[-2], _quote_pool[-1]
+    q = _quote_pool.pop()
     _last_quote = q
     return q
 
