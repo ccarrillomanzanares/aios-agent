@@ -1125,14 +1125,19 @@ def _cloud_flow(theme="wargames", voice=None):
     if not (prov_data and model):
         return False
 
-    # Firefox para obtener/copiar la API key del proveedor
+    # No abrir Firefox por defecto: el usuario puede tener la key a mano.
+    # Imprimimos la URL y preguntamos si quiere que se la abramos.
     fx = _which("firefox")
     url = CLOUD_KEY_URLS.get(prov_data["name"])
-    if fx:
-        _sp.Popen([fx, url] if url else [fx], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
-        wg(f"Opening {prov_data['name']} in Firefox to get your API key...")
+    if url:
+        wg(f"Get your {prov_data['name']} API key at: {url}")
     else:
-        wg("Firefox not found - get your API key from the provider console.")
+        wg(f"Get your {prov_data['name']} API key from the provider console.")
+    if fx and url:
+        open_fx = wg_input("  Open Firefox to get the API key? (y/N): ").strip().lower()
+        if open_fx in ("y", "yes"):
+            _sp.Popen([fx, url], stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+            wg(f"  Opening {prov_data['name']} in Firefox...")
 
     while True:
         wg("")
