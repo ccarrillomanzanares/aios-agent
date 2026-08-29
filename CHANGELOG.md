@@ -1,223 +1,221 @@
 # Changelog
 
-## v3.15 - agosto 2026
+## v0.16 - August 2026
 
-### fixes del arranque del LLM y del pantallazo (regresión de la barra de progreso)
+### voice (TTS/STT) — independent `voice:` section from chat
 
-- **Carga del LLM clavada al 85%**: `_start_local_model` usaba `select` sobre el fd crudo + `readline` con buffer de Python. Cuando llama-server escribía `model loaded` y `listening` casi a la vez, `readline` leía las dos líneas al buffer pero devolvía solo la primera; `listening` quedaba atascada en el buffer (select mira el fd, no el buffer) y la barra se quedaba en 85% para siempre **aunque el servidor ya escuchara** (por eso 0% CPU y "no termina"). Fix: **hilo lector + cola** (sin select) que drena el stdout y detecta `listening` de verdad; timeout de 15 min y volcado de las últimas líneas si no arranca.
-- **Printscreen (`Print`)**: el `scrot` inline en i3 con `%` (strftime) + `&&` + comillas anidadas rompía el parser de i3 (`Could not translate string to key symbol`). Fix: script `scripts/screenshot.sh` dedicado, y binding a `/usr/local/bin/aios-agent/scripts/screenshot.sh`.
-
-## v3.16 - agosto 2026
-
-### voz (TTS/STT) — sección `voice:` independiente del chat
-
-- **Config**: sección `voice:` en `config.yaml` (tts/stt/tts_lang), separada de `cloud:` (chat). El setup (live e `aios-install`) deja elegir TTS (off/espeak/gemini/openai), STT (off/vosk/gemini/openai) e idioma; las claves de voz van a `~/.aios/.env` aparte de la de chat (`GOOGLE_API_KEY`/`OPENAI_API_KEY` vs `DEEPSEEK_API_KEY`).
-- **TTS** (`voice.py`): espeak-ng local (sin clave), Gemini `gemini-2.5-flash-tts` y OpenAI `gpt-4o-mini-tts` (cloud). Omite bloques de código/tablas para no deletrearlos y habla en hilo (no bloquea el chat). `espeak-ng` instalado vía sven.
-- **STT** (`voice.py`): vosk local, Gemini y OpenAI cloud (graba con `arecord`).
-- **Comandos**: `/voice` (alterna la voz, persiste) y `/mic` (graba + transcribe + envía como mensaje).
-- **Icono**: bloque `VOX/MIC` en la barra i3 (verde=activo, atenuado=off) leyendo `data/voice_state.json`.
+- **Config**: `voice:` section in `config.yaml` (tts/stt/tts_lang), separate from `cloud:` (chat). Setup (live and `aios-install`) lets choose TTS (off/espeak/gemini/openai), STT (off/vosk/gemini/openai) and language; voice keys go to `~/.aios/.env` apart from chat (`GOOGLE_API_KEY`/`OPENAI_API_KEY` vs `DEEPSEEK_API_KEY`).
+- **TTS** (`voice.py`): local espeak-ng (no key), Gemini `gemini-2.5-flash-tts` and OpenAI `gpt-4o-mini-tts` (cloud). Skips code blocks/tables so it doesn't spell them out, and speaks in a thread (does not block chat). `espeak-ng` installed via sven.
+- **STT** (`voice.py`): local vosk, Gemini and OpenAI cloud (records with `arecord`).
+- **Commands**: `/voice` (toggles voice, persists) and `/mic` (records + transcribes + sends as message).
+- **Icon**: `VOX/MIC` block in the i3 bar (green=active, dimmed=off) reading `data/voice_state.json`.
 
 ### fixes
 
-- **Beep/tic no sonaba**: `aplay --buffer-size=512 --period-size=512` (buffer == periodo) fallaba en silencio en algunos codecs; quitados (valores por defecto del dispositivo). `aios-diag` ahora recoge el estado de audio (aplay -l, /proc/asound/cards, amixer, errores snd/hda).
-- **Barra de carga en inglés**: el texto de la barra de progreso del LLM estaba en español; pasado a inglés (consistente con el resto del printf).
+- **Beep/tic did not sound**: `aplay --buffer-size=512 --period-size=512` (buffer == period) failed silently on some codecs; removed (device defaults). `aios-diag` now collects audio state (`aplay -l`, `/proc/asound/cards`, `amixer`, snd/hda errors).
+- **Loading bar in English**: the LLM progress bar text was in Spanish; switched to English (consistent with the rest of the printf).
 
-## v3.14 - agosto 2026
+## v0.15 - August 2026
 
-### agente: ejecuta tools de verdad (feedback Carlos)
+### fixes for LLM boot and screenshot (progress bar regression)
 
-- **`import sys` en `agent.py`**: `_out()` y `_cbreak_on()` usaban `sys` sin importarlo → `NameError` que el `except` del stream se tragaba en silencio (el agente parecía "mudo"; al `shutdown` saltaba el error). Fix raíz.
-- **Tool visible antes de ejecutar**: el `⚙ tool(...)` se muestra ANTES de `execute_tool` — un comando largo ya no parece que "no hace nada".
-- **`run_command` con stdin correcto**: `/dev/null` por defecto (un prompt interactivo ya no bloquea en silencio) y auto-`y` para `sven install/upgrade/update` (el `:: Proceed? [Y/n]` ya no cuelga).
-- **Tool `list_desktop_apps`**: parsea `/usr/share/applications/*.desktop` — el agente responde "qué apps hay" buscando de verdad (p. ej. Firefox), no de memoria.
-- **Grounding**: "sven siempre con sudo" + "nunca termines el turno con voy-a-hacerlo; emite el tool_call en el mismo turno" + "usa list_desktop_apps".
+- **LLM loading stuck at 85%**: `_start_local_model` used `select` on raw fd + `readline` with Python buffer. When llama-server wrote `model loaded` and `listening` almost together, `readline` read both lines into buffer but returned only the first; `listening` stayed stuck in the buffer (select watches the fd, not the buffer) and the bar stayed at 85% forever **even though the server was already listening** (hence 0% CPU and "does not finish"). Fix: **reader thread + queue** (no select) that drains stdout and detects `listening` for real; 15 min timeout and dump of the last lines if it doesn't start.
+- **Printscreen (`Print`)**: inline `scrot` in i3 with `%` (strftime) + `&&` + nested quotes broke the i3 parser (`Could not translate string to key symbol`). Fix: dedicated `scripts/screenshot.sh` script, and binding to `/usr/local/bin/aios-agent/scripts/screenshot.sh`.
 
-### carga del LLM local
+## v0.14 - August 2026
 
-- **Barra de progreso real** en `chat.py` `_start_local_model`: fases reales del log de llama-server (`loading model` → `init` → `model loaded` → `listening`) con porcentaje y tiempo, en vez de 30s fijos. Si no arranca, vuelca el log capturado.
+### agent: executes real tools (Carlos feedback)
 
-### pantallazos y diagnóstico
+- **`import sys` in `agent.py`**: `_out()` and `_cbreak_on()` used `sys` without importing it → `NameError` that the stream `except` swallowed silently (the agent seemed "mute"; on `shutdown` the error jumped). Root fix.
+- **Tool visible before executing**: the `⚙ tool(...)` is shown BEFORE `execute_tool` — a long command no longer looks like "it does nothing".
+- **`run_command` with correct stdin**: `/dev/null` by default (an interactive prompt no longer blocks silently) and auto-`y` for `sven install/upgrade/update` (the `:: Proceed? [Y/n]` no longer hangs).
+- **Tool `list_desktop_apps`**: parses `/usr/share/applications/*.desktop` — the agent answers "what apps are there" by actually searching (e.g. Firefox), not from memory.
+- **Grounding**: "sven always with sudo" + "never end the turn with I'll do it; emit the tool_call in the same turn" + "use list_desktop_apps".
 
-- **Printscreen (`Print`)**: `scrot` a `~/screenshots/shot-<timestamp>.png`; documentado en `shortcuts.txt` junto a los comandos de chat `/think /health /reset /stats`.
-- **`aios-diag`**: recopila diagnóstico (sistema + errores + logs AIOS + pantallazos desde la última recolección), redacta claves de `config.yaml`, comprime `tar.zst` con timestamp y sube por rsync a una cuenta `diag` de SOLO escritura (rrsync, sin shell/sudo). La clave no va en la ISO (`--local` = solo local).
+### local LLM loading
 
-## v3.13 - agosto 2026
+- **Real progress bar** in `chat.py` `_start_local_model`: real phases from llama-server log (`loading model` → `init` → `model loaded` → `listening`) with percentage and time, instead of fixed 30s. If it doesn't start, it dumps the captured log.
 
-### fixes de estabilidad (feedback Arnold / portátiles físicos)
+### screenshots and diagnostics
 
-- **Bucle live→menú**: `_live_flow` devuelve `True` al completar y `main()` hace `break` — antes "Setup complete" no terminaba y volvía al menú en bucle.
-- **Internet con reintento**: `_wait_internet()` espera al DHCP tras asociar el WiFi antes de declarar "no internet" (antes falso negativo inmediato).
-- **Delete/flechas en `_read_line`**: manejo de secuencias de escape (`\x1b`, Delete xterm/rxvt) en los inputs del formulario.
-- **sven timeout 600s**: `run_command` da timeout generoso a `sven install/upgrade/sync` (antes daba timeout a los minutos).
-- **Chat sin efecto escalera**: `_out()` escribe CRLF explícito en la salida del LLM (streaming, tools y salto final). Antes escribía salto de línea simple confiando en ONLCR del tty y el cursor no volvía a col 0 → cada prompt se desplazaba a la derecha.
+- **Printscreen (`Print`)**: `scrot` to `~/screenshots/shot-<timestamp>.png`; documented in `shortcuts.txt` along with the chat commands `/think /health /reset /stats`.
+- **`aios-diag`**: collects diagnostics (system + errors + AIOS logs + screenshots since last collection), redacts keys from `config.yaml`, compresses `tar.zst` with timestamp and uploads via rsync to a write-only `diag` account (rrsync, no shell/sudo). Key not included in ISO (`--local` = local only).
 
-## v3.12 - agosto 2026
+## v0.13 - August 2026
 
-### soporte ollama-hardened (Moonlight) como proveedor
+### stability fixes (Arnold feedback / physical laptops)
 
-- **X-API-Key**: `auth_type` en config (bearer/x-api-key); `CLOUD_HEADERS` usa `X-API-Key` para hardened. `verify=False` solo x-api-key (cert self-signed).
-- **Proveedor "Ollama Hardened"**: `https://webuillama.ccmai.org:8443/v1/chat/completions`, Moonlight-16B-A3B Q3_K_M. Key en `~/.aios/.env` (privada, no en ISO).
-- **Fix lectura de key** del proveedor custom (`provider_env`).
-- **Caddyfile hardened** (repo ollama-hardened): rutas API → 401 sin key válida.
+- **Live→menu loop**: `_live_flow` returns `True` on completion and `main()` does `break` — before "Setup complete" did not finish and returned to the menu in a loop.
+- **Internet with retry**: `_wait_internet()` waits for DHCP after associating WiFi before declaring "no internet" (before it was an immediate false negative).
+- **Delete/arrows in `_read_line`**: handling of escape sequences (`\x1b`, Delete xterm/rxvt) in form inputs.
+- **sven timeout 600s**: `run_command` gives a generous timeout to `sven install/upgrade/sync` (before it timed out after minutes).
+- **Chat without staircase effect**: `_out()` writes explicit CRLF in LLM output (streaming, tools and final newline). Before it wrote a simple newline relying on tty ONLCR and the cursor didn't return to col 0 → each prompt shifted right.
 
-## v3.11 - agosto 2026
+## v0.12 - August 2026
 
-### mejoras al LLM local (precisión / anti-alucinación)
+### ollama-hardened support (Moonlight) as provider
 
-- **Grounding AIOS**: `_AIOS_GROUNDING` inyecta los invariantes de AIOS en el system prompt (LFS, `sven` como único gestor — nunca apt/dnf/pacman, systemd, i3, red con systemd-networkd + wpa_supplicant sin ctrl_interface, usrmerge, `aios-update`/`aios-install`, grabación `$mod+Print`). Evita que el modelo invente comandos de otras distros.
-- **Disciplina de verificación**: regla en el prompt — para preguntas sobre el estado ACTUAL del sistema (RAM/disco/procesos/servicios), comprobar con tool primero, nunca responder de memoria.
-- **Sampling según doc oficial de Qwen3**: `_sampling_params()` — thinking `temp 0.6/top_p 0.95/top_k 20/min_p 0`, no-thinking `0.7/0.8/20/0`; cloud mantiene temperatura conservadora. Verificado A/B en VPS (b10655): misma respuesta correcta, sin repeticiones.
-- **Eco del reasoning_content**: el agente captura y devuelve `reasoning_content` en el historial multi-turno (thinking limpio en conversaciones largas).
+- **X-API-Key**: `auth_type` in config (bearer/x-api-key); `CLOUD_HEADERS` uses `X-API-Key` for hardened. `verify=False` only for x-api-key (self-signed cert).
+- **Provider "Ollama Hardened"**: `https://webuillama.ccmai.org:8443/v1/chat/completions`, Moonlight-16B-A3B Q3_K_M. Key in `~/.aios/.env` (private, not in ISO).
+- **Fix reading key** of custom provider (`provider_env`).
+- **Hardened Caddyfile** (ollama-hardened repo): API routes → 401 without a valid key.
 
-## v3.10 - agosto 2026
+## v0.11 - August 2026
 
-### switch thinking local (ON/OFF) + context/threads relativos en instalación a disco
+### local LLM improvements (accuracy / anti-hallucination)
 
-- **Thinking mode local (Qwen3-8B)**: switch binario ON/OFF vía clave `local.think` en `config.yaml` (default OFF).
-  - `agent.py`: `THINK_LOCAL` (env `AIOS_LOCAL_THINK`) controla el token `/no_think` de la consulta, la regla "Do not use <think> tags" del system prompt y el `max_tokens` (mín. 2048 al pensar, porque el razonamiento consume tokens antes de la respuesta). `_quick_llm` sigue siempre con `/no_think`.
-  - `chat.py`: pasa `AIOS_LOCAL_THINK` al entorno antes de importar `agent`.
-  - `setup.py`: pregunta "Enable thinking mode? [y/N]" en live e install.
-  - `aios-install`: nuevo flag `--think 0|1`.
-- **Verificado empíricamente (VPS, llama.cpp b10655)**: con `/think`, el razonamiento de Qwen3 va en `delta.reasoning_content` (campo SEPARADO), NO inline en `delta.content`. El agente solo lee `content`/`tool_calls`, así que el razonamiento no se imprime ni contamina la respuesta; `_clean` queda como safety net.
-- **Fix context/threads en instalación a disco**: `aios-install` escribía `threads: 14` y `context: 32768` hardcodeados; ahora usa `_detect_cpu()` y `_auto_context(_detect_ram_gb())` (espejo de `setup.py`), coherente con el live y sin lanzar llama-server con `-c 32768` en máquinas ≤8 GB.
-- **Comando `/think` en caliente**: toggle del thinking sin salir del agente (como `/sound`); persiste en `config.yaml` y `agent.set_think()` regenera token + `max_tokens` + system prompt en runtime. Documentado en `shortcuts.txt` (aios-lfs).
+- **AIOS grounding**: `_AIOS_GROUNDING` injects AIOS invariants into the system prompt (LFS, `sven` as the only package manager — never apt/dnf/pacman, systemd, i3, networking with systemd-networkd + wpa_supplicant without ctrl_interface, usrmerge, `aios-update`/`aios-install`, recording `$mod+Print`). Prevents the model from inventing commands from other distros.
+- **Verification discipline**: rule in prompt — for questions about the CURRENT state of the system (RAM/disk/processes/services), check with a tool first, never answer from memory.
+- **Sampling per official Qwen3 doc**: `_sampling_params()` — thinking `temp 0.6/top_p 0.95/top_k 20/min_p 0`, no-thinking `0.7/0.8/20/0`; cloud keeps conservative temperature. A/B verified on VPS (b10655): same correct answer, no repetitions.
+- **Reasoning_content echo**: the agent captures and returns `reasoning_content` in multi-turn history (clean thinking in long conversations).
 
-## v3.9 - agosto 2026
+## v0.10 - August 2026
 
-### fix: agente mudo (respuesta en blanco + prompt >)
+### local thinking switch (ON/OFF) + relative context/threads in disk installation
 
-- **Sintoma**: el agente dejaba de responder (respuesta en blanco, prompt ">", sin ejecucion de tools) cuando el modelo devolvia tool calls largas con coordenadas de vision (p.ej. OCR TSV "805,316,5x3") y ocasionalmente sin ellas.
-- **Causa raiz**: chat.py tragaba en silencio el retorno de agent.run() (solo print() de salto de linea) -> cualquier error o "(respuesta vacia del modelo)" quedaba invisible. Ademas, si el stream del LLM se cortaba sin finish_reason (servidor cerraba a mitad de tool call), content quedaba vacio y el agente se rendia sin reintentar.
+- **Local thinking mode (Qwen3-8B)**: binary ON/OFF switch via `local.think` key in `config.yaml` (default OFF).
+  - `agent.py`: `THINK_LOCAL` (env `AIOS_LOCAL_THINK`) controls the `/no_think` token in the query, the "Do not use <think> tags" system prompt rule and `max_tokens` (min. 2048 when thinking, because reasoning consumes tokens before the response). `_quick_llm` always uses `/no_think`.
+  - `chat.py`: passes `AIOS_LOCAL_THINK` to the environment before importing `agent`.
+  - `setup.py`: asks "Enable thinking mode? [y/N]" in live and install.
+  - `aios-install`: new flag `--think 0|1`.
+- **Empirically verified (VPS, llama.cpp b10655)**: with `/think`, Qwen3 reasoning goes in `delta.reasoning_content` (SEPARATE field), NOT inline in `delta.content`. The agent only reads `content`/`tool_calls`, so reasoning is neither printed nor contaminates the response; `_clean` remains as a safety net.
+- **Fix context/threads in disk installation**: `aios-install` wrote hardcoded `threads: 14` and `context: 32768`; now uses `_detect_cpu()` and `_auto_context(_detect_ram_gb())` (mirror of `setup.py`), consistent with live and without launching llama-server with `-c 32768` on machines ≤8 GB.
+- **Hot `/think` command**: thinking toggle without leaving the agent (like `/sound`); persists in `config.yaml` and `agent.set_think()` regenerates token + `max_tokens` + system prompt at runtime. Documented in `shortcuts.txt` (aios-lfs).
+
+## v0.9 - August 2026
+
+### fix: mute agent (blank response + prompt >)
+
+- **Symptom**: the agent stopped responding (blank response, prompt `>`, no tool execution) when the model returned long tool calls with vision coordinates (e.g. OCR TSV "805,316,5x3") and occasionally without them.
+- **Root cause**: `chat.py` silently swallowed the return value of `agent.run()` (only `print()` newline) → any error or "(empty model response)" became invisible. Also, if the LLM stream was cut without finish_reason (server closed mid-tool-call), content was empty and the agent gave up without retrying.
 - **Fixes**:
-  1. chat.py: el retorno de agent.run() se muestra si no vino por el stream (errores y respuesta vacia ya no son mudos).
-  2. agent.py: log crudo del stream SSE en /tmp/aios-stream.log (lineas data: + marcador END con finish_reason/chunks/tools + excepciones) para diagnostico.
-  3. agent.py: reintento unico si el stream termina sin finish_reason y sin contenido ("⚠️ Stream vacio (posible corte). Reintentando...").
-- Verificado en portatil fisico (4 Ago 2026): tras reiniciar el agente, responde con normalidad. Pendiente confirmacion a largo plazo del caso de coordenadas.
+  1. `chat.py`: the return value of `agent.run()` is shown if it didn't come from the stream (errors and empty responses are no longer mute).
+  2. `agent.py`: raw SSE stream log in `/tmp/aios-stream.log` (`data:` lines + END marker with finish_reason/chunks/tools + exceptions) for diagnostics.
+  3. `agent.py`: single retry if the stream ends without finish_reason and without content ("⚠️ Empty stream (possible cut). Retrying...").
+- Verified on physical laptop (4 Aug 2026): after restarting the agent, it responds normally. Pending long-term confirmation of the coordinates case.
 
-# Changelog
+## v0.8 - August 2026
 
-## v3.8 - agosto 2026
+### distro kernel (#5) - generic hardware
 
-### kernel de distro (#5) - hardware generico
+- Kernel 6.18.10 config expanded: wifi (iwlwifi, ath9k/10k/11k, rtw88/89, rtl8xxxu, brcmfmac, rtlwifi/rtl8723be/rtl8821ae), DRM (i915/amdgpu/nouveau), NVMe, UAS, I2C_HID_ACPI, ethernet (r8169/e1000e/igb), ALSA HDA + USB audio (=m via udev; critical =y).
+- linux-firmware firmware in /lib/firmware (~534MB) + iwlwifi symlinks (intel/iwlwifi -> root) + regulatory.db + rtl_nic.
+- Verified on HP Notebook (AMD APU + Realtek RTL8723BE + RTL8106E): wifi, ethernet, audio (alc269 + HDMI), Synaptics touchpad.
 
-- Config del kernel 6.18.10 ampliada: wifi (iwlwifi, ath9k/10k/11k, rtw88/89, rtl8xxxu, brcmfmac, rtlwifi/rtl8723be/rtl8821ae), DRM (i915/amdgpu/nouveau), NVMe, UAS, I2C_HID_ACPI, ethernet (r8169/e1000e/igb), ALSA HDA + USB audio (=m via udev; criticos =y).
-- Firmware linux-firmware en /lib/firmware (~534MB) + symlinks iwlwifi (intel/iwlwifi -> raiz) + regulatory.db + rtl_nic.
-- Verificado en HP Notebook (AMD APU + Realtek RTL8723BE + RTL8106E): wifi, ethernet, audio (alc269 + HDMI), touchpad Synaptics.
+### setup.py - option 5 WIFI SETUP
 
-### setup.py - opcion 5 WIFI SETUP
+- New menu option: detects wifi interface, scans SSIDs, generates `/etc/wpa_supplicant/wpa_supplicant-<iface>.conf` (wpa_passphrase), connects with wpa_supplicant and verifies connectivity.
+- Internet verification with urllib against example.com/archlinux.org: curl/ping don't exist on the system and 1.1.1.1 returns 403 to urllib.
+- Persistence on installed system: enables wpa_supplicant@<iface> and creates `/etc/systemd/network/20-wifi-dhcp.network` (systemd-networkd DHCP on wl*, same mechanism as ethernet en*).
+- Bug fix: the `aios-wifi.service` unit used `/usr/sbin/wpa_supplicant` (non-existent path; Arch installs it in /usr/bin) → 203/EXEC → wifi associated without IP at boot. Replaced by networkd.
 
-- Nueva opcion de menu: detecta interfaz wifi, escanea SSIDs, genera /etc/wpa_supplicant/wpa_supplicant-<iface>.conf (wpa_passphrase), conecta con wpa_supplicant y verifica conectividad.
-- Verificacion de internet con urllib contra example.com/archlinux.org: en el sistema no existen curl/ping y 1.1.1.1 devuelve 403 a urllib.
-- Persistencia en sistema instalado: habilita wpa_supplicant@<iface> y crea /etc/systemd/network/20-wifi-dhcp.network (systemd-networkd DHCP en wl*, mismo mecanismo que el ethernet en*).
-- Fix de bug: el unit aios-wifi.service usaba /usr/sbin/wpa_supplicant (ruta inexistente; Arch lo instala en /usr/bin) -> 203/EXEC -> wifi asociada sin IP al arranque. Sustituido por networkd.
+### infrastructure and dependencies
 
-### infraestructura y dependencias
+- sven: database sync (`sven sync`) + manual JSON registry in `/var/lib/sven/installed/` for ghost-state packages (pcsclite, libinput, libgudev) — packages marked installed but missing files.
+- libinput.so.10 + libgudev-1.0.so.0 + libwacom + liblua installed (dependency chain of the Xorg libinput driver) → Synaptics touchpad works on real hardware.
+- busybox: applet symlinks (`/bin/udhcpc`, `/sbin/udhcpc`) + default.script in `/usr/share/udhcpc` and `/etc/udhcpc` (Ubuntu busybox looks for compiled path `/etc/udhcpc/`).
+- MILESTONE: complete AIOS on real hardware - wifi at boot without cable, cloud agent works (4 Aug 2026).
 
-- sven: sincronizacion de bases (sven sync) + registro manual JSON en /var/lib/sven/installed/ para paquetes con estado fantasma (pcsclite, libinput, libgudev) - paquetes marcados instalados sin archivos.
-- libinput.so.10 + libgudev-1.0.so.0 + libwacom + liblua instalados (cadena de dependencias del driver libinput del Xorg) -> touchpad Synaptics funcional en hardware real.
-- busybox: symlinks de applets (/bin/udhcpc, /sbin/udhcpc) + default.script en /usr/share/udhcpc y /etc/udhcpc (el busybox de Ubuntu busca la ruta compilada /etc/udhcpc/).
-- HITO: AIOS completo en hardware real - wifi al arranque sin cable, agente cloud funcional (4 Ago 2026).
+## v0.7 - August 2026
 
-## v3.7 - agosto 2026
+### physical milestone
 
-### hito físico
+- Full boot of AIOS LFS on real hardware (physical laptop with SATA SSD) verified on 2 Aug 2026.
+- ISO boots from USB when written with Rufus in DD mode.
+- Installer copies the system to SSD disk and the machine boots from disk with AIOS banner and login.
+- Whole chain (live USB → install → disk boot) works on physical hardware, not only VirtualBox.
+- Fixed the live initrd init to wait for the boot device to appear for 30 s, with verification loop `[ -b ]` and `break 2`.
+- Expanded recognized device list in init: `sdc`, `sdd`, `hd*`, `nvme*`, `mmcblk*`.
+- Replaced silent kernel panic with clear message `AIOS: boot media not found` plus busybox emergency shell.
+- Documented that Rufus must be used in DD mode; ISO mode creates FAT32 and init looks for iso9660, so it currently fails.
 
-- Se verificó el arranque completo de AIOS LFS en hardware real (portátil físico con SSD SATA) el 2 Ago 2026.
-- La ISO arranca desde USB cuando se graba con Rufus en modo DD.
-- El instalador copia el sistema al disco SSD y el equipo arranca desde disco con banner AIOS y login.
-- Toda la cadena (live USB → instalación → arranque disco) funciona en hardware físico, no solo en VirtualBox.
-- Se corrigió el init del initrd live para esperar la aparición del dispositivo de arranque durante 30 s, con loop de verificación `[ -b ]` y `break 2`.
-- Se amplió la lista de dispositivos reconocidos en el init: `sdc`, `sdd`, `hd*`, `nvme*`, `mmcblk*`.
-- Se reemplazó el kernel panic silencioso por el mensaje claro `AIOS: boot media not found` más shell de emergencia busybox.
-- Se documentó que Rufus debe usarse en modo DD; el modo ISO crea FAT32 y el init busca iso9660, por lo que falla actualmente.
+### next steps
 
-### próximos pasos
+- Support Rufus ISO/FAT32 mode in the live initrd init script.
+- Compile and integrate kernel #5 with NVMe and UAS support.
 
-- Soportar Rufus modo ISO/FAT32 en el script init del initrd live.
-- Compilar e integrar kernel #5 con soporte NVMe y UAS.
-
-## v3.6 - agosto 2026
+## v0.6 - August 2026
 
 ### aios-install v1.1.2
 
-- **Fix: kernel panic al arrancar AIOS LFS desde disco duro.**
-  El sistema instalado a disco mostraba el panic `'Attempted to kill init! exit code=0x7f00'` (127) justo tras el arranque.
+- **Fix: kernel panic when booting AIOS LFS from hard disk.**
+  The installed-to-disk system showed panic `'Attempted to kill init! exit code=0x7f00'` (127) right after boot.
 
-#### Causas raíz
+#### root causes
 
-1. **Escape octal en el patrón `sed` de `build_disk_initrd`**: la cadena Python usaba un solo backslash en `'s/.*root=\([^ ]*\).*/\1/p'`. Python interpreta `\1` como el carácter de control SOH (`0x01`), que terminaba escrito en el `init` generado. Al ejecutarse, `sed` devolvía un dispositivo root fantasma y el posterior `mount -t ext4` fallaba.
-2. **Fallback incorrecto en el initrd**: cuando `mount` fallaba, el script ejecutaba `exec /bin/sh`, pero en el initrd live transformado no existe `/bin/sh`; solo hay `init` y `bin/busybox`, sin symlinks de applets. El `exec` fallaba con código 127, matando el init y provocando el panic.
-3. **Sin espera al dispositivo root**: el dispositivo de root podía no estar disponible en el instante en que el init lo consultaba, por lo que incluso con el dispositivo correcto el arranque era inestable.
+1. **Octal escape in the `sed` pattern of `build_disk_initrd`**: the Python string used a single backslash in `'s/.*root=\([^ ]*\).*/\1/p'`. Python interprets `\1` as the SOH control character (`0x01`), which ended up written in the generated `init`. At runtime, `sed` returned a phantom root device and the subsequent `mount -t ext4` failed.
+2. **Wrong fallback in initrd**: when `mount` failed, the script executed `exec /bin/sh`, but in the transformed live initrd `/bin/sh` doesn't exist; only `init` and `bin/busybox`, without applet symlinks. The `exec` failed with code 127, killing init and causing the panic.
+3. **No wait for root device**: the root device might not be available at the instant init queried it, so even with the correct device the boot was unstable.
 
-#### Solución aplicada
+#### applied solution
 
-- Se corrigió el patrón `sed`/`tail` usando doble backslash (`\\(` y `\\1`) para que el script `init` generado reciba literalmente `\(` y `\1`, y `sed` extraiga el dispositivo root correcto.
-- Se añadió un bucle de espera activa de hasta 30 segundos hasta que el dispositivo root aparezca en `/dev`.
-- Se reemplazó el fallback `exec /bin/sh` por `exec /bin/busybox sh`, que sí existe en el initrd.
-- Se usa ahora `exec /bin/busybox switch_root /root /sbin/init` para continuar el arranque del sistema real.
-- Se añadió `/bin/busybox` (estático, 2.1 MB, extraído del initrd) al squashfs del sistema live, ya que `build_disk_initrd` lo necesita y el sistema live no lo incluía.
+- Fixed the sed/tail pattern using double backslash (`\\(` and `\\1`) so the generated `init` script receives literally `\(` and `\1`, and `sed` extracts the correct root device.
+- Added an active wait loop of up to 30 seconds until the root device appears in `/dev`.
+- Replaced the fallback `exec /bin/sh` with `exec /bin/busybox sh`, which exists in the initrd.
+- Now uses `exec /bin/busybox switch_root /root /sbin/init` to continue boot of the real system.
+- Added `/bin/busybox` (static, 2.1 MB, extracted from initrd) to the live system squashfs, since `build_disk_initrd` needs it and the live system didn't include it.
 
-#### Verificación
+#### verification
 
-- Reinstalando AIOS LFS a disco, el arranque desde disco funciona correctamente: se muestra el logo AIOS y llega al login.
-- Pendiente de pulir: GRUB sigue mostrando el mensaje `'Welcome to GRUB!'`. Futura mejora: `timeout_style=hidden` y `quiet_boot=1`.
+- Reinstalling AIOS LFS to disk, boot from disk works correctly: the AIOS logo is shown and it reaches login.
+- Pending polish: GRUB still shows the `'Welcome to GRUB!'` message. Future improvement: `timeout_style=hidden` and `quiet_boot=1`.
 
-## v3.4 - agosto 2026
-
-### setup.py
-
-- `validate_api_key` ejecuta la petición en un hilo daemon con `join(timeout=12)`; el timeout de `urlopen` no cubre resolución DNS y el menú cloud se colgaba sin límite.
-- Al final de `__main__` se usa `os._exit(0)` para forzar la salida sin esperar a hilos residuales.
-- La API key se guarda correctamente en `~/.aios/.env` (corregido el bug `if not key:` → `if key:`).
-- Menú LOCAL actualizado con el modelo `Qwen3-8B-Instruct` y el texto `"1) LOCAL (no internet) / Simple tasks"`.
-- `print_box` se centra en pantalla usando `os.get_terminal_size`, con padding horizontal y vertical.
-- Mensaje final del setup: `"Setup complete. Starting the AIOS agent..."`, reflejando el paso automático de setup a aios.
-
-## v3.5 - agosto 2026
+## v0.5 - August 2026
 
 ### aios-install
 
-- **v1.1.0**: permitir cambiar las contraseñas `root` y `aios` durante la instalación. Se usa `getpass`, longitud mínima de 8 caracteres y `chpasswd` vía chroot por stdin. El resumen final omite `"Login: aios/aios"` si se cambiaron las credenciales.
-- **v1.1.1**: silent boot en disco. El `grub.cfg` generado usa `timeout=0`, `quiet`, `systemd.show_status=false`, `initrd /boot/initrd.img` y `root=` real. `build_disk_initrd` transforma el initrd live conservando el banner y reemplazando el bucle ISO por `mount root` + `switch_root /sbin/init`.
-- Se elimina `nokaslr` del `grub.cfg` generado.
-- `print_box` centrado en pantalla.
+- **v1.1.0**: allow changing the `root` and `aios` passwords during installation. Uses `getpass`, minimum length of 8 characters and `chpasswd` via chroot by stdin. The final summary omits `"Login: aios/aios"` if credentials were changed.
+- **v1.1.1**: silent boot on disk. The generated `grub.cfg` uses `timeout=0`, `quiet`, `systemd.show_status=false`, `initrd /boot/initrd.img` and real `root=`. `build_disk_initrd` transforms the live initrd preserving the banner and replacing the ISO loop with `mount root` + `switch_root /sbin/init`.
+- Removed `nokaslr` from the generated `grub.cfg`.
+- `print_box` centered on screen.
 
-## v2.7.1 — Fix del bootloader GRUB en instalaciones a disco (VirtualBox)
+## v0.4 - August 2026
 
-- `aios-install`: se reemplaza la generación dinámica del menú GRUB (`grub-mkconfig`) por un `grub.cfg` fijo en modo texto.
-- Motivación: `grub-mkconfig` generaba un menú gráfico (`load_video`, `insmod all_video`, `gfxpayload=keep`, `terminal_output gfxterm`, `menuentry "Arch GNU/Linux"`) que colgaba en VirtualBox mostrando `Cargando Linux 6.18.10-lfs ...`.
-- Nuevo `grub.cfg` generado por `install_grub()`:
+### setup.py
+
+- `validate_api_key` runs the request in a daemon thread with `join(timeout=12)`; the `urlopen` timeout did not cover DNS resolution and the cloud menu hung indefinitely.
+- At the end of `__main__`, `os._exit(0)` is used to force exit without waiting for residual threads.
+- The API key is saved correctly in `~/.aios/.env` (fixed the bug `if not key:` → `if key:`).
+- LOCAL menu updated with model `Qwen3-8B-Instruct` and text `"1) LOCAL (no internet) / Simple tasks"`.
+- `print_box` centered on screen using `os.get_terminal_size`, with horizontal and vertical padding.
+- Final setup message: `"Setup complete. Starting the AIOS agent..."`, reflecting the automatic step from setup to aios.
+
+## v0.3 — Fix bootloader GRUB on disk installations (VirtualBox)
+
+- `aios-install`: dynamic GRUB menu generation (`grub-mkconfig`) replaced by a fixed text-mode `grub.cfg`.
+- Motivation: `grub-mkconfig` generated a graphical menu (`load_video`, `insmod all_video`, `gfxpayload=keep`, `terminal_output gfxterm`, `menuentry "Arch GNU/Linux"`) that hung in VirtualBox showing `Loading Linux 6.18.10-lfs ...`.
+- New `grub.cfg` generated by `install_grub()`:
   - `set default=0`
   - `set timeout=5`
   - `menuentry "AIOS LFS" { linux /boot/vmlinuz-6.18.10-lfs root=/dev/sda2 rw nokaslr console=tty0 loglevel=6 }`
-- Se mantiene `grub-install` para escribir el bootloader en el disco destino.
-- Se eliminan UUID y referencias a "Arch Linux" del menú de arranque.
-- README.md actualizado con sección "Fix v7: GRUB gráfico cuelga en VirtualBox tras instalación a disco".
+- `grub-install` is kept to write the bootloader to the target disk.
+- UUIDs and "Arch Linux" references removed from the boot menu.
+- README.md updated with section "Fix v7: Graphical GRUB hangs in VirtualBox after disk installation".
 
-## v2.1 — SRE Agent con function calling nativo sobre Qwen2.5-7B-Instruct
+## v0.2 — SRE Agent with native function calling on Qwen2.5-7B-Instruct
 
-- Modelo definitivo fijado en Qwen2.5-7B-Instruct; descartados Qwen2.5-Coder-3B y otros modelos <7B por function calling poco fiable.
+- Definitive model fixed to Qwen2.5-7B-Instruct; discarded Qwen2.5-Coder-3B and other models <7B due to unreliable function calling.
 - 13 tools: `run_command`, `read_file`, `write_file`, `web_search`, `git_operation`, `mcp_call`, `run_playbook`, `process_start`, `process_send`, `process_close`, `process_list`, `cloud_reasoning`, `get_context_usage`.
-- Memoria procedural Skill-Pro, compresión de contexto con conteo real de tokens vía `/v1/tokenize`, sesión persistente y recuperación de errores apt.
-- Historial readline, navegación con cursores y Ctrl+C que interrumpe el turno actual sin salir del chat.
-- Setup wizard (`setup.py`) con modos local/cloud/híbrido y 7 proveedores (DeepSeek V4 Flash/Pro, OpenAI, Anthropic, Google, Kimi, Ollama Cloud, OpenRouter); sesiones y memoria separadas por modo; `context_limit` por proveedor en `data/config.yaml`.
-- Detección automática de RAM desde `/proc/meminfo` y escalado automático del contexto local: ≤8 GB → 8K, 12–16 GB → 32K, >16 GB → 64K.
-- Asignación automática de threads CPU al 87.5% de los cores (p. ej. 14/16); el menú muestra `N/16 cores` en lugar de porcentaje.
-- `cloud_reasoning` delega razonamiento complejo al cloud con el contexto local completo; `get_context_usage` muestra tokens usados vs. máximo.
-- Compresión por modo: 95% del contexto local (32K por defecto) para local/híbrido, 50% del `context_limit` para cloud.
-- Anti-bucle: si la misma tool + argumentos se repite ≥3 veces, se pregunta al usuario si abortar con timeout de 10 s.
-- Correcciones: Docker `--format` ya no se marca como destructivo; endpoint local/híbrido corregido a `/v1/chat/completions`; API key oculta con `getpass`; se muestra N/16 cores; DeepSeek actualizado a V4 Flash y V4 Pro; añadido Ollama Cloud como proveedor; `.gitignore` actualizado con `gcc*`; disclaimer de responsabilidad en README; RAM mínima local subida de 8 GB a 12 GB.
-- README.md y PDF ejecutivo actualizados.
+- Procedural Skill-Pro memory, context compression with real token counting via `/v1/tokenize`, persistent session and apt error recovery.
+- Readline history, cursor navigation and Ctrl+C that interrupts the current turn without exiting the chat.
+- Setup wizard (`setup.py`) with local/cloud/hybrid modes and 7 providers (DeepSeek V4 Flash/Pro, OpenAI, Anthropic, Google, Kimi, Ollama Cloud, OpenRouter); separate sessions and memory per mode; `context_limit` per provider in `data/config.yaml`.
+- Automatic RAM detection from `/proc/meminfo` and automatic local context scaling: ≤8 GB → 8K, 12–16 GB → 32K, >16 GB → 64K.
+- Automatic CPU thread allocation at 87.5% of cores (e.g. 14/16); menu shows `N/16 cores` instead of percentage.
+- `cloud_reasoning` delegates complex reasoning to cloud with full local context; `get_context_usage` shows used tokens vs. maximum.
+- Compression per mode: 95% of local context (32K default) for local/hybrid, 50% of `context_limit` for cloud.
+- Anti-loop: if the same tool + arguments repeats ≥3 times, the user is asked whether to abort with a 10 s timeout.
+- Fixes: Docker `--format` no longer flagged destructive; local/hybrid endpoint corrected to `/v1/chat/completions`; API key hidden with `getpass`; N/16 cores shown; DeepSeek updated to V4 Flash and V4 Pro; Ollama Cloud added as provider; `.gitignore` updated with `gcc*`; liability disclaimer in README; minimum local RAM raised from 8 GB to 12 GB.
+- README.md and executive PDF updated.
 
-## v2.0 — Agente SRE con function calling nativo sobre Qwen3-8B
+## v0.1 — SRE Agent with native function calling on Qwen3-8B
 
-- Reescritura completa del repositorio.
-- Agente ligero de SRE con function calling nativo vía llama.cpp server.
-- Nuevas herramientas:
-  - `run_command`: ejecuta comandos shell en Linux.
-  - `read_file`: lee archivos de configuración y logs.
-  - `write_file`: escribe archivos, bloqueando rutas de sistema críticas.
-- Soporte conversacional en español con hasta 5 turnos de razonamiento.
-- Seguridad básica: advertencia antes de comandos destructivos y bloqueo de `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
-- CLI interactivo en `chat.py`.
-- README.md y PDF ejecutivo en `docs/ejecutivo.pdf`.
+- Complete repository rewrite.
+- Lightweight SRE agent with native function calling via llama.cpp server.
+- New tools:
+  - `run_command`: executes shell commands on Linux.
+  - `read_file`: reads configuration files and logs.
+  - `write_file`: writes files, blocking critical system paths.
+- Conversational support in Spanish with up to 5 reasoning turns.
+- Basic security: warning before destructive commands and blocking of `/etc`, `/boot`, `/sys`, `/proc`, `/dev`.
+- Interactive CLI in `chat.py`.
+- README.md and executive PDF in `docs/ejecutivo.pdf`.
