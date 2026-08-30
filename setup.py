@@ -314,10 +314,10 @@ SYSTEMD_DIR = Path("/etc/systemd/system")
 
 LOCAL_MODELS = [
     {
-        "name": "Qwen3-8B-Instruct",
-        "file": "Qwen_Qwen3-8B-Q4_K_M.gguf",
-        "size": "4.7 GB",
-        "speed": "17 tok/s",
+        "name": "Qwen3.5-9B-Instruct",
+        "file": "Qwen_Qwen3.5-9B-Q4_K_M.gguf",
+        "size": "6.2 GB",
+        "speed": "16 tok/s",
         "desc": "most reliable",
         "default": True,
     },
@@ -452,12 +452,12 @@ def detect_ram_gb():
 
 
 def _check_local_requirements():
-    """Compare machine resources with the minimum for Qwen3-8B local.
+    """Compare machine resources with the minimum for Qwen3.5-9B local.
     Returns a line with the verdict (could work / better not try it)."""
     try:
         cores = os.cpu_count() or 4
         ram = detect_ram_gb()
-        req_cores, req_ram = 4, 8
+        req_cores, req_ram = 4, 12
         if cores >= req_cores and ram >= req_ram:
             return (f"     This machine could run it ({cores} cores, {ram} GB RAM) "
                     f"- slow, about typing speed.")
@@ -1182,9 +1182,9 @@ def _live_flow(online):
     wg("")
     wg("AIOS live mode.")
     wg("How do you want to use the agent?")
-    wg("  1) LOCAL - the built-in Qwen3-8B model (no internet needed)")
+    wg("  1) LOCAL - the built-in Qwen3.5-9B model (no internet needed)")
     wg("     Requires: CPU at least like an Intel i5-1035G1 (4 cores / 8 threads,")
-    wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 8 GB RAM.")
+    wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 12 GB RAM (16 GB recommended).")
     wg("     Note: runs slow, about human typing speed.")
     wg(_check_local_requirements())
     wg("  2) CLOUD - an external model via API")
@@ -1216,7 +1216,7 @@ def _live_flow(online):
         wg("Cloud setup cancelled. Falling back to LOCAL.")
 
     wg("")
-    wg("LOCAL mode - Qwen3-8B (Q4_K_M)")
+    wg("LOCAL mode - Qwen3.5-9B (Q4_K_M)")
     if _write_local_config(theme, voice):
         _sp.run(["aios-theme", theme], capture_output=True)
         wg("Setup complete. Starting the AIOS agent...")
@@ -1229,9 +1229,9 @@ def _install_flow(online):
     wg("")
     wg("Installing AIOS to the hard disk.")
     wg("How do you want to use the agent on the installed system?")
-    wg("  1) LOCAL - the built-in Qwen3-8B model")
+    wg("  1) LOCAL - the built-in Qwen3.5-9B model")
     wg("     Requires: CPU at least like an Intel i5-1035G1 (4 cores / 8 threads,")
-    wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 8 GB RAM.")
+    wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 12 GB RAM (16 GB recommended).")
     wg("     Note: runs slow, about human typing speed.")
     wg(_check_local_requirements())
     wg("  2) CLOUD - an external model via API")

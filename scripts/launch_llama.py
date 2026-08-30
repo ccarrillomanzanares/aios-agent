@@ -16,7 +16,7 @@ def main():
     if cfg.get("mode") != "local":
         print("[aios-llama] Cloud mode - not starting local model", flush=True)
         sys.exit(0)
-    mn = cfg.get("local", {}).get("model", "Qwen_Qwen3-8B-Q4_K_M.gguf")
+    mn = cfg.get("local", {}).get("model", "Qwen_Qwen3.5-9B-Q4_K_M.gguf")
     mp = MODELS_DIR / mn
     if not mp.exists():
         print(f"[aios-llama] Model not found: {mp}", flush=True)
