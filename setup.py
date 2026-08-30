@@ -41,7 +41,7 @@ def _open_audio():
     try:
         import subprocess as _sp
         _AUDIO = _sp.Popen(
-            ["aplay", "-q", "-f", "S16_LE", "-r", "44100", "-c", "1", "-"],
+            ["aplay", "-q", "--period-size=512", "--buffer-size=1024", "-f", "S16_LE", "-r", "44100", "-c", "1", "-"],
             stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         )
         # Warm-up: force the device open (0.2 s of silence) before first real tic
@@ -1328,6 +1328,7 @@ def main():
     time.sleep(0.4)
     wg("You have just booted Artificial Intelligence Operating System.")
     wg("Press F1 or Super+F1 (Super = the Windows key) to view the keyboard shortcuts")
+    wg("(Chat commands like /sound, /voice, /theme work after setup, once the agent/LLM starts.)")
     wg("")
 
     # Keyboard layout (first boot) — applies TTY + X11 and is persisted
