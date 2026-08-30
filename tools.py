@@ -121,7 +121,7 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
         stdin_parts.append(_SUDO_PASSWORD + "\n")
     if _auto_confirm:
         stdin_parts.append("y\ny\ny\ny\n")
-    stdin_arg = subprocess.PIPE if stdin_parts else subprocess.DEVNULL
+    stdin_arg = None if stdin_parts else subprocess.DEVNULL
     stdin_input = "".join(stdin_parts) if stdin_parts else None
 
     while attempts < max_attempts:
