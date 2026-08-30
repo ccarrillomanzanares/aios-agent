@@ -30,6 +30,21 @@ def has_sudo_password():
     return bool(_SUDO_PASSWORD)
 
 
+_SUDO_NOPASSWD = None  # cached detection (True/False); None = not checked yet
+
+
+def _check_sudo_nopasswd():
+    """Detect NOPASSWD (live) vs password-required (installed) once per session."""
+    global _SUDO_NOPASSWD
+    if _SUDO_NOPASSWD is None:
+        try:
+            r = subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=5)
+            _SUDO_NOPASSWD = (r.returncode == 0)
+        except Exception:
+            _SUDO_NOPASSWD = False
+    return _SUDO_NOPASSWD
+
+
 def _is_blocked_command(command: str) -> bool:
     """Return True if command matches an unconditionally blocked dangerous pattern."""
     lower = command.lower()
@@ -108,16 +123,18 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     # If no password is cached, return a clear error (the agent must ask the
     # user to run /sudo <password>).
     uses_sudo = bool(re.search(r"\bsudo\b", current_command))
-    if uses_sudo and not _SUDO_PASSWORD:
-        return json.dumps({"stdout": "", "stderr": "sudo requires a password — set it first with /sudo <password>",
-                           "exit_code": -1, "elapsed": 0.0}, ensure_ascii=False)
-    if uses_sudo:
+    need_sudo_password = False
+    if uses_sudo and not _check_sudo_nopasswd():
+        need_sudo_password = True
+        if not _SUDO_PASSWORD:
+            return json.dumps({"stdout": "", "stderr": "sudo requires a password — set it first with /sudo <password>",
+                               "exit_code": -1, "elapsed": 0.0}, ensure_ascii=False)
         current_command = re.sub(r"\bsudo\b", "sudo -S", current_command, count=1)
 
     # stdin: sven asks ":: Proceed? [Y/n]" → auto-confirm; sudo -S reads the password.
     _auto_confirm = any(kw in command for kw in ("sven install", "sven upgrade", "sven update"))
     stdin_parts = []
-    if uses_sudo:
+    if need_sudo_password:
         stdin_parts.append(_SUDO_PASSWORD + "\n")
     if _auto_confirm:
         stdin_parts.append("y\ny\ny\ny\n")
