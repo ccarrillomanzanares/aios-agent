@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.17.2 - 2026-08-30 22:49
+
+### fixes
+
+- **audio**: `aplay` now uses a minimal period/buffer (`--period-size=512 --buffer-size=1024`) so the typewriter tic sounds per-character instead of accumulating into a continuous beep.
+- **volume keys**: the i3 volume bindings now use `amixer set Master` (the same ALSA mixer `aplay`/`plughw` uses) instead of `pactl` (PipeWire), so the keys actually change the volume.
+- **setup note**: keyboard shortcuts indicate that chat commands (`/sound`, `/voice`, `/theme`) work after setup (once the agent/LLM starts).
+- **Ollama Hardened provider**: endpoint moved to `:443` (valid cert via Cloudflare) and TLS verification enabled by default (`VERIFY_TLS` no longer tied to `x-api-key`); model switched from Moonlight (no function calling) to `qwen3.5:9b`.
+- **context/tokens**: cloud `max_tokens` now scales with the context (`_cloud_context // 4`) instead of a fixed 4096, and the Ollama Hardened `context_limit` raised 8K → 32K — fixes empty responses from reasoning models exhausting the token budget.
+- **status bar**: `CTX` block now resolves the Ollama Hardened context limit (32K) instead of the 128K default.
+
+
 ## v0.17.1 - 2026-08-30 14:10
 
 ### fixes
