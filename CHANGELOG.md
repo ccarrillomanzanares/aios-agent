@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.17.1 - 2026-08-30 14:10
+
+### fixes
+
+- **audio**: `aios-audio.service` was never enabled (missing `multi-user.target.wants` symlink), so `audio-detect.py` didn't run at boot and `asound.conf` kept the hardcoded `plughw:1,0`. Now enabled — the analog card is auto-detected (e.g. `plughw:0,0` on HDA Intel PCH).
+- **sven**: `run_command` passed both `stdin` and `input` to `subprocess.run`, so `sven update`/`upgrade`/`install` failed with "stdin and input arguments may not both be used". Fixed — `input` implies PIPE.
+- **sudo**: the agent now detects NOPASSWD (`sudo -n true`). In live (NOPASSWD) `sudo` runs directly without a password; in the installed system (password) it asks for `/sudo <password>` (in-memory only, never persisted to disk).
+
 ## v0.17 - 2026-08-30 01:48
 
 ### new features
