@@ -878,7 +878,7 @@ PROVIDERS = [
     {
         "name": "Ollama Hardened",
         "models": [
-            ("hf.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF:Q3_K_M", "Moonlight-16B-A3B Q3_K_M - 16B MoE (3B active)"),
+            ("qwen3.5:9b", "Qwen3.5 9B - reasoning + tool calling (6.6GB)"),
         ],
         "env": "OLLAMA_HARDENED_API_KEY",
         "context_limit": 8192,
