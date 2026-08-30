@@ -109,8 +109,9 @@ if API_KEY:
     CLOUD_HEADERS = {"X-API-Key": API_KEY} if AUTH_TYPE == "x-api-key" else {"Authorization": f"Bearer {API_KEY}"}
 else:
     CLOUD_HEADERS = {}
-# Ollama-hardened uses self-signed cert → disable TLS verification only in that case.
-VERIFY_TLS = AUTH_TYPE != "x-api-key"
+# TLS verification: enabled by default (Cloudflare serves a valid cert on :443).
+# Set AIOS_CLOUD_VERIFY=0 only for self-signed endpoints.
+VERIFY_TLS = os.environ.get("AIOS_CLOUD_VERIFY", "1") in ("1", "true", "yes", "on")
 # Thinking mode local (binary). Qwen3 thinks by default; /no_think turns it off.
 # OFF (default) -> fast; ON -> model reasons before answering (more accurate, slower).
 THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true", "yes", "on")

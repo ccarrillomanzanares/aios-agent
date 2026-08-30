@@ -882,7 +882,7 @@ PROVIDERS = [
         ],
         "env": "OLLAMA_HARDENED_API_KEY",
         "context_limit": 8192,
-        "base_url": "https://webuillama.ccmai.org:8443/v1/chat/completions",
+        "base_url": "https://webuillama.ccmai.org/v1/chat/completions",
         "auth_type": "x-api-key",
     },
     {
