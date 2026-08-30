@@ -155,7 +155,7 @@ _LOCAL_CONTEXT = _auto_context(_ram_gb())
 # hundreds of tokens thinking; 512 ran out → "empty response" with finish=length);
 # local = 1/8 of RAM-derived context (leaves 7/8 for system+tools+history)
 if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
-    MAX_TOKENS = 4096
+    MAX_TOKENS = max(4096, _cloud_context // 4)
 else:
     MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
     if THINK_LOCAL:

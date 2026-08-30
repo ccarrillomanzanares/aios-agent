@@ -881,7 +881,7 @@ PROVIDERS = [
             ("qwen3.5:9b", "Qwen3.5 9B - reasoning + tool calling (6.6GB)"),
         ],
         "env": "OLLAMA_HARDENED_API_KEY",
-        "context_limit": 8192,
+        "context_limit": 32768,
         "base_url": "https://webuillama.ccmai.org/v1/chat/completions",
         "auth_type": "x-api-key",
     },
