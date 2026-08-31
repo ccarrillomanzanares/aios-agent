@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.18 - 2026-08-31 19:48
+
+### new features
+
+- **local LLM — Qwen3.5-9B**: the bundled local model is now **Qwen3.5-9B** (Q4_K_M), replacing Qwen3-8B — better reasoning and tool calling. `llama-server` upgraded to **b10655** (CPU-dispatched: runs on any x86-64, from SSE4.2 to AVX-512).
+
+### fixes
+
+- **cloud empty responses**: the Ollama Hardened server now serves `qwen3.5:9b` with a **32K context window** (`OLLAMA_CONTEXT_LENGTH=32768`) instead of the 4K default — fixes empty responses where reasoning + tool-calling exhausted the context.
+- **agent empty-response diagnostics**: on an empty response the agent now reports the cause (`finish_reason`, reasoning characters emitted) instead of the generic "(empty model response)".
+
 ## v0.17.2 - 2026-08-30 22:49
 
 ### fixes
