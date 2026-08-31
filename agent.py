@@ -112,7 +112,7 @@ else:
 # TLS verification: enabled by default (Cloudflare serves a valid cert on :443).
 # Set AIOS_CLOUD_VERIFY=0 only for self-signed endpoints.
 VERIFY_TLS = os.environ.get("AIOS_CLOUD_VERIFY", "1") in ("1", "true", "yes", "on")
-# Thinking mode local (binary). Qwen3 thinks by default; /no_think turns it off.
+# Thinking mode local (binary). Qwen3.5 thinks by default; enable_thinking controls it.
 # OFF (default) -> fast; ON -> model reasons before answering (more accurate, slower).
 THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true", "yes", "on")
 
@@ -186,7 +186,7 @@ def _estimate_tokens(text: str) -> int:
 def _rules_common():
     # Only say "do not think" when thinking is off. When it is on, let Qwen3 reason
     # (more accurate); the thinking block is cleaned in _clean().
-    _no_think = "" if THINK_LOCAL else "Do not use <think> tags.\n"
+    _no_think = ""  # thinking is controlled via chat_template_kwargs (enable_thinking), not <think> tags
     return (
         "Always respond in the same language the user writes in.\n"
         "Be concise.\n"
@@ -256,6 +256,20 @@ def _sampling_params():
     return {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0}
 
 
+def _empty_reason(finish: str, reasoning_chunks: list) -> str:
+    """Human-readable cause of a content-less response (diagnostic)."""
+    r = len("".join(reasoning_chunks)) if reasoning_chunks else 0
+    if finish == "length":
+        s = "finish_reason=length: token/context budget exhausted"
+        if r:
+            s += f" ({r} reasoning chars emitted first)"
+        s += " — raise num_ctx/max_tokens"
+        return s
+    if finish:
+        return f"finish_reason={finish} with no content"
+    return "no finish_reason (stream cut?)"
+
+
 from tools import TOOLS, execute_tool
 from memory import ProceduralMemory
 
@@ -273,8 +287,9 @@ class Agent:
         """Fast LLM without tools, for key generation and compression."""
         resp = requests.post(
             LLAMA_SERVER,
-            json={"messages": [{"role": "user", "content": f"/no_think {prompt}"}],
-                  "max_tokens": tokens, "temperature": temp},
+            json={"messages": [{"role": "user", "content": prompt}],
+                  "max_tokens": tokens, "temperature": temp,
+                  "chat_template_kwargs": {"enable_thinking": False}},
             headers=CLOUD_HEADERS,
             timeout=15,
             verify=VERIFY_TLS,
@@ -407,8 +422,7 @@ class Agent:
             if cached:
                 return f"[cache] {cached}"
 
-        content = query if THINK_LOCAL else f"/no_think {query}"
-        self.messages.append({"role": "user", "content": content})
+        self.messages.append({"role": "user", "content": query})
 
         final_response = ""
         empty_retries = 0
@@ -423,6 +437,8 @@ class Agent:
                 "stream": True,
                 **_sampling_params(),
             }
+            if AIOS_MODE == "local":
+                payload["chat_template_kwargs"] = {"enable_thinking": THINK_LOCAL}
             if AIOS_MODE in ("cloud", "hybrid") and CLOUD_MODEL:
                 payload["model"] = CLOUD_MODEL
 
@@ -534,7 +550,7 @@ class Agent:
             # reasoning_content). With max_tokens already increased this is rare.
             if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1:
                 empty_retries += 1
-                print("\n  Empty stream (possible cut or exhausted reasoning). Retrying...")
+                print(f"\n  Empty stream ({_empty_reason(finish, reasoning_chunks)}). Retrying...")
                 continue
 
             # Tool call → execute and return result to LLM
@@ -615,7 +631,7 @@ class Agent:
                 self._save_session()
                 break
             else:
-                final_response = "(empty model response)"
+                final_response = f"(empty model response — {_empty_reason(finish, reasoning_chunks)})"
                 break
 
         return final_response or "(no response)"
