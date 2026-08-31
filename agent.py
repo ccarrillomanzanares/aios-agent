@@ -255,6 +255,20 @@ def _sampling_params():
     return {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0}
 
 
+def _empty_reason(finish: str, reasoning_chunks: list) -> str:
+    """Human-readable cause of a content-less response (diagnostic)."""
+    r = len("".join(reasoning_chunks)) if reasoning_chunks else 0
+    if finish == "length":
+        s = "finish_reason=length: token/context budget exhausted"
+        if r:
+            s += f" ({r} reasoning chars emitted first)"
+        s += " — raise num_ctx/max_tokens"
+        return s
+    if finish:
+        return f"finish_reason={finish} with no content"
+    return "no finish_reason (stream cut?)"
+
+
 from tools import TOOLS, execute_tool
 from memory import ProceduralMemory
 
@@ -535,7 +549,7 @@ class Agent:
             # reasoning_content). With max_tokens already increased this is rare.
             if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1:
                 empty_retries += 1
-                print("\n  Empty stream (possible cut or exhausted reasoning). Retrying...")
+                print(f"\n  Empty stream ({_empty_reason(finish, reasoning_chunks)}). Retrying...")
                 continue
 
             # Tool call → execute and return result to LLM
@@ -616,7 +630,7 @@ class Agent:
                 self._save_session()
                 break
             else:
-                final_response = "(empty model response)"
+                final_response = f"(empty model response — {_empty_reason(finish, reasoning_chunks)})"
                 break
 
         return final_response or "(no response)"
