@@ -195,6 +195,7 @@ def _rules_common():
         "If you run a command, show its output to the user.\n"
         "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
         "If a command fails with Permission denied or Operation not permitted, retry it with sudo. sudo needs a password: if a sudo command returns 'sudo requires a password', tell the user to run /sudo <password> first, then retry.\n"
+        "If a systemd service fails to start with 'A dependency job for ... failed', do NOT run the same `systemctl start` again. Inspect the failing dependency first with `systemctl status <dependency>` and `journalctl -u <dependency> --no-pager`. If the failure is due to the live session (e.g. Docker socket cannot bind in overlay), tell the user and stop.\n"
         "If you don't know something, say so honestly: 'I don't know'.\n"
         + _no_think
         + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
@@ -630,6 +631,23 @@ class Agent:
                             _last_errors = getattr(self, '_last_run_errors', {})
                             _last_errors[_cmd] = {"exit_code": r.get('exit_code'), "stderr": r.get('stderr', '')}
                             self._last_run_errors = _last_errors
+
+                        # If the command failed due to a systemd dependency, augment the result
+                        # with an explicit diagnostic instruction so the model does not loop.
+                        _combined = (out + "\n" + err).lower()
+                        if "a dependency job for" in _combined and "failed" in _combined:
+                            import re as _re
+                            _m = _re.search(r"a dependency job for ([^\.]+) failed", _combined)
+                            _dep = (_m.group(1).strip() if _m else "the dependency")
+                            _extra = (
+                                f"\n\n[DIAGNOSTIC HINT] systemd reports that {_dep} failed. "
+                                f"Do NOT run the same `systemctl start` command again. "
+                                f"First run `sudo systemctl status {_dep}` and `sudo journalctl -u {_dep} --no-pager` to identify the cause. "
+                                f"If the failure is because this is a live session (overlay/squashfs), explain that to the user and stop trying to start the service."
+                            )
+                            r['stdout'] = (r.get('stdout', '') or '') + _extra
+                            result = json.dumps(r, ensure_ascii=False)
+                            _out("     [systemd dependency detected — stop repeating start]\n")
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", "call_0"),
