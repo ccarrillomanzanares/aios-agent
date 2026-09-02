@@ -749,7 +749,9 @@ def setup_wifi():
         _ensure_dns()  # udhcpc does not write resolv.conf: without DNS the network looks dead
         if SYSTEMD_DIR.exists():
             _run_sudo(["systemctl", "enable", f"wpa_supplicant@{iface}"])
-            _run_sudo(["systemctl", "start", f"wpa_supplicant@{iface}"])
+            # Persist DHCP for wifi via .network file, but do NOT restart networkd
+            # or start a second wpa_supplicant while the manually-launched one is
+            # already running — that drops the connection we just verified.
             net_path = Path("/etc/systemd/network/20-wifi-dhcp.network")
             if not net_path.exists():
                 net_cfg = (
@@ -764,7 +766,8 @@ def setup_wifi():
                     "UseDNS=no\n"
                 )
                 _run_sudo(["tee", str(net_path)], input=net_cfg)
-                _run_sudo(["systemctl", "restart", "systemd-networkd"])
+                # reload only, restart is done on next boot
+                _run_sudo(["systemctl", "reload", "systemd-networkd"])
 
         clear()
         print_box("WIFI SETUP", ["", f"  WiFi connected to {ssid}", f"  IP: {ip or 'unknown'}", ""])

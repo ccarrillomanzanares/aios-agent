@@ -50,6 +50,8 @@ def _is_blocked_command(command: str) -> bool:
     lower = command.lower()
     if re.search(r'\brm\s+-rf\s+/\s*$', lower) or re.search(r'\brm\s+-rf\s+/*\b', lower):
         return True
+    if re.search(r'\brm\s+-rf\s+/var/lib/docker(/|\s|$|\*)', lower):
+        return True
     if re.search(r'\bdd\s+if=\S+\s+of=/dev/\S+', lower):
         return True
     if re.search(r'\bmkfs\.\w+\s+\S+', lower):
@@ -57,6 +59,16 @@ def _is_blocked_command(command: str) -> bool:
     if re.search(r'\bfdisk\b', lower):
         return True
     if re.search(r'\bchmod\b.*(?:-r\s+)?000\b', lower):
+        return True
+    # Expose Docker API without TLS is effectively root-for-everyone on the network
+    if re.search(r'\bdockerd\b.*--host\s*=\s*tcp://0\.0\.0\.0', lower):
+        return True
+    if re.search(r'\bdockerd\b.*--host\s+tcp://0\.0\.0\.0', lower):
+        return True
+    # Kill all / any broad signal to system daemons is too risky to auto-run
+    if re.search(r'\bkillall\s+(?:dockerd|containerd|systemd|init|Xorg|wpa_supplicant)', lower):
+        return True
+    if re.search(r'\bpkill\s+-9\s+(-f\s+)?(dockerd|containerd|systemd|init|Xorg|wpa_supplicant)', lower):
         return True
     return False
 
@@ -73,6 +85,11 @@ def _is_destructive_command(command: str) -> bool:
     if re.search(r'\bFORMAT_BLOCKED\b', lower):
         return True
     if re.search(r'\bdd\s+if=\S+', lower):
+        return True
+    # Docker daemon exposed to network (even localhost-only tcp or explicit tls=false needs review)
+    if re.search(r'\bdockerd\b.*--host\s*=\s*tcp://', lower):
+        return True
+    if re.search(r'\bdockerd\b.*--host\s+tcp://', lower):
         return True
     return False
 

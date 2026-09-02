@@ -570,31 +570,48 @@ class Agent:
                     except json.JSONDecodeError:
                         args = {}
 
-                    # Anti-loop: detect repeated tool calls (same tool + same base command)
-                    _last_call = getattr(self, '_last_tool', None)
-                    _repeat_count = getattr(self, '_tool_repeat_count', 0)
-                    _base = args.get('command', '')
-                    if isinstance(_base, str) and _base.strip():
-                        _base = _base.strip().split()[0]   # base command (e.g. 'ls')
-                    _same = bool(_last_call and _last_call['name'] == name and _last_call['base'] == _base)
-                    if _same:
-                        self._tool_repeat_count = _repeat_count + 1
-                    else:
-                        self._tool_repeat_count = 0
-                    self._last_tool = {'name': name, 'base': _base}
+                    # --- Anti-loop detection (same tool + same arguments repeated) ---
+                    _call_sig = (name, json.dumps(args, sort_keys=True, ensure_ascii=False))
+                    _recent = getattr(self, '_tool_history', [])
+                    _recent.append(_call_sig)
+                    if len(_recent) > 10:
+                        _recent = _recent[-10:]
+                    self._tool_history = _recent
 
-                    if self._tool_repeat_count >= 4:
-                        print(f"  Same tool call {name} repeated {self._tool_repeat_count + 1} times")
-                        print("  Abort the task? (y/N): ", end="", flush=True)
-                        try:
-                            import sys
-                            import select
-                            # 10s timeout
-                            r, _, _ = select.select([sys.stdin], [], [], 10)
-                            if r and sys.stdin.readline().strip().lower() == 'y':
-                                return "Task aborted by the user after detecting a loop."
-                        except:
-                            pass
+                    # Count exact repeats in recent history
+                    _repeat_count = sum(1 for c in _recent if c == _call_sig)
+                    if _repeat_count >= 3:
+                        _out(f"  ⚠ Loop detected: {name} with same arguments has been executed {_repeat_count} times.\n")
+                        _out("  I will stop executing and ask the LLM to diagnose instead of repeating.\n")
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", "call_0"),
+                            "content": json.dumps({
+                                "error": "Loop detected",
+                                "detail": f"{name}({_tool_history[-1][1]}) has been executed {_repeat_count} times with the same arguments. Stop repeating and explain the root cause."
+                            }, ensure_ascii=False)
+                        })
+                        break
+
+                    # --- Previous-attempt error pattern detection for run_command ---
+                    if name == "run_command":
+                        _cmd = args.get('command', '')
+                        _last_errors = getattr(self, '_last_run_errors', {})
+                        _prev = _last_errors.get(_cmd)
+                        if _prev and _prev.get("exit_code") != 0:
+                            # Already tried this exact command and it failed; ask model to analyse instead of retrying
+                            _out(f"  ⚠ Command already failed before: {_cmd[:60]}...\n")
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id", "call_0"),
+                                "content": json.dumps({
+                                    "error": "Command previously failed with the same command string",
+                                    "previous_exit_code": _prev.get("exit_code"),
+                                    "previous_stderr": _prev.get("stderr", "")[:500],
+                                    "instruction": "Do not run the same failing command again. Diagnose the previous error first (e.g. systemctl status, journalctl -u, ls -l)."
+                                }, ensure_ascii=False)
+                            })
+                            break
 
                     # Show the tool BEFORE executing (so a long command does not
                     # look like it "does nothing" — the ⚙ is visible immediately).
@@ -608,6 +625,11 @@ class Agent:
                             _out("     " + out.replace("\n", "\n     ") + "\n")
                         if err:
                             _out("     [stderr] " + err.replace("\n", "\n     ") + "\n")
+                        # Store failed command to avoid blind retries
+                        if r.get('exit_code') != 0:
+                            _last_errors = getattr(self, '_last_run_errors', {})
+                            _last_errors[_cmd] = {"exit_code": r.get('exit_code'), "stderr": r.get('stderr', '')}
+                            self._last_run_errors = _last_errors
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", "call_0"),
