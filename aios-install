@@ -84,6 +84,49 @@ def _fix_erase():
     except Exception:
         pass
 
+def _read_password(prompt, min_len=8):
+    """Read a password with echo masked as '*', safe after raw-mode menus.
+    This avoids getpass(), which is sensitive to a dirty tty state left by
+    _read_line() / tty.setraw() and produced the 'password does not work' bug
+    after disk installation (Sep 2026)."""
+    import termios, tty
+    while True:
+        if prompt:
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        buf = []
+        try:
+            # raw mode so we can control every keystroke, including backspace
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch in (chr(13), "\n"):        # Enter
+                    break
+                if ch in ("\x7f", "\x08"):   # Backspace / DEL
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                    continue
+                if ch == "\x03":             # Ctrl+C
+                    raise KeyboardInterrupt
+                if ch == "\x04":             # Ctrl+D
+                    break
+                if ch.isprintable():
+                    buf.append(ch)
+                    sys.stdout.write("*")
+                    sys.stdout.flush()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        password = "".join(buf)
+        if len(password) < min_len:
+            print(f"  Too short (min {min_len} characters).")
+            continue
+        return password
 def confirm(question):
     return ask(f"{question} (y/N)", "n").lower() in ("y", "yes")
 
@@ -486,17 +529,13 @@ def persist_ntp(target):
 
 def set_passwords(target):
     """REQUIRED: change root/aios passwords in the installed system."""
-    import getpass
     print("\n  SECURITY: the live system uses factory passwords (root/root, aios/aios).")
     print("  The installed system MUST have its own passwords set.")
 
     def read_new_password(user):
         while True:
-            p1 = getpass.getpass(f"  New password for {user}: ")
-            if len(p1) < 8:
-                print("  Too short (min 8 characters).")
-                continue
-            p2 = getpass.getpass(f"  Repeat for {user}: ")
+            p1 = _read_password(f"  New password for {user}: ")
+            p2 = _read_password(f"  Repeat for {user}: ")
             if p1 != p2:
                 print("  Passwords do not match.")
                 continue
