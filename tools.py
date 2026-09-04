@@ -16,7 +16,7 @@ from process import process_start, process_send, process_close, process_list
 
 
 # sudo password cache (session only): run_command passes it to sudo -S.
-# The user sets it with /sudo <password> in chat; never persisted to disk.
+# The user is prompted inline (masked) by run_command when it's needed; never persisted to disk.
 _SUDO_PASSWORD = None
 
 
@@ -28,6 +28,54 @@ def set_sudo_password(pw):
 
 def has_sudo_password():
     return bool(_SUDO_PASSWORD)
+
+
+def _prompt_sudo_password():
+    """Prompt the user for the sudo password inline (echo masked as '*').
+    Returns the password (or '' if aborted). Called by run_command when a sudo
+    command needs a password and none is cached — keeps the action chain intact
+    (the command runs right after, in the same turn) instead of bouncing back
+    with a '/sudo <password>' instruction that broke the agent loop."""
+    import termios
+    import tty
+    try:
+        sys.stdout.write("  Sudo password: ")
+        sys.stdout.flush()
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        buf = []
+        try:
+            tty.setraw(fd)
+            while True:
+                ch = sys.stdin.read(1)
+                if ch in (chr(13), "\n"):        # Enter
+                    break
+                if ch in ("\x7f", "\x08"):    # Backspace / DEL
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                    continue
+                if ch == "\x03":              # Ctrl+C
+                    raise KeyboardInterrupt
+                if ch == "\x04":              # Ctrl+D
+                    break
+                if ch.isprintable():
+                    buf.append(ch)
+                    sys.stdout.write("*")
+                    sys.stdout.flush()
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        return "".join(buf)
+    except Exception:
+        # Fallback: canonical getpass (e.g. stdin is not a TTY).
+        import getpass
+        try:
+            return getpass.getpass("  Sudo password: ")
+        except Exception:
+            return input("  Sudo password: ").strip()
 
 
 _SUDO_NOPASSWD = None  # cached detection (True/False); None = not checked yet
@@ -137,15 +185,18 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     current_command = command
 
     # sudo: on disk it asks for a password. Pass it to "sudo -S" through stdin.
-    # If no password is cached, return a clear error (the agent must ask the
-    # user to run /sudo <password>).
+    # If no password is cached, prompt the user inline (masked) so the command
+    # can run immediately in this same turn — no '/sudo' bounce that broke the loop.
     uses_sudo = bool(re.search(r"\bsudo\b", current_command))
     need_sudo_password = False
     if uses_sudo and not _check_sudo_nopasswd():
         need_sudo_password = True
         if not _SUDO_PASSWORD:
-            return json.dumps({"stdout": "", "stderr": "sudo requires a password — set it first with /sudo <password>",
-                               "exit_code": -1, "elapsed": 0.0}, ensure_ascii=False)
+            _pw = _prompt_sudo_password()
+            if not _pw:
+                return json.dumps({"stdout": "", "stderr": "sudo requires a password — none provided (cancelled)",
+                                   "exit_code": -1, "elapsed": 0.0}, ensure_ascii=False)
+            set_sudo_password(_pw)
         current_command = re.sub(r"\bsudo\b", "sudo -S", current_command, count=1)
 
     # stdin: sven asks ":: Proceed? [Y/n]" → auto-confirm; sudo -S reads the password.

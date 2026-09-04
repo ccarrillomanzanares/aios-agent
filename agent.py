@@ -194,7 +194,7 @@ def _rules_common():
         "For 'what programs/apps are installed' or 'is X installed', use the list_desktop_apps tool (never answer from memory).\n"
         "If you run a command, show its output to the user.\n"
         "Before destructive commands (rm -rf, dd, mkfs, fdisk), warn and ask for confirmation.\n"
-        "If a command fails with Permission denied or Operation not permitted, retry it with sudo. sudo needs a password: if a sudo command returns 'sudo requires a password', tell the user to run /sudo <password> first, then retry.\n"
+        "If a command fails with Permission denied or Operation not permitted, retry it with sudo. When you run a command with sudo, the system will automatically ask the user for the sudo password (masked) if it is needed — do NOT ask the user to run /sudo or to type a password; just emit the sudo command and it will be handled.\n"
         "If a systemd service fails to start with 'A dependency job for ... failed', do NOT run the same `systemctl start` again. Inspect the failing dependency first with `systemctl status <dependency>` and `journalctl -u <dependency> --no-pager`. If the failure is due to the live session (e.g. Docker socket cannot bind in overlay), tell the user and stop.\n"
         "If you don't know something, say so honestly: 'I don't know'.\n"
         + _no_think

@@ -553,22 +553,11 @@ def main():
                 continue
 
         if query.lower().startswith("/sudo"):
-            pw = query[5:].strip()
-            if not pw:
-                try:
-                    import getpass
-                    pw = getpass.getpass("  Sudo password: ").strip()
-                except Exception:
-                    pw = input("  Sudo password: ").strip()
-            if pw:
-                try:
-                    import tools
-                    tools.set_sudo_password(pw)
-                    print("  Sudo password set (session only, not persisted).")
-                except Exception as e:
-                    print(f"  Error: {e}")
-            else:
-                print("  No password provided.")
+            # /sudo is deprecated: run_command now prompts for the sudo password
+            # inline (masked) when needed. Keep a no-op so old muscle memory does
+            # not crash, and point the user to the new behaviour.
+            print("  /sudo is no longer needed — the agent asks for the sudo password")
+            print("  automatically (masked) whenever a command needs it.")
             continue
 
         if query.lower() == "/think":
