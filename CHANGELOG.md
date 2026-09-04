@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.18.1 - 2026-09-04 17:58
+
+### fixes
+
+- **installer password bug (critical)**: `aios-install` used `getpass.getpass()` for the root/aios passwords, but the terminal is left in a dirty (raw) state by the earlier `_read_line()` menus — `getpass` then reads the password corruptly, so the passwords set during installation do not work at first login. Replaced with a self-contained `_read_password()` that masks input with `*` and controls the tty directly.
+- **installer chroot ordering bug (critical)**: `cleanup_chroot()` (which unmounts `/proc`, `/sys`, `/dev`, `/run` from the target) ran **before** `set_passwords()`, `harden_login()`, `harden_ssh()` and `add_user_groups()`. Those functions `chroot` into the target and run `chpasswd` / `systemctl enable` — with `/proc` unmounted they fail silently, so `sshd` was never enabled and password/PAM setup could be incomplete. Reordered so `cleanup_chroot()` runs last, just before the final `umount`.
+- **`aios-install` line endings**: forced LF in `.gitattributes` (it is a Linux script; CRLF broke the shebang and the Python string literals during editing).
+
 ## v0.18 - 2026-08-31 19:48
 
 ### new features
