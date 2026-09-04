@@ -1273,7 +1273,7 @@ def _install_flow(online):
         think = think_opt in ("y", "yes")
 
     wg("")
-    ntp_opt = wg_input("Set the correct time automatically using an internet time server? (y/N): ").strip().lower()
+    ntp_opt = wg_input("Set the correct time automatically and choose your timezone? (y/N): ").strip().lower()
     if ntp_opt == "y":
         setup_ntp(standalone=False)
     wg("")
@@ -1297,10 +1297,11 @@ def _install_flow(online):
 
 
 def setup_ntp(standalone=True):
-    """Configure automatic time via external NTP server (systemd-timesyncd).
-    standalone=False: called from the install flow (no final Enter prompt)."""
+    """Configure automatic time via external NTP server (systemd-timesyncd) and
+    the local timezone. standalone=False: called from the install flow (no final
+    Enter prompt)."""
     print_box = _legacy_box  # keep original visual, it works (fix 25 Aug: NameError)
-    print_box("NTP SETUP", ["", "  Automatic time sync via external NTP server.", ""])
+    print_box("DATE & TIME SETUP", ["", "  Automatic time sync (NTP) + local timezone.", ""])
     server = input("  NTP server [pool.ntp.org]: ").strip() or "pool.ntp.org"
     _run(["sudo", "tee", "/etc/systemd/timesyncd.conf"],
          input=f"[Time]\nNTP={server}\n")
@@ -1313,8 +1314,160 @@ def setup_ntp(standalone=True):
         for line in r.stdout.splitlines()[:6]:
             wg(line.strip())
     wg("")
+    # Timezone (so the clock shows local time, not UTC) — universal selector.
+    _select_timezone()
+    wg("")
     if standalone:
         input("  Press Enter to return to the menu...")
+
+
+def _zone_entries(prefix=""):
+    """Real timezone entries under /usr/share/zoneinfo/<prefix>.
+    Skips posix/right (duplicate leap-second trees) and technical files.
+    At the ROOT level, only subdirectories (continents/regions) are listed —
+    the root-level alias files (UTC, GMT, posixrules, localtime...) are reachable
+    by typing them directly, not as picker entries."""
+    base = Path("/usr/share/zoneinfo") / prefix
+    out = []
+    if not base.is_dir():
+        return out
+    for p in sorted(base.iterdir()):
+        name = p.name
+        if name in ("posix", "right"):
+            continue
+        if name.endswith((".tab", ".zi", ".list")):
+            continue
+        if name in ("Factory", "SECURITY", "leapseconds"):
+            continue
+        if not prefix and name in ("UTC", "GMT", "localtime", "posixrules"):
+            continue
+        out.append(name)
+    return out
+
+
+def _select_timezone():
+    """Interactively select the timezone (hierarchical continents -> regions ->
+    cities), or type it directly. Applies /etc/localtime. Universal: works for
+    any user in the world (reads tzdata, no hardcoded zone)."""
+    ZONEINFO = Path("/usr/share/zoneinfo")
+
+    def _valid_zone(name):
+        # a real zone is a regular file (or symlink to one) under zoneinfo
+        p = ZONEINFO / name
+        return p.exists() and (p.is_file() or p.is_symlink())
+
+    def _apply(name):
+        # symlink /etc/localtime -> /usr/share/zoneinfo/<name>
+        target = f"/usr/share/zoneinfo/{name}"
+        r = _run(["sudo", "ln", "-sf", target, "/etc/localtime"])
+        if r.returncode == 0:
+            wg(f"  Timezone set to {name}.")
+            # show resulting local time
+            try:
+                import datetime
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                wg(f"  Local time now: {now}")
+            except Exception:
+                pass
+        else:
+            wg("  Could not set the timezone (permission error?).")
+
+    while True:
+        wg("")
+        wg("  Select your timezone so the clock shows local time.")
+        wg("  (Type a zone directly, e.g. Europe/Madrid or America/New_York,")
+        wg("   or press Enter to pick from a list.)")
+        typed = wg_input("  Timezone: ").strip()
+        if typed:
+            if _valid_zone(typed):
+                _apply(typed)
+                return
+            # suggestion: entries starting with the typed prefix
+            sugg = [z for z in _all_zones() if z.startswith(typed)]
+            if sugg:
+                wg("  That zone does not exist. Did you mean:")
+                for s in sugg[:8]:
+                    wg(f"    {s}")
+            else:
+                wg("  That zone does not exist. Try again or pick from the list.")
+            continue
+        # hierarchical picker
+        zone = _pick_zone_menu()
+        if zone:
+            _apply(zone)
+            return
+
+
+def _all_zones():
+    """All valid zone names (for suggestions), skipping posix/right/technical."""
+    out = []
+    for root, dirs, files in os.walk("/usr/share/zoneinfo"):
+        dirs[:] = [d for d in dirs if d not in ("posix", "right")]
+        for f in files:
+            if f.endswith((".tab", ".zi", ".list")):
+                continue
+            if f in ("Factory", "SECURITY", "leapseconds"):
+                continue
+            rel = os.path.relpath(os.path.join(root, f), "/usr/share/zoneinfo")
+            out.append(rel.replace(os.sep, "/"))
+    return sorted(out)
+
+
+def _pick_zone_menu():
+    """Hierarchical zone picker: continent -> region -> city. Returns full name
+    or None if cancelled. Lists both files and subdirs, paginated."""
+    ZONEINFO = Path("/usr/share/zoneinfo")
+    path_parts = []
+
+    while True:
+        base = ZONEINFO.joinpath(*path_parts)
+        entries = _zone_entries("/".join(path_parts)) if path_parts else _zone_entries("")
+        if not entries:
+            wg("  No entries here. Going back.")
+            if path_parts:
+                path_parts.pop()
+                continue
+            return None
+
+        # partition: subdirs first (navigable), then files (final zones)
+        dirs = [e for e in entries if (base / e).is_dir()]
+        files = [e for e in entries if (base / e).is_file() or (base / e).is_symlink()]
+        listing = dirs + files
+
+        wg("")
+        if path_parts:
+            wg(f"  Timezone: /{'/'.join(path_parts)}/")
+        for i, e in enumerate(listing, 1):
+            is_dir = (base / e).is_dir()
+            wg(f"  {i}) {e}{'/' if is_dir else ''}")
+        wg("  0) Go back")
+        wg("  b) Type it manually")
+        wg("")
+
+        raw = wg_input("> ").strip()
+        if raw == "0":
+            if path_parts:
+                path_parts.pop()
+                continue
+            return None
+        if raw.lower() == "b":
+            return None  # signal to caller to ask typed input
+        try:
+            opt = int(raw)
+        except ValueError:
+            wg("  Invalid choice.")
+            continue
+        if not (1 <= opt <= len(listing)):
+            wg("  Invalid choice.")
+            continue
+        chosen = listing[opt - 1]
+        full = "/".join(path_parts + [chosen])
+        p = ZONEINFO / full
+        if p.is_dir():
+            path_parts.append(chosen)
+            continue
+        # it's a file/symlink -> final zone
+        return full
 
 
 def main():
@@ -1345,6 +1498,7 @@ def main():
         wg("")
         wg("  1) Test AIOS in live mode, without installing")
         wg("  2) Install AIOS to the hard disk")
+        wg("  3) Set date & time (NTP + timezone)")
         wg("  0) Exit to shell")
         wg("")
         wg("Note: AIOS has only been tested on machines without multi-boot setups.")
@@ -1354,8 +1508,12 @@ def main():
         choice = wg_input("> ")
         if choice == "0":
             break
+        elif choice == "3":
+            wg("")
+            setup_ntp(standalone=True)
+            continue
         elif choice not in ("1", "2"):
-            wg("Invalid option. Please choose 0, 1 or 2.")
+            wg("Invalid option. Please choose 0, 1, 2 or 3.")
             continue
 
         # Internet check
