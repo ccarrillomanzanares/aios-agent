@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.18.2 - 2026-09-04 23:21
+
+### fixes
+
+- **docker group not created on install (systemd ALPM hooks missing)**: `sven install docker` installed the binaries but `docker.socket` failed with `status=216/GROUP` "Unknown group 'docker'". The docker package ships `usr/lib/sysusers.d/docker.conf` (`g docker - -`), processed by `systemd-sysusers` via the `20-systemd-sysusers.hook` — but those hooks ship with Arch's `systemd` package, absent here because AIOS builds systemd from LFS base. Added the systemd hooks (`20-systemd-sysusers`, `21-systemd-tmpfiles`, `25-systemd-hwdb`, `25-systemd-sysctl`, `30-systemd-daemon-reload-system` + `scripts/systemd-hook`) to the tree. Verified end-to-end: uninstall → delete group → reinstall → hook fires automatically and creates the group.
+- **docker socket not connecting (LFS symlinks missing)**: `/var/run` and `/var/lock` were real empty directories (owner ccmai, dated Jun 21) instead of the LFS symlinks `/var/run → /run` and `/var/lock → /run/lock` (LFS book §7.5); `/etc/mtab → /proc/self/mounts` was missing entirely. `dockerd` listens on `/var/run/docker.sock` while `docker.socket` creates `/run/docker.sock`, so they never connected ("no such file or directory"). Root cause: the Jun 21 `mksquashfs` over an overlay mount omitted **absolute** symlinks pointing at chroot mount points (relative symlinks survived). Recreated the 3 symlinks in the tree and installed disks.
+- **build hardening**: `aios-deploy-and-build.sh` now verifies/recreates the 3 LFS symlinks before every `mksquashfs`, so a rebuilt tree can't silently lose them again.
+
 ## v0.18.1 - 2026-09-04 17:58
 
 ### fixes
