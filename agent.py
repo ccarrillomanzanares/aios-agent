@@ -571,30 +571,12 @@ class Agent:
                     except json.JSONDecodeError:
                         args = {}
 
-                    # --- Anti-loop detection (same tool + same arguments repeated) ---
-                    _call_sig = (name, json.dumps(args, sort_keys=True, ensure_ascii=False))
-                    _recent = getattr(self, '_tool_history', [])
-                    _recent.append(_call_sig)
-                    if len(_recent) > 10:
-                        _recent = _recent[-10:]
-                    self._tool_history = _recent
 
-                    # Count exact repeats in recent history
-                    _repeat_count = sum(1 for c in _recent if c == _call_sig)
-                    if _repeat_count >= 3:
-                        _out(f"  ⚠ Loop detected: {name} with same arguments has been executed {_repeat_count} times.\n")
-                        _out("  I will stop executing and ask the LLM to diagnose instead of repeating.\n")
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.get("id", "call_0"),
-                            "content": json.dumps({
-                                "error": "Loop detected",
-                                "detail": f"{name}({_tool_history[-1][1]}) has been executed {_repeat_count} times with the same arguments. Stop repeating and explain the root cause."
-                            }, ensure_ascii=False)
-                        })
-                        break
-
-                    # --- Previous-attempt error pattern detection for run_command ---
+                    # --- Anti-repeat: only guard against blind re-running a command
+                    # that ALREADY FAILED with the same command string. Exact-repeat
+                    # counting was removed (Sep 2026): it produced false positives on
+                    # legitimate retries (e.g. `sven install` after a network timeout)
+                    # and crashed with a NameError on `_tool_history`. ---
                     if name == "run_command":
                         _cmd = args.get('command', '')
                         _last_errors = getattr(self, '_last_run_errors', {})
