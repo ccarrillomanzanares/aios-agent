@@ -133,19 +133,54 @@ def _fix_erase():
 
 
 def _read_line():
-    """Read a line with correct backspace and protected prompt (fix 25 Aug).
+    """Read a line with correct backspace, protected prompt, and paste support
+    (fix 25 Aug + bracketed paste 4 Sep).
 
     Uses raw mode + manual keyboard handling: backspace removes from the buffer
-    (never the prompt), no stray '^' characters; Ctrl+C interrupts."""
+    (never the prompt), no stray '^' characters; Ctrl+C interrupts. Enables
+    bracketed paste (ESC[?2004h) so pasted text is captured verbatim as a block
+    instead of being interpreted key-by-key (which broke copy/paste)."""
     import termios
     import tty
+    import select
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     buf = []
+    pasting = False
     try:
         tty.setraw(fd)
+        # Enable bracketed paste: the terminal wraps pasted text in
+        # ESC[200~ ... ESC[201~ so we can capture it verbatim.
+        sys.stdout.write("\x1b[?2004h")
+        sys.stdout.flush()
         while True:
             ch = sys.stdin.read(1)
+            if ch == "\x1b":             # escape sequence (paste markers, Delete, arrows)
+                seq = ch
+                try:
+                    while select.select([fd], [], [], 0.02)[0]:
+                        seq += sys.stdin.read(1)
+                except Exception:
+                    pass
+                if seq == "\x1b[200~":   # bracketed paste START
+                    pasting = True
+                elif seq == "\x1b[201~": # bracketed paste END
+                    pasting = False
+                elif seq in ("\x1b[3~", "\x1b[P"):   # Delete (xterm / rxvt)
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                continue
+            if pasting:
+                # During a paste, accept characters verbatim; ignore newlines
+                # (a trailing newline in the copied text must not end the input).
+                if ch in ("\r", "\n"):
+                    continue
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+                continue
             if ch in ("\r", "\n"):
                 break
             if ch in ("\x7f", "\x08"):   # backspace / DEL
@@ -153,20 +188,6 @@ def _read_line():
                     buf.pop()
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
-                continue
-            if ch == "\x1b":             # escape sequence (Delete, arrows)
-                import select
-                seq = ch
-                try:
-                    while select.select([fd], [], [], 0.02)[0]:
-                        seq += sys.stdin.read(1)
-                except Exception:
-                    pass
-                if seq in ("\x1b[3~", "\x1b[P"):   # Delete (xterm / rxvt)
-                    if buf:
-                        buf.pop()
-                        sys.stdout.write("\b \b")
-                        sys.stdout.flush()
                 continue
             if ch == "\x03":              # Ctrl+C
                 raise KeyboardInterrupt
@@ -177,6 +198,8 @@ def _read_line():
                 sys.stdout.write(ch)
                 sys.stdout.flush()
     finally:
+        sys.stdout.write("\x1b[?2004l")
+        sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
     sys.stdout.write("\n")
     sys.stdout.flush()
