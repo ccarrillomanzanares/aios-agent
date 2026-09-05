@@ -219,9 +219,11 @@ def _rules_common():
         "If a systemd service fails to start with 'A dependency job for ... failed', do NOT run the same `systemctl start` again. Inspect the failing dependency first with `systemctl status <dependency>` and `journalctl -u <dependency> --no-pager`. If the failure is due to the live session (e.g. Docker socket cannot bind in overlay), tell the user and stop.\n"
         "If you don't know something, say so honestly: 'I don't know'.\n"
         + _no_think
-        + "\nFor complex tasks, do NOT over-explain: generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
-        "If the user's request is ambiguous or you are unsure what they want, ask ONE short clarifying question first — do NOT guess and run extra steps they did not ask for.\n"
+        + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
         "NEVER end your turn with a promise to act ('I'll do it now', 'vamos a hacerlo', 'let me...'). If you intend to run a tool, emit the tool call in the SAME turn immediately — do not wait for the user to say 'ok'.\n"
+        "Example:\n"
+        "  User: \"install WordPress with Docker and MariaDB\"\n"
+        "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
         "\nIf a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."
     )
 
