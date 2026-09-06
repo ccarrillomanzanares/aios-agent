@@ -465,8 +465,23 @@ def ocr(path: str = "") -> str:
 
     env = _display_env()
     try:
+        # Preprocess: upscale 2x + grayscale + contrast stretch. Screenshots have
+        # small text; tesseract reads them much better after this. Falls back to
+        # the original image if ImageMagick is missing or fails.
+        prep = image_path
+        try:
+            prep = "/tmp/aios-ocr-prep.png"
+            subprocess.run(
+                ["convert", image_path, "-resize", "200%", "-colorspace", "Gray",
+                 "-contrast-stretch", "2%x2%", prep],
+                capture_output=True, text=True, timeout=20,
+            )
+            if not os.path.exists(prep):
+                prep = image_path
+        except Exception:
+            prep = image_path
         r = subprocess.run(
-            ["tesseract", image_path, "stdout", "-l", "eng+spa"],
+            ["tesseract", prep, "stdout", "-l", "eng+spa", "--psm", "11"],
             env=env,
             capture_output=True,
             text=True,
@@ -826,7 +841,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "ocr",
-            "description": "Extract text from an image using Tesseract. If no path is given, takes a screenshot first.",
+            "description": "Extract text from an image using Tesseract. If no path is given, takes a screenshot first. The OCR text may be fragmentary or incomplete. Report ONLY what the OCR text actually contains — never invent or guess page content, buttons, or text that is not present in the OCR output.",
             "parameters": {
                 "type": "object",
                 "properties": {

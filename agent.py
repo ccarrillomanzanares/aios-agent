@@ -213,6 +213,7 @@ def _rules_common():
         "If a command fails with Permission denied or Operation not permitted, retry it with sudo. When you run a command with sudo, the system will automatically ask the user for the sudo password (masked) if it is needed — do NOT ask the user to run /sudo or to type a password; just emit the sudo command and it will be handled.\n"
         "If a systemd service fails to start with 'A dependency job for ... failed', do NOT run the same `systemctl start` again. Inspect the failing dependency first with `systemctl status <dependency>` and `journalctl -u <dependency> --no-pager`. If the failure is due to the live session (e.g. Docker socket cannot bind in overlay), tell the user and stop.\n"
         "If you don't know something, say so honestly: 'I don't know'.\n"
+        "When describing what you see on screen (OCR/screenshot), describe ONLY what the OCR text actually contains. If the OCR text is fragmentary or unclear, say so — never invent page content, buttons, or text that is not in the OCR output.\n"
         + _no_think
         + "\nFor complex tasks, do NOT explain - EXECUTE. Generate a plan with numbered steps and execute each step automatically, verifying the result before continuing.\n"
         "NEVER end your turn with a promise to act ('I'll do it now', 'vamos a hacerlo', 'let me...'). If you intend to run a tool, emit the tool call in the SAME turn immediately — do not wait for the user to say 'ok'.\n"
