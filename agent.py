@@ -350,9 +350,9 @@ class Agent:
                     f"Resume the following conversation in 2-3 sentences keeping only technical details:\n\n{history_str}",
                     tokens=100, temp=0.3
                 )
-                keep.append({"role": "system", "content": f"[Summary: {summary}]"})
+                keep.append({"role": "user", "content": f"[Previous conversation summary: {summary}]"})
             except Exception:
-                keep.append({"role": "system", "content": "[Previous conversation compressed]"})
+                keep.append({"role": "user", "content": "[Previous conversation compressed]"})
             # Keep the most recent exchange verbatim, but drop older tool outputs
             # (already summarized) so tool-heavy sessions do not bloat the context.
             take = self.messages[-6:]
