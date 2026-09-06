@@ -179,7 +179,7 @@ else:
         # with a small budget the model stops at finish=length and returns empty.
         MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
 
-MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.20)
+MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.10)
 SESSION_FILE = Path("data") / f"session_{os.environ.get('AIOS_MODE', 'local')}.json"
 
 
