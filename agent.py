@@ -139,7 +139,7 @@ THINK_LOCAL = os.environ.get("AIOS_LOCAL_THINK", "false").lower() in ("1", "true
 
 MAX_TOKENS = 512
 TEMPERATURE = 0.1
-MAX_TURNS = 10
+MAX_TURNS = 25
 # Compression: 95% for local (RAM-derived), 50% for cloud (per-provider context_limit)
 _LOCAL_CONTEXT = 32768
 _cloud_context = int(os.environ.get("AIOS_CLOUD_CONTEXT", "128000"))
@@ -226,6 +226,21 @@ def _rules_common():
         "  Agent: run step 1 (check Docker), step 2 (create compose), step 3 (start), step 4 (verify). Without asking, without explaining. Just execute.\n"
         "\nIf a script expects interactive input (input(), confirmations, passwords), use process_start. Do NOT use run_command for interactive scripts."
     )
+
+
+def _is_trivial_query(q: str) -> bool:
+    """True for greetings/acknowledgements/short queries — not reusable
+    procedure knowledge worth caching in procedural memory."""
+    _TRIVIAL = {"hola", "buenas", "hello", "hi", "hey", "gracias", "thanks",
+                "ok", "vale", "si", "s\u00ed", "adelante", "perfecto", "genial"}
+    qn = re.sub(r"[^a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc0-9 ]", "", q.lower()).strip()
+    if len(qn) < 12:
+        return True
+    words = set(qn.split())
+    if words & _TRIVIAL:
+        return True
+    return False
+
 
 _AIOS_GROUNDING = """AIOS is Linux From Scratch (LFS), NOT Debian/Ubuntu/Arch/Fedora. Packages are managed ONLY with `sven`:
 - `sven install <pkg>` / `sven remove <pkg>` / `sven search <q>` / `sven update` / `sven upgrade`
@@ -443,6 +458,7 @@ class Agent:
             _open_audio()
         # Compress history if needed
         self._compress()
+        final_response = None
 
         # 1. Check procedural cache (disabled in pure cloud mode)
         if AIOS_MODE != "cloud":
@@ -675,7 +691,11 @@ class Agent:
                 had_tools = any(m["role"] == "tool" for m in self.messages[-5:])
                 had_dynamic = any("run_command" in m.get("content","") or "read_file" in m.get("content","")
                                   for m in self.messages[-5:])
-                if had_tools and not had_dynamic and final_response and final_response != "I don't know":
+                if (had_tools and not had_dynamic and final_response
+                        and final_response != "I don't know"
+                        and not final_response.startswith("(continue)")
+                        and len(final_response) >= 80
+                        and not _is_trivial_query(query)):
                     self.memory.store(query, final_response, self._quick_llm)
                 self._save_session()
                 break
@@ -683,7 +703,22 @@ class Agent:
                 final_response = f"(empty model response — {_empty_reason(finish, reasoning_chunks)})"
                 break
 
-        return final_response or "(no response)"
+        if not final_response:
+            # Turn budget exhausted (no final answer reached): summarize what
+            # was done and ask the user whether to continue. Context is kept,
+            # so a "yes" continues the work in the next run.
+            tools_used = []
+            for m in self.messages[1:]:
+                for tc in m.get("tool_calls", []) or []:
+                    name = tc.get("function", {}).get("name", "")
+                    if name and name not in tools_used:
+                        tools_used.append(name)
+            detail = ", ".join(tools_used) if tools_used else "varias tareas"
+            final_response = (
+                "(continue) A\u00fan no he terminado tu petici\u00f3n: he estado usando " + detail + ". "
+                "\u00bfQuieres que contin\u00fae? (responde 's\u00ed' y seguir\u00e9 donde lo dej\u00e9)"
+            )
+        return final_response
 
     def set_think(self, on: bool) -> bool:
         """Enable/disable thinking on the fly (token + max_tokens + system prompt)."""

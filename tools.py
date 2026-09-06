@@ -466,7 +466,7 @@ def ocr(path: str = "") -> str:
     env = _display_env()
     try:
         r = subprocess.run(
-            ["tesseract", image_path, "stdout", "-l", "eng"],
+            ["tesseract", image_path, "stdout", "-l", "eng+spa"],
             env=env,
             capture_output=True,
             text=True,

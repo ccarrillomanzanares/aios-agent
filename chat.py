@@ -634,6 +634,7 @@ def main():
                                                   "Error reading LLM stream",
                                                   "(empty model response)",
                                                   "(no response)",
+                                                  "(continue)",
                                                   "[cache]")):
                 print("  " + response)
                 sys.stdout.flush()
