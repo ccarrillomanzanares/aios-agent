@@ -303,8 +303,6 @@ def _input_tic(prompt="> "):
                     buf.pop()
                     sys.stdout.write("\b \b")
                     sys.stdout.flush()
-                    if agent.SOUND_ON:
-                        agent._tic()
             elif ch == "\x1b":  # ESC: arrow sequence
                 seq = sys.stdin.read(2)
                 if seq == "[A" and idx > 0:  # up
@@ -323,8 +321,6 @@ def _input_tic(prompt="> "):
                 buf.append(ch)
                 sys.stdout.write(ch)
                 sys.stdout.flush()
-                if agent.SOUND_ON:
-                    agent._tic()
         line = "".join(buf)
         if line:
             _input_history.append(line)
