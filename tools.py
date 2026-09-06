@@ -165,6 +165,12 @@ def _confirm_destructive(command: str, timeout: int = 10) -> bool:
         return False
 
 
+def _strip_ansi(s: str) -> str:
+    """Remove ANSI escape codes (sven/docker colored output) from tool text."""
+    return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", s)
+
+
+
 def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     """Execute a shell command. Returns JSON with stdout, stderr, exit_code, elapsed."""
     # sven install/upgrade/sync takes minutes (DB sync + download + install): generous timeout.
@@ -216,8 +222,10 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
         try:
             r = subprocess.run(current_command, shell=True, capture_output=True, text=True,
                                timeout=remaining, stdin=stdin_arg, input=stdin_input)
-            stdout = r.stdout.strip()[:5000]
-            stderr = r.stderr.strip()[:2000]
+            # Strip ANSI and cap output size: huge command logs inflate the
+            # conversation context and make reasoning models slow (timeouts).
+            stdout = _strip_ansi(r.stdout.strip())[:1200]
+            stderr = _strip_ansi(r.stderr.strip())[:1000]
 
             if retry and r.returncode != 0 and ("apt" in current_command or "apt-get" in current_command):
                 lower_err = (stdout + "\n" + stderr).lower()

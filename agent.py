@@ -184,7 +184,7 @@ else:
         # with a small budget the model stops at finish=length and returns empty.
         MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
 
-MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.50)
+MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.20)
 SESSION_FILE = Path("data") / f"session_{os.environ.get('AIOS_MODE', 'local')}.json"
 
 
@@ -343,7 +343,13 @@ class Agent:
                 keep.append({"role": "system", "content": f"[Summary: {summary}]"})
             except Exception:
                 keep.append({"role": "system", "content": "[Previous conversation compressed]"})
-            keep.extend(self.messages[-6:])
+            # Keep the most recent exchange verbatim, but drop older tool outputs
+            # (already summarized) so tool-heavy sessions do not bloat the context.
+            take = self.messages[-6:]
+            last_tool = max((i for i, m in enumerate(take) if m.get("role") == "tool"), default=None)
+            if last_tool is not None:
+                take = take[max(0, last_tool - 1):]
+            keep.extend(take)
         else:
             keep = self.messages
         self.messages = keep
