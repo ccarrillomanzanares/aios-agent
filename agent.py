@@ -26,7 +26,7 @@ def _open_audio():
     try:
         import subprocess as _sp
         _AUDIO = _sp.Popen(
-            ["aplay", "-q", "--period-size=512", "--buffer-size=1024", "-f", "S16_LE", "-r", "44100", "-c", "1", "-"],
+            ["aplay", "-q", "--period-size=128", "--buffer-size=256", "-f", "S16_LE", "-r", "44100", "-c", "1", "-"],
             stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
         )
         # Warm-up: force the device open (0.2 s of silence) before first real tic
@@ -41,35 +41,30 @@ def _open_audio():
 
 
 def _tic():
-    """Play a soft 'click' (Hermes-desktop style): a 4 ms white-noise burst with
-    exponential decay, through a narrow bandpass (Q=8) centered ~2-4 kHz. Much
-    subtler than the old 850 Hz beep. Synthesized in memory (no files), volume
-    matches web-haptics (gain = 0.5 * intensity, no extra normalization)."""
+    """Play a soft 'click': a 6 ms white-noise burst with exponential decay,
+    through a narrow bandpass (Q=4) centered at 1 kHz. Warmer and less
+    strident than the previous 2-4 kHz click. Synthesized in memory (no files)."""
     if _AUDIO is None or _AUDIO.poll() is not None:
         return
     import math
     import random
     import struct
     sr = 44100
-    intensity = 0.58
-    # 4 ms noise burst, exponential decay exp(-i/25) over sample index
-    n = int(sr * 0.004)
-    # bandpass center = 2000 + intensity*2000, with +/-30% jitter (organic feel)
-    center = 2000 + intensity * 2000
-    jitter = 1 + (random.random() - 0.5) * 0.3
-    freq = center * jitter
-    Q = 8.0
-    w0 = 2 * math.pi * freq / sr
+    # 6 ms noise burst, exponential decay exp(-i/40) over sample index
+    n = int(sr * 0.006)
+    center = 1000.0
+    Q = 4.0
+    w0 = 2 * math.pi * center / sr
     alpha = math.sin(w0) / (2 * Q)
     b0, b1, b2 = alpha, 0.0, -alpha
     a0, a1, a2 = 1 + alpha, -2 * math.cos(w0), 1 - alpha
     b0, b1, b2 = b0 / a0, b1 / a0, b2 / a0
     a1, a2 = a1 / a0, a2 / a0
-    gain = 0.5 * intensity
+    gain = 0.32
     pcm = bytearray()
     x1 = x2 = y1 = y2 = 0.0
     for i in range(n):
-        x0 = (random.random() * 2 - 1) * math.exp(-i / 25.0)
+        x0 = (random.random() * 2 - 1) * math.exp(-i / 40.0)
         y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
         x2, x1 = x1, x0
         y2, y1 = y1, y0
