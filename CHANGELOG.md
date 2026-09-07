@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.18.4 - 2026-09-07 15:58
+
+### fixes
+
+- **arranque en portátiles (race en boot)**: el getty@tty1 lanzaba X antes de que udev aplicara permisos a `/dev/dri/card0` -> `open /dev/dri/card0: Permission denied` -> `no screens found` -> getty en bucle -> `start-limit-hit` -> cursor parpadeando sin sesión. `aios-session` ahora espera hasta 30s a que `/dev/dri/card0` sea legible/escribible antes de `startx`.
+- **audio en portátiles (misma race)**: `audio-detect.py` corría a los 9s del boot, cuando solo se veía la tarjeta HDMI -> escribía `plughw:0,0` (HDMI) en vez de la analógica. Ahora si la única tarjeta detectada es HDMI, espera y reintenta (hasta 15s) hasta que aparezca la analógica.
+- **deploy**: `aios-deploy-and-build.sh` ahora copia `scripts/aios-session` y `scripts/audio-detect.py` al árbol (antes no llegaban a la ISO).
+
 ## v0.18.3 - 2026-09-07 08:06
 
 ### fixes
