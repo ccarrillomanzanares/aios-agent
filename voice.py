@@ -21,6 +21,14 @@ _PROCS = []
 _LOCK = threading.Lock()
 
 
+def _log(msg):
+    try:
+        with open("/tmp/aios-voice.log", "a") as f:
+            f.write(f"{msg}\n")
+    except Exception:
+        pass
+
+
 def _track(p):
     with _LOCK:
         _PROCS.append(p)
@@ -119,8 +127,8 @@ def _speak_sync(tts, text, lang):
         try:
             import agent
             agent._close_audio()
-        except Exception:
-            pass
+        except Exception as e:
+            _log(f"close_audio error: {e}")
         try:
             if tts == "espeak":
                 _espeak(text, lang)
@@ -132,9 +140,10 @@ def _speak_sync(tts, text, lang):
             try:
                 import agent
                 agent._reopen_audio()
-            except Exception:
-                pass
-    except Exception:
+            except Exception as e:
+                _log(f"reopen_audio error: {e}")
+    except Exception as e:
+        _log(f"speak_sync error: {e}")
         pass  # voice must never break the chat
 
 
