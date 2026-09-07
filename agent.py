@@ -41,34 +41,45 @@ def _open_audio():
 
 
 def _tic():
-    """Play a soft 'click': a 6 ms white-noise burst with exponential decay,
-    through a narrow bandpass (Q=4) centered at 1 kHz. Warmer and less
-    strident than the previous 2-4 kHz click. Synthesized in memory (no files)."""
+    """Play a teletype-style 'tick': a very short high transient (4 kHz noise,
+    1.5 ms) followed by a low body (250 Hz sine, 8 ms). Mimics the classic
+    Wargames terminal clack. Synthesized in memory (no files)."""
     if _AUDIO is None or _AUDIO.poll() is not None:
         return
     import math
     import random
     import struct
     sr = 44100
-    # 6 ms noise burst, exponential decay exp(-i/40) over sample index
-    n = int(sr * 0.006)
-    center = 1000.0
-    Q = 4.0
-    w0 = 2 * math.pi * center / sr
-    alpha = math.sin(w0) / (2 * Q)
-    b0, b1, b2 = alpha, 0.0, -alpha
-    a0, a1, a2 = 1 + alpha, -2 * math.cos(w0), 1 - alpha
-    b0, b1, b2 = b0 / a0, b1 / a0, b2 / a0
-    a1, a2 = a1 / a0, a2 / a0
-    gain = 0.32
+
+    def _bandpass(x, center, Q):
+        w0 = 2 * math.pi * center / sr
+        alpha = math.sin(w0) / (2 * Q)
+        b0, b1, b2 = alpha, 0.0, -alpha
+        a0, a1, a2 = 1 + alpha, -2 * math.cos(w0), 1 - alpha
+        b0, b1, b2 = b0 / a0, b1 / a0, b2 / a0
+        a1, a2 = a1 / a0, a2 / a0
+        y = [0.0] * len(x)
+        x1 = x2 = y1 = y2 = 0.0
+        for i, v in enumerate(x):
+            y0 = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2, x1 = x1, v
+            y2, y1 = y1, y0
+            y[i] = y0
+        return y
+
+    # Transient: 1.5 ms noise, very fast decay, bandpass 4 kHz
+    n1 = int(sr * 0.0015)
+    click = [(random.random() * 2 - 1) * math.exp(-i / 5.0) for i in range(n1)]
+    click = _bandpass(click, 4000.0, 8.0)
+    # Body: 250 Hz sine, 8 ms, fast decay
+    n2 = int(sr * 0.008)
+    body = [math.sin(2 * math.pi * 250 * i / sr) * math.exp(-i / (sr * 0.0018)) for i in range(n2)]
+    # Assemble: click + tiny gap + body
+    samples = list(click) + [0.0] * int(sr * 0.0005) + [b * 0.5 for b in body]
+    gain = 0.38
     pcm = bytearray()
-    x1 = x2 = y1 = y2 = 0.0
-    for i in range(n):
-        x0 = (random.random() * 2 - 1) * math.exp(-i / 40.0)
-        y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
-        x2, x1 = x1, x0
-        y2, y1 = y1, y0
-        pcm += struct.pack("<h", int(y0 * gain * 32767))
+    for s in samples:
+        pcm += struct.pack("<h", int(max(-1.0, min(1.0, s)) * gain * 32767))
     try:
         _AUDIO.stdin.write(bytes(pcm))
         _AUDIO.stdin.flush()
