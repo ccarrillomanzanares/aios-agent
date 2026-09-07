@@ -767,8 +767,9 @@ def _ensure_browser():
     """Start Chromium with remote debugging if not running."""
     import subprocess as _sp
     import os as _os
+    import urllib.request as _url
     try:
-        with _urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=2):
+        with _url.urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=2):
             return
     except Exception:
         pass
