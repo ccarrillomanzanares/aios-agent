@@ -248,12 +248,28 @@ def _pick_quote():
     return q
 
 
+def _aios_version() -> str:
+    """Read the current AIOS version from the CHANGELOG (first "## vX.Y.Z" line).
+    Falls back to the legacy banner version if the file is missing."""
+    import re as _re
+    try:
+        changelog = Path(__file__).resolve().parent / "CHANGELOG.md"
+        if changelog.exists():
+            for line in changelog.read_text(encoding="utf-8", errors="replace").splitlines():
+                m = _re.match(r"^##\s+(v[0-9]+\.[0-9]+(?:\.[0-9]+)?)", line.strip())
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return "1.4"
+
+
 def _greet():
     """BBS header + rotating movie quote. No hexagon (boot art is kept elsewhere)."""
     import random
     from agent import _tic, _open_audio, _skip_pressed, _cbreak_on, _cbreak_off
     _open_audio()
-    print(f"AIOS/1.4 — {time.strftime('%a %b %d %Y').upper()}")
+    print(f"AIOS/{_aios_version()} — {time.strftime('%a %b %d %Y').upper()}")
     quote = _pick_quote()
     fd_cb, old_cb = _cbreak_on()
     try:
