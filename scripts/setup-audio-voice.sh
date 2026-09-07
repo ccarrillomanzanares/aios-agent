@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup-audio-voz.sh — applies AIOS audio / voice / STT fixes.
+# setup-audio-voice.sh — applies AIOS audio / voice / STT fixes.
 #
 # Origin: diagnostic session (muted audio, typewriter tick, /voice not
 # stopping, /mic not hearing). Reproduces on any AIOS:
@@ -11,7 +11,7 @@
 #      (symptom: /mic replies "(No speech detected)")
 #   4) Final checks (aplay, vosk, espeak-ng)
 #
-# Usage:  sudo ./setup-audio-voz.sh        (idempotent, re-runnable)
+# Usage:  sudo ./setup-audio-voice.sh        (idempotent, re-runnable)
 set -u
 
 [ "$(id -u)" = 0 ] || { echo "  Run as root: sudo $0"; exit 1; }
