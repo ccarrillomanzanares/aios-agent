@@ -621,6 +621,234 @@ def list_desktop_apps() -> str:
     return json.dumps({"count": len(apps), "apps": apps}, ensure_ascii=False)
 
 
+# ---------------------------------------------------------------------------
+# Chromium CDP (DevTools Protocol) — control real del navegador
+# (DOM, clics por selector, formularios). Sin dependencias: mini WebSocket.
+# ---------------------------------------------------------------------------
+
+_CDP_PORT = 9222
+_CDP_WS = None
+
+
+def _ws_connect(url, timeout=5):
+    """Minimal RFC 6455 WebSocket client (no deps). Returns a socket."""
+    import socket
+    import base64
+    import os
+    import re as _re
+    m = _re.match(r"ws://([^:/]+):(\d+)(/.*)?", url)
+    if not m:
+        raise RuntimeError(f"bad ws url: {url}")
+    host, port, path = m.group(1), int(m.group(2)), m.group(3) or "/"
+    s = socket.create_connection((host, port), timeout=timeout)
+    key = base64.b64encode(os.urandom(16)).decode()
+    req = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host}:{port}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n"
+    )
+    s.sendall(req.encode())
+    resp = b""
+    while b"\r\n\r\n" not in resp:
+        chunk = s.recv(4096)
+        if not chunk:
+            raise RuntimeError("ws handshake failed (no response)")
+        resp += chunk
+    if b" 101 " not in resp.split(b"\r\n", 1)[0]:
+        raise RuntimeError(f"ws handshake rejected: {resp[:200]!r}")
+    return s
+
+
+def _ws_send(sock, payload):
+    """Send a masked text frame."""
+    import struct
+    data = payload.encode("utf-8")
+    mask = b"\x01\x02\x03\x04"
+    header = bytearray()
+    header.append(0x81)  # FIN + text
+    n = len(data)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header += struct.pack(">H", n)
+    else:
+        header.append(0x80 | 127)
+        header += struct.pack(">Q", n)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    sock.sendall(bytes(header) + mask + masked)
+
+
+def _ws_recv(sock, timeout=30):
+    """Receive one frame (text/binary), returns str."""
+    import struct
+    sock.settimeout(timeout)
+    hdr = _recv_exact(sock, 2)
+    b1, b2 = hdr[0], hdr[1]
+    opcode = b1 & 0x0F
+    masked = b2 & 0x80
+    n = b2 & 0x7F
+    if n == 126:
+        n = struct.unpack(">H", _recv_exact(sock, 2))[0]
+    elif n == 127:
+        n = struct.unpack(">Q", _recv_exact(sock, 8))[0]
+    mask = _recv_exact(sock, 4) if masked else b""
+    data = _recv_exact(sock, n)
+    if masked:
+        data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    if opcode == 8:  # close
+        raise RuntimeError("ws closed by peer")
+    if opcode == 9:  # ping -> pong
+        _ws_send_raw(sock, 0x8A, data)
+        return _ws_recv(sock, timeout)
+    return data.decode("utf-8", errors="replace")
+
+
+def _ws_send_raw(sock, opcode, data=b""):
+    import struct
+    header = bytearray([0x80 | opcode])
+    n = len(data)
+    if n < 126:
+        header.append(n)
+    elif n < 65536:
+        header.append(126)
+        header += struct.pack(">H", n)
+    else:
+        header.append(127)
+        header += struct.pack(">Q", n)
+    sock.sendall(bytes(header) + data)
+
+
+def _recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise RuntimeError("ws connection closed")
+        buf += chunk
+    return buf
+
+
+def _cdp_call(method, params=None, timeout=30):
+    """Send a CDP command and wait for its response."""
+    global _CDP_WS
+    import json as _json
+    if _CDP_WS is None:
+        _CDP_WS = _browser_ws()
+    _ws_send(_CDP_WS, _json.dumps({"id": 1, "method": method, "params": params or {}}))
+    while True:
+        msg = _json.loads(_ws_recv(_CDP_WS, timeout))
+        if msg.get("id") == 1:
+            if "error" in msg:
+                raise RuntimeError(f"CDP {method}: {msg['error']}")
+            return msg.get("result", {})
+
+
+def _browser_ws():
+    """Find the debugger websocket of the active Chromium tab."""
+    import json as _json
+    import urllib.request as _url
+    try:
+        with _url.urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=3) as r:
+            tabs = _json.loads(r.read().decode())
+    except Exception as e:
+        raise RuntimeError(f"Chromium CDP not reachable on :{_CDP_PORT} ({e}). "
+                           "Start it with: chromium --remote-debugging-port=9222")
+    for t in tabs:
+        if t.get("type") == "page":
+            return _ws_connect(t["webSocketDebuggerUrl"])
+    raise RuntimeError("No Chromium page tab found")
+
+
+def _ensure_browser():
+    """Start Chromium with remote debugging if not running."""
+    import subprocess as _sp
+    import os as _os
+    try:
+        with _urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=2):
+            return
+    except Exception:
+        pass
+    env = _os.environ.copy()
+    env["DISPLAY"] = ":0"
+    _sp.Popen(
+        ["chromium", "--remote-debugging-port=9222", "--no-first-run",
+         "--no-default-browser-check", "about:blank"],
+        env=env, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+    )
+    import time as _time
+    for _ in range(20):
+        try:
+            with _urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=2):
+                return
+        except Exception:
+            _time.sleep(0.5)
+    raise RuntimeError("Chromium did not start with CDP on :9222")
+
+
+def browser_navigate(url: str) -> str:
+    """Open Chromium (if needed) and navigate to a URL. Returns the page title."""
+    import json as _json
+    _ensure_browser()
+    _cdp_call("Page.enable")
+    _cdp_call("Page.navigate", {"url": url})
+    import time as _time
+    _time.sleep(2)
+    res = _cdp_call("Runtime.evaluate", {"expression": "document.title", "returnByValue": True})
+    title = res.get("result", {}).get("value", "")
+    return _json.dumps({"ok": True, "url": url, "title": title}, ensure_ascii=False)
+
+
+def browser_eval(expr: str) -> str:
+    """Evaluate JavaScript in the page and return the result (JSON). Use to read the DOM:
+    document.body.innerText, document.title, document.querySelectorAll('a').length, etc."""
+    import json as _json
+    _ensure_browser()
+    res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+    if "exceptionDetails" in res:
+        return _json.dumps({"error": str(res["exceptionDetails"])[:500]}, ensure_ascii=False)
+    val = res.get("result", {}).get("value")
+    if isinstance(val, str) and len(val) > 4000:
+        val = val[:4000] + "...[truncated]"
+    return _json.dumps({"result": val}, ensure_ascii=False)
+
+
+def browser_click(selector: str) -> str:
+    """Click an element by CSS selector (e.g. '#accept', 'button.primary')."""
+    import json as _json
+    _ensure_browser()
+    expr = (
+        f"(function(){{var el=document.querySelector({selector!r});"
+        "if(!el)return 'NOT_FOUND';el.click();return 'CLICKED';}})()"
+    )
+    res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+    val = res.get("result", {}).get("value", "")
+    return _json.dumps({"ok": val == "CLICKED", "result": val}, ensure_ascii=False)
+
+
+def browser_type(selector: str, text: str) -> str:
+    """Type text into an input/textarea by CSS selector."""
+    import json as _json
+    _ensure_browser()
+    expr = (
+        f"(function(){{var el=document.querySelector({selector!r});"
+        "if(!el)return 'NOT_FOUND';"
+        "el.focus();"
+        "var set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value')"
+        "||Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value');"
+        f"set.set.call(el,{text!r});"
+        "el.dispatchEvent(new Event('input',{bubbles:true}));"
+        "el.dispatchEvent(new Event('change',{bubbles:true}));"
+        "return 'TYPED';}})()"
+    )
+    res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+    val = res.get("result", {}).get("value", "")
+    return _json.dumps({"ok": val == "TYPED", "result": val}, ensure_ascii=False)
+
+
 TOOLS = [
     {
         "type": "function",
@@ -879,6 +1107,63 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_navigate",
+            "description": "Open Chromium (if needed) and navigate to a URL. Returns the page title. Use for web browsing tasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL, e.g. https://www.google.com/travel/flights"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_eval",
+            "description": "Evaluate JavaScript in the current page and return the result. Use to READ the page: document.body.innerText (visible text), document.title, document.querySelectorAll('a').length, document.URL. Prefer this over OCR.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expr": {"type": "string", "description": "JavaScript expression returning a value"}
+                },
+                "required": ["expr"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Click an element by CSS selector (e.g. '#accept', 'button.primary', 'a[href*=flights]'). Use after browser_eval to find the right selector.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS selector of the element to click"}
+                },
+                "required": ["selector"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": "Type text into an input/textarea by CSS selector (e.g. 'input[name=q]', '#search'). Use after browser_eval to find the right selector.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS selector of the input"},
+                    "text": {"type": "string", "description": "Text to type"}
+                },
+                "required": ["selector", "text"]
+            }
+        }
+    },
 ]
 
 
@@ -959,6 +1244,10 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "xdotool_type": xdotool_type,
         "xdotool_key": xdotool_key,
         "xdotool_click": xdotool_click,
+        "browser_navigate": browser_navigate,
+        "browser_eval": browser_eval,
+        "browser_click": browser_click,
+        "browser_type": browser_type,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
