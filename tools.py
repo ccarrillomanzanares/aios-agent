@@ -824,7 +824,7 @@ def browser_click(selector: str) -> str:
     sel = _json.dumps(selector)
     expr = (
         f"(function(){{var el=document.querySelector({sel});"
-        "if(!el)return 'NOT_FOUND';el.click();return 'CLICKED';}})()"
+        "if(!el)return 'NOT_FOUND';el.click();return 'CLICKED';})()"
     )
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
     val = res.get("result", {}).get("value", "")
@@ -846,7 +846,7 @@ def browser_type(selector: str, text: str) -> str:
         f"set.set.call(el,{txt});"
         "el.dispatchEvent(new Event('input',{bubbles:true}));"
         "el.dispatchEvent(new Event('change',{bubbles:true}));"
-        "return 'TYPED';}})()"
+        "return 'TYPED';})()"
     )
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
     val = res.get("result", {}).get("value", "")
