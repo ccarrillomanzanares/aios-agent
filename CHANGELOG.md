@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.18.5 - 2026-09-07 20:21
+
+### features
+
+- **Chromium + CDP (browser_*)**: nuevas tools `browser_navigate`, `browser_eval`, `browser_click`, `browser_type` — control real del navegador vía DevTools Protocol (DOM real, clics por selector, formularios por campo). Sin OCR a ciegas. Chromium 152 instalado desde sven.
+- **Prompt de navegador**: el agente usa `browser_*` para navegar (nunca `process_send` — los navegadores ignoran stdin); workflow documentado (navigate → eval → click → type).
+- **Banner del instalador dinámico**: `aios-install` lee la versión del CHANGELOG (muestra `AIOS LFS INSTALLER v0.18.5` en vez del `1.1.3` hardcodeado).
+
+### fixes
+
+- **voz silenciosa (causa raíz)**: el aplay del tic ocupa el device PCM; el TTS lanzaba otro aplay → `Device or resource busy` silenciado. Fix: cerrar/reabrir el aplay del tic DENTRO del thread de `_speak_sync` (voice.py) — `speak()` lanza un thread y retorna, así que cerrar en chat.py reabría antes de que el TTS abriera el device.
+- **browser no navegaba**: `_ensure_browser()` usaba `_urlopen` sin importar (NameError silencioso) en la comprobación y en el loop de espera → timeout de 10s. Fix: `urllib.request as _url` en ambos + espera de 30s (Chromium tarda en arrancar en el portátil).
+- **aios-diag sin ejecutable**: modo 100755 en git (el wrapper `/usr/local/bin/aios-diag` no tenía `x`).
+
 ## v0.18.4 - 2026-09-07 15:58
 
 ### fixes
