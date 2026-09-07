@@ -781,12 +781,12 @@ def _ensure_browser():
         env=env, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
     )
     import time as _time
-    for _ in range(20):
+    for _ in range(30):
         try:
-            with _urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=2):
+            with _url.urlopen(f"http://127.0.0.1:{_CDP_PORT}/json", timeout=2):
                 return
         except Exception:
-            _time.sleep(0.5)
+            _time.sleep(1)
     raise RuntimeError("Chromium did not start with CDP on :9222")
 
 
