@@ -8,7 +8,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "1.1.3"
+def _aios_version():
+    """Read the current AIOS version from the CHANGELOG (first "## vX.Y.Z" line).
+    Falls back to the legacy installer version if the file is missing."""
+    import re as _re
+    try:
+        changelog = Path(__file__).resolve().parent / "CHANGELOG.md"
+        if changelog.exists():
+            for line in changelog.read_text(encoding="utf-8", errors="replace").splitlines():
+                m = _re.match(r"^##\s+(v[0-9]+\.[0-9]+(?:\.[0-9]+)?)", line.strip())
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return "1.1.3"
+
+VERSION = _aios_version()
 CONFIG_SRC = Path.home() / ".aios" / "config.yaml"
 MODEL_SRC = Path("/usr/local/share/aios/models")
 AGENT_SRC = Path("/usr/local/bin/aios-agent")
