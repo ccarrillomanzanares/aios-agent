@@ -115,12 +115,25 @@ def speak(text, config):
 def _speak_sync(tts, text, lang):
     try:
         stop()
-        if tts == "espeak":
-            _espeak(text, lang)
-        elif tts == "gemini":
-            _gemini_tts(text, lang)
-        elif tts == "openai":
-            _openai_tts(text, lang)
+        # Free the PCM device held by the tic aplay, then restore it after.
+        try:
+            import agent
+            agent._close_audio()
+        except Exception:
+            pass
+        try:
+            if tts == "espeak":
+                _espeak(text, lang)
+            elif tts == "gemini":
+                _gemini_tts(text, lang)
+            elif tts == "openai":
+                _openai_tts(text, lang)
+        finally:
+            try:
+                import agent
+                agent._reopen_audio()
+            except Exception:
+                pass
     except Exception:
         pass  # voice must never break the chat
 
