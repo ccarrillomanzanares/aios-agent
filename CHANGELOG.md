@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.18.3 - 2026-09-07 08:06
+
+### fixes
+
+- **timeout HTTP 120s -> 300s**: generación larga en CPU (p.ej. cuentos, respuestas extensas) superaba el límite de 120s y el agente cortaba con `Read timed out`. El POST tardaba 2m5s en ollama-core (prompt-eval + generación a 4-8 tok/s) y el cliente moría antes.
+- **resumen de compresión como `user` (no `system`)**: el modelo `frob/qwen3.5-instruct:9b` (no-thinking) exige `system` al principio del historial; el resumen insertado como `system` en medio daba 500 `Jinja Exception: System message must be at the beginning`.
+- **umbral de compresión cloud 20% -> 10%**: evita que el prompt-eval (~25 tok/s en CPU) supere el timeout con contextos grandes.
+- **cap de salida de tools**: ANSI strip + truncado a 1200/1000 chars (antes 5000/2000) — las salidas de comandos inflaban el contexto y ralentizaban el modelo razonador.
+- **MAX_TURNS 10 -> 25** + al agotarse pregunta `(continue) Aún no he terminado... ¿Quieres que continúe?` en vez de `(no response)`.
+- **filtro de memoria procedural**: no guarda saludos/triviales (hola, gracias, ok...) ni respuestas cortas (<80 chars) ni mensajes de estado `(continue)`.
+- **OCR eng+spa**: tesseract con español para páginas en español.
+- **bracketed paste en `_read_line()`** (setup.py): copy/paste funcional en el prompt de la API key.
+- **banner de versión dinámico**: `AIOS/v0.18.3` se lee del CHANGELOG (se autoactualiza con cada release) en vez del `AIOS/1.4` hardcodeado.
+- **tic de teletipo Wargames**: transitorio 4kHz + cuerpo 250Hz, a mitad de volumen, con `--period-size=128` (tic por carácter, sin ráfagas); el tic al escribir del usuario se elimina (solo suena el typewriter del agente).
+
+### nota
+
+- El ejemplo de WordPress del system prompt se revirtió (vuelve a `do NOT explain - EXECUTE` original); el preprocesado de OCR (2x+psm 11) se revirtió por timeout — la visión por OCR queda como está (limitación del modelo 9B sin visión real).
+
 ## v0.18.2 - 2026-09-04 23:21
 
 ### fixes
