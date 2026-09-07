@@ -40,6 +40,26 @@ def _open_audio():
         _AUDIO = None
 
 
+def _close_audio():
+    """Close the persistent aplay (frees the PCM device for TTS)."""
+    global _AUDIO
+    if _AUDIO is not None:
+        try:
+            _AUDIO.stdin.close()
+        except Exception:
+            pass
+        try:
+            _AUDIO.terminate()
+        except Exception:
+            pass
+        _AUDIO = None
+
+
+def _reopen_audio():
+    """Reopen the persistent aplay after TTS (device was busy)."""
+    _open_audio()
+
+
 def _tic():
     """Play a teletype-style 'tick': a very short high transient (4 kHz noise,
     1.5 ms) followed by a low body (250 Hz sine, 8 ms). Mimics the classic

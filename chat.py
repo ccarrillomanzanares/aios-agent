@@ -658,9 +658,12 @@ def main():
             if config.get("voice", {}).get("tts", "off") not in (None, "off"):
                 try:
                     import voice
+                    agent._close_audio()   # free the PCM device (tic aplay holds it)
                     voice.speak(response, config)
                 except Exception:
                     pass
+                finally:
+                    agent._reopen_audio()  # restore the tic aplay
         except KeyboardInterrupt:
             print("\n[Interrupted]")
             continue
