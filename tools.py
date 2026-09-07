@@ -821,8 +821,9 @@ def browser_click(selector: str) -> str:
     """Click an element by CSS selector (e.g. '#accept', 'button.primary')."""
     import json as _json
     _ensure_browser()
+    sel = _json.dumps(selector)
     expr = (
-        f"(function(){{var el=document.querySelector({selector!r});"
+        f"(function(){{var el=document.querySelector({sel});"
         "if(!el)return 'NOT_FOUND';el.click();return 'CLICKED';}})()"
     )
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
@@ -834,13 +835,15 @@ def browser_type(selector: str, text: str) -> str:
     """Type text into an input/textarea by CSS selector."""
     import json as _json
     _ensure_browser()
+    sel = _json.dumps(selector)
+    txt = _json.dumps(text)
     expr = (
-        f"(function(){{var el=document.querySelector({selector!r});"
+        f"(function(){{var el=document.querySelector({sel});"
         "if(!el)return 'NOT_FOUND';"
         "el.focus();"
         "var set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value')"
         "||Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value');"
-        f"set.set.call(el,{text!r});"
+        f"set.set.call(el,{txt});"
         "el.dispatchEvent(new Event('input',{bubbles:true}));"
         "el.dispatchEvent(new Event('change',{bubbles:true}));"
         "return 'TYPED';}})()"
