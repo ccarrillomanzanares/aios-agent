@@ -6,4 +6,14 @@
 # tty1 se elimino — hacia que el menu apareciera sin startx).
 LOG="/home/aios/startx.log"
 
+# Esperar a que udev aplique permisos a /dev/dri (race en boot:
+# X moria con "open /dev/dri/card0: Permission denied" -> no screens found
+# -> getty start-limit-hit -> cursor parpadeando). Max 30s.
+for i in $(seq 1 30); do
+    if [ -c /dev/dri/card0 ] && [ -r /dev/dri/card0 ] && [ -w /dev/dri/card0 ]; then
+        break
+    fi
+    sleep 1
+done
+
 exec /usr/bin/startx "$@" > "$LOG" 2>&1

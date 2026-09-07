@@ -8,6 +8,7 @@ is NOT HDMI/DisplayPort, so the beep/audio works on any machine
 """
 import pathlib
 import re
+import time
 
 
 def detect_analog_card():
@@ -32,6 +33,18 @@ def detect_analog_card():
     return min(cards) if cards else 0
 
 
+def _is_hdmi(card):
+    try:
+        text = pathlib.Path("/proc/asound/cards").read_text()
+    except OSError:
+        return False
+    for line in text.splitlines():
+        m = re.match(rf"^\s*{card}\s*\[", line)
+        if m:
+            return bool(re.search(r"HDMI|DisplayPort|\bDP\b", line, re.I))
+    return False
+
+
 def _write(conf):
     # /etc/asound.conf (system); if not writable (ro squashfs without overlay),
     # fall back to ~/.asoundrc (always writable and takes priority per user).
@@ -46,6 +59,14 @@ def _write(conf):
 
 def main():
     card = detect_analog_card()
+    # At boot the HDMI card may appear before the analog one; if the only
+    # detected card is HDMI, wait and retry (up to 15s) so laptops with
+    # HDMI+analog get the right card.
+    for _ in range(15):
+        if not _is_hdmi(card):
+            break
+        time.sleep(1)
+        card = detect_analog_card()
     conf = (
         "pcm.!default {\n"
         "    type plug\n"
