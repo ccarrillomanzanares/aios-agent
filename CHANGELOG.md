@@ -4,42 +4,42 @@
 
 ### features
 
-- **Chromium + CDP (browser_*)**: nuevas tools `browser_navigate`, `browser_eval`, `browser_click`, `browser_type` — control real del navegador vía DevTools Protocol (DOM real, clics por selector, formularios por campo). Sin OCR a ciegas. Chromium 152 instalado desde sven.
-- **Prompt de navegador**: el agente usa `browser_*` para navegar (nunca `process_send` — los navegadores ignoran stdin); workflow documentado (navigate → eval → click → type).
-- **Banner del instalador dinámico**: `aios-install` lee la versión del CHANGELOG (muestra `AIOS LFS INSTALLER v0.18.5` en vez del `1.1.3` hardcodeado).
+- **Chromium + CDP (browser_*)**: new tools `browser_navigate`, `browser_eval`, `browser_click`, `browser_type` — real browser control via DevTools Protocol (real DOM, clicks by selector, forms by field). No more blind OCR. Chromium 152 installed from sven.
+- **Browser prompt**: the agent uses `browser_*` to browse (never `process_send` — browsers ignore stdin); documented workflow (navigate → eval → click → type).
+- **Dynamic installer banner**: `aios-install` reads the version from the CHANGELOG (shows `AIOS LFS INSTALLER v0.18.5` instead of the hardcoded `1.1.3`).
 
 ### fixes
 
-- **voz silenciosa (causa raíz)**: el aplay del tic ocupa el device PCM; el TTS lanzaba otro aplay → `Device or resource busy` silenciado. Fix: cerrar/reabrir el aplay del tic DENTRO del thread de `_speak_sync` (voice.py) — `speak()` lanza un thread y retorna, así que cerrar en chat.py reabría antes de que el TTS abriera el device.
-- **browser no navegaba**: `_ensure_browser()` usaba `_urlopen` sin importar (NameError silencioso) en la comprobación y en el loop de espera → timeout de 10s. Fix: `urllib.request as _url` en ambos + espera de 30s (Chromium tarda en arrancar en el portátil).
-- **aios-diag sin ejecutable**: modo 100755 en git (el wrapper `/usr/local/bin/aios-diag` no tenía `x`).
+- **silent voice (root cause)**: the tic aplay holds the PCM device; TTS launched another aplay → `Device or resource busy` silenced. Fix: close/reopen the tic aplay INSIDE the `_speak_sync` thread (voice.py) — `speak()` spawns a thread and returns, so closing in chat.py reopened before TTS opened the device.
+- **browser did not navigate**: `_ensure_browser()` used `_urlopen` without importing it (silent NameError) in the check and in the wait loop → 10s timeout. Fix: `urllib.request as _url` in both + 30s wait (Chromium takes a while to start on the laptop).
+- **aios-diag not executable**: mode 100755 in git (the `/usr/local/bin/aios-diag` wrapper had no `x`).
 
 ## v0.18.4 - 2026-09-07 15:58
 
 ### fixes
 
-- **arranque en portátiles (race en boot)**: el getty@tty1 lanzaba X antes de que udev aplicara permisos a `/dev/dri/card0` -> `open /dev/dri/card0: Permission denied` -> `no screens found` -> getty en bucle -> `start-limit-hit` -> cursor parpadeando sin sesión. `aios-session` ahora espera hasta 30s a que `/dev/dri/card0` sea legible/escribible antes de `startx`.
-- **audio en portátiles (misma race)**: `audio-detect.py` corría a los 9s del boot, cuando solo se veía la tarjeta HDMI -> escribía `plughw:0,0` (HDMI) en vez de la analógica. Ahora si la única tarjeta detectada es HDMI, espera y reintenta (hasta 15s) hasta que aparezca la analógica.
-- **deploy**: `aios-deploy-and-build.sh` ahora copia `scripts/aios-session` y `scripts/audio-detect.py` al árbol (antes no llegaban a la ISO).
+- **laptop boot (boot race)**: getty@tty1 launched X before udev applied permissions to `/dev/dri/card0` -> `open /dev/dri/card0: Permission denied` -> `no screens found` -> getty loop -> `start-limit-hit` -> blinking cursor with no session. `aios-session` now waits up to 30s for `/dev/dri/card0` to be readable/writable before `startx`.
+- **laptop audio (same race)**: `audio-detect.py` ran 9s into boot, when only the HDMI card was visible -> wrote `plughw:0,0` (HDMI) instead of the analog one. Now if the only detected card is HDMI, it waits and retries (up to 15s) until the analog card appears.
+- **deploy**: `aios-deploy-and-build.sh` now copies `scripts/aios-session` and `scripts/audio-detect.py` to the tree (they never reached the ISO before).
 
 ## v0.18.3 - 2026-09-07 08:06
 
 ### fixes
 
-- **timeout HTTP 120s -> 300s**: generación larga en CPU (p.ej. cuentos, respuestas extensas) superaba el límite de 120s y el agente cortaba con `Read timed out`. El POST tardaba 2m5s en ollama-core (prompt-eval + generación a 4-8 tok/s) y el cliente moría antes.
-- **resumen de compresión como `user` (no `system`)**: el modelo `frob/qwen3.5-instruct:9b` (no-thinking) exige `system` al principio del historial; el resumen insertado como `system` en medio daba 500 `Jinja Exception: System message must be at the beginning`.
-- **umbral de compresión cloud 20% -> 10%**: evita que el prompt-eval (~25 tok/s en CPU) supere el timeout con contextos grandes.
-- **cap de salida de tools**: ANSI strip + truncado a 1200/1000 chars (antes 5000/2000) — las salidas de comandos inflaban el contexto y ralentizaban el modelo razonador.
-- **MAX_TURNS 10 -> 25** + al agotarse pregunta `(continue) Aún no he terminado... ¿Quieres que continúe?` en vez de `(no response)`.
-- **filtro de memoria procedural**: no guarda saludos/triviales (hola, gracias, ok...) ni respuestas cortas (<80 chars) ni mensajes de estado `(continue)`.
-- **OCR eng+spa**: tesseract con español para páginas en español.
-- **bracketed paste en `_read_line()`** (setup.py): copy/paste funcional en el prompt de la API key.
-- **banner de versión dinámico**: `AIOS/v0.18.3` se lee del CHANGELOG (se autoactualiza con cada release) en vez del `AIOS/1.4` hardcodeado.
-- **tic de teletipo Wargames**: transitorio 4kHz + cuerpo 250Hz, a mitad de volumen, con `--period-size=128` (tic por carácter, sin ráfagas); el tic al escribir del usuario se elimina (solo suena el typewriter del agente).
+- **HTTP timeout 120s -> 300s**: long CPU generations (e.g. stories, long answers) exceeded the 120s limit and the agent cut with `Read timed out`. The POST took 2m5s on ollama-core (prompt-eval + generation at 4-8 tok/s) and the client died first.
+- **compression summary as `user` (not `system`)**: the no-thinking model `frob/qwen3.5-instruct:9b` requires `system` at the start of the history; a summary inserted as `system` in the middle caused 500 `Jinja Exception: System message must be at the beginning`.
+- **cloud compression threshold 20% -> 10%**: keeps prompt-eval (~25 tok/s on CPU) under the timeout with large contexts.
+- **tool output cap**: ANSI strip + truncation to 1200/1000 chars (was 5000/2000) — command outputs no longer bloat the context and slow the reasoning model.
+- **MAX_TURNS 10 -> 25** + when exhausted the agent asks `(continue) Aún no he terminado... ¿Quieres que continúe?` instead of `(no response)`.
+- **procedural memory filter**: no longer caches greetings/trivial queries (hola, gracias, ok...), short answers (<80 chars) or `(continue)` status messages.
+- **OCR eng+spa**: tesseract with Spanish for Spanish pages.
+- **bracketed paste in `_read_line()`** (setup.py): copy/paste works in the API key prompt.
+- **dynamic version banner**: `AIOS/v0.18.3` is read from the CHANGELOG (auto-updates with each release) instead of the hardcoded `AIOS/1.4`.
+- **Wargames teletype tick**: 4kHz transient + 250Hz body, half volume, with `--period-size=128` (tick per character, no bursts); the user-typing tick is removed (only the agent's typewriter sounds).
 
-### nota
+### note
 
-- El ejemplo de WordPress del system prompt se revirtió (vuelve a `do NOT explain - EXECUTE` original); el preprocesado de OCR (2x+psm 11) se revirtió por timeout — la visión por OCR queda como está (limitación del modelo 9B sin visión real).
+- The WordPress example in the system prompt was reverted (back to the original `do NOT explain - EXECUTE`); the OCR preprocessing (2x+psm 11) was reverted due to timeout — OCR vision stays as-is (limitation of the 9B model without real vision).
 
 ## v0.18.2 - 2026-09-04 23:21
 
