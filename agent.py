@@ -669,6 +669,33 @@ class Agent:
                             })
                             break
 
+                    # --- Anti-loop: same tool + same args 3x in a row → stop.
+                    # Prevents blind loops (e.g. browser_eval on the wrong page)
+                    # that also saturate the cloud LLM (524 timeouts).
+                    _loop_key = (name, func.get('arguments', ''))
+                    _loop_hist = getattr(self, '_loop_hist', [])
+                    _loop_hist.append(_loop_key)
+                    if len(_loop_hist) > 9:
+                        _loop_hist = _loop_hist[-9:]
+                    self._loop_hist = _loop_hist
+                    _consec = 0
+                    for _k in reversed(_loop_hist):
+                        if _k == _loop_key:
+                            _consec += 1
+                        else:
+                            break
+                    if _consec >= 3:
+                        _out(f"  ⚠ Same tool call repeated {_consec}x — no progress, stopping.\n")
+                        self.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id", "call_0"),
+                            "content": json.dumps({
+                                "error": f"Tool {name} with identical arguments has been called {_consec} times in a row.",
+                                "instruction": "STOP repeating this tool call. The state is not changing. Ask the user what they want to do, or try a different approach (e.g. browser_navigate to the correct URL first, then read the page)."
+                            }, ensure_ascii=False)
+                        })
+                        break
+
                     # Show the tool BEFORE executing (so a long command does not
                     # look like it "does nothing" — the ⚙ is visible immediately).
                     _out(f"  ⚙ {name}({func.get('arguments','')})\n")
