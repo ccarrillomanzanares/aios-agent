@@ -76,7 +76,7 @@ def _tic():
     body = [math.sin(2 * math.pi * 250 * i / sr) * math.exp(-i / (sr * 0.0018)) for i in range(n2)]
     # Assemble: click + tiny gap + body
     samples = list(click) + [0.0] * int(sr * 0.0005) + [b * 0.5 for b in body]
-    gain = 0.38
+    gain = 0.19
     pcm = bytearray()
     for s in samples:
         pcm += struct.pack("<h", int(max(-1.0, min(1.0, s)) * gain * 32767))
