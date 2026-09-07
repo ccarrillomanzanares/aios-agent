@@ -493,7 +493,7 @@ class Agent:
                 payload["model"] = CLOUD_MODEL
 
             try:
-                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=120, stream=True, verify=VERIFY_TLS)
+                resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=300, stream=True, verify=VERIFY_TLS)
                 resp.raise_for_status()
             except Exception as e:
                 return f"LLM connection error: {e}"
