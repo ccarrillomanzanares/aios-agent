@@ -118,6 +118,54 @@ def _skip_pressed():
     return False
 
 
+def _read_key():
+    """Non-blocking read of ONE raw key during the typewriter (cbreak mode).
+    Returns the byte (b" ", b"\t", b"\x12"...) or None if no key pressed.
+    Used for barge-in: Tab = add text info, Ctrl+R = add voice info."""
+    try:
+        import select
+        if select.select([0], [], [], 0)[0]:
+            return os.read(0, 1)
+    except Exception:
+        pass
+    return None
+
+
+def _barge_input(prompt="  » "):
+    """Raw line input for barge-in text (no tic, no history).
+    Called AFTER the typewriter stops, with the terminal restored."""
+    import termios, tty
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    buf = []
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ("\r", "\n"):
+                sys.stdout.write("\r\n")
+                sys.stdout.flush()
+                break
+            if ch in ("\x03", "\x04"):  # Ctrl+C / Ctrl+D cancels
+                sys.stdout.write("\r\n")
+                sys.stdout.flush()
+                return ""
+            if ch in ("\x7f", "\x08"):  # backspace
+                if buf:
+                    buf.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+            elif ch.isprintable():
+                buf.append(ch)
+                sys.stdout.write(ch)
+                sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    return "".join(buf)
+
+
 def _cbreak_on():
     """Enable cbreak mode (each key is available instantly, no echo) if there is a tty.
     Returns (fd, old) to restore with _cbreak_off, or (None, None)."""
@@ -534,6 +582,7 @@ class Agent:
             finish_reason = None
             stream_log = None
             fd_cb, old_cb = None, None
+            barged = None  # "text" (Tab) or "voice" (Ctrl+R) — user barge-in
 
             try:
                 # Raw stream log (diagnostics for the empty-response bug)
@@ -578,13 +627,20 @@ class Agent:
                             else:
                                 for i, ch in enumerate(chunk):
                                     _out(ch)
-                                    if _skip_pressed():
+                                    _k = _read_key()
+                                    if _k == b" ":
                                         _out(chunk[i + 1:])
+                                        skip_rest = True
+                                        break
+                                    if _k in (b"\t", b"\x12"):
+                                        barged = "text" if _k == b"\t" else "voice"
                                         skip_rest = True
                                         break
                                     if self.SOUND_ON:
                                         _tic()
                                     time.sleep(0.02)
+                                if barged:
+                                    break
                         # Tool calls fragmented by index
                         if "tool_calls" in delta:
                             for tc_delta in delta["tool_calls"]:
@@ -602,8 +658,10 @@ class Agent:
                                     tool_calls_by_index[idx]["function"]["name"] += func_delta["name"]
                                 if func_delta.get("arguments"):
                                     tool_calls_by_index[idx]["function"]["arguments"] += func_delta["arguments"]
+                        if barged:
+                            break
                 if stream_log:
-                    stream_log.write(f"--- END finish={finish_reason} chunks={len(content_chunks)} tools={len(tool_calls_by_index)} ---\n")
+                    stream_log.write(f"--- END finish={finish_reason} chunks={len(content_chunks)} tools={len(tool_calls_by_index)} barged={barged} ---\n")
             except Exception as e:
                 if stream_log:
                     stream_log.write(f"--- EXC {type(e).__name__}: {e} ---\n")
@@ -613,6 +671,22 @@ class Agent:
                     stream_log.close()
                 _cbreak_off(fd_cb, old_cb)
 
+            if barged:
+                _out("\n")
+                # Barge-in: the user interrupted mid-turn to add info.
+                # Preserve what the agent already said, then let chat.py
+                # re-enter with the info as a fresh user query.
+                if content_chunks:
+                    self.messages.append({"role": "assistant", "content": "".join(content_chunks)})
+                try:
+                    self._save_session()
+                except Exception:
+                    pass
+                if barged == "text":
+                    _binfo = _barge_input()
+                else:
+                    _binfo = ""
+                return f"__BARGE__:{barged}:{_binfo}"
             _out("\n")  # newline after the stream (explicit CRLF)
             content = "".join(content_chunks)
             reasoning = "".join(reasoning_chunks)
@@ -705,6 +779,16 @@ class Agent:
                     # Show the tool BEFORE executing (so a long command does not
                     # look like it "does nothing" — the ⚙ is visible immediately).
                     _out(f"  ⚙ {name}({func.get('arguments','')})\n")
+                    # Barge-in during tool phase: stop before executing.
+                    _bk = _read_key()
+                    if _bk in (b"\t", b"\x12"):
+                        _bmode = "text" if _bk == b"\t" else "voice"
+                        _out("\n")
+                        if _bmode == "text":
+                            _binfo = _barge_input()
+                        else:
+                            _binfo = ""
+                        return f"__BARGE__:{_bmode}:{_binfo}"
                     result = execute_tool(name, args, context=self.messages)
                     if name == "run_command":
                         r = json.loads(result)

@@ -634,33 +634,63 @@ def main():
             continue
 
         try:
-            response = agent.run(query)
-            # The response was already printed character by character during the stream.
-            # We only add a final newline (explicit CRLF) if the stream did not leave one.
-            sys.stdout.write(chr(13) + "\n")
-            sys.stdout.flush()
-            # run() returns errors and empty responses without streaming
-            # (LLM connection error, empty stream, cache). If they are not printed,
-            # the prompt returns with no visible reply.
-            if response and response.startswith(("LLM connection error",
-                                                  "Error reading LLM stream",
-                                                  "(empty model response)",
-                                                  "(no response)",
-                                                  "(continue)",
-                                                  "[cache]")):
-                print("  " + response)
+            while True:
+                response = agent.run(query)
+                # Barge-in: the user interrupted mid-turn to add info (text or voice).
+                # Re-enter the agent loop with the info as a fresh query, keeping the
+                # context from before the interruption.
+                if isinstance(response, str) and response.startswith("__BARGE__:"):
+                    try:
+                        _, _bmode, _binfo = response.split(":", 2)
+                    except ValueError:
+                        _bmode, _binfo = "text", ""
+                    if _bmode == "voice":
+                        try:
+                            import voice
+                            _vtext = voice.listen(config)
+                        except Exception:
+                            _vtext = None
+                        if _vtext:
+                            print(f"  [Voz: {_vtext}]\n")
+                            query = _vtext
+                            continue
+                        # No speech -> just continue the turn
+                        query = "sigue con lo que estabas haciendo"
+                        continue
+                    if _binfo:
+                        print(f"  [Añadido: {_binfo}]\n")
+                        query = _binfo
+                        continue
+                    # Empty text (Tab + Enter) -> just continue the turn
+                    query = "sigue con lo que estabas haciendo"
+                    continue
+                # The response was already printed character by character during the stream.
+                # We only add a final newline (explicit CRLF) if the stream did not leave one.
+                sys.stdout.write(chr(13) + "\n")
                 sys.stdout.flush()
-            # Always save session (even on errors) to keep context.
-            try:
-                agent._save_session()
-            except Exception:
-                pass
-            if config.get("voice", {}).get("tts", "off") not in (None, "off"):
+                # run() returns errors and empty responses without streaming
+                # (LLM connection error, empty stream, cache). If they are not printed,
+                # the prompt returns with no visible reply.
+                if response and response.startswith(("LLM connection error",
+                                                      "Error reading LLM stream",
+                                                      "(empty model response)",
+                                                      "(no response)",
+                                                      "(continue)",
+                                                      "[cache]")):
+                    print("  " + response)
+                    sys.stdout.flush()
+                # Always save session (even on errors) to keep context.
                 try:
-                    import voice
-                    voice.speak(response, config)  # closes/reopens the tic aplay inside its thread
+                    agent._save_session()
                 except Exception:
                     pass
+                if config.get("voice", {}).get("tts", "off") not in (None, "off"):
+                    try:
+                        import voice
+                        voice.speak(response, config)  # closes/reopens the tic aplay inside its thread
+                    except Exception:
+                        pass
+                break
         except KeyboardInterrupt:
             print("\n[Interrupted]")
             continue
