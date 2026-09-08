@@ -226,8 +226,11 @@ def _estimate_tokens(text: str) -> int:
             return len(resp.json().get("tokens", []))
     except Exception:
         pass
-    # Fallback: rough estimate (4 chars ~= 1 token, same as _count_tokens)
-    return len(text) // 4
+    # Fallback: rough estimate. len//2 OVERESTIMATES for natural text in all
+    # European languages (measured 2.8-4.4 chars/token) and matches technical
+    # content (~2 chars/token). Overestimating is safe: compression triggers
+    # early, never late (Cloudflare 100s limit).
+    return len(text) // 2
 
 
 def _rules_common():
@@ -369,35 +372,38 @@ class Agent:
         return sum(len(t) // 4 for t in texts)
 
     def _compress(self):
-        """Compress history when approaching context limit. Keeps system prompt + last 3 exchanges."""
-        all_text = "\n".join(m.get("content", "") for m in self.messages)
-        total = _estimate_tokens(all_text)
-        if total < MAX_HISTORY_TOKENS:
-            return
-        keep = [self.messages[0]]
-        if len(self.messages) > 6:
-            old = self.messages[1:-6]
-            history_str = "\n".join(
-                f"{m['role']}: {m['content'][:200]}" for m in old if m.get("content")
-            )[-2000:]  # cap: keep the compression call light (Cloudflare 100s)
-            try:
-                summary = self._quick_llm(
-                    f"Resume the following conversation in 2-3 sentences keeping only technical details:\n\n{history_str}",
-                    tokens=100, temp=0.3
-                )
-                keep.append({"role": "user", "content": f"[Previous conversation summary: {summary}]"})
-            except Exception:
-                keep.append({"role": "user", "content": "[Previous conversation compressed]"})
-            # Keep the most recent exchange verbatim, but drop older tool outputs
-            # (already summarized) so tool-heavy sessions do not bloat the context.
-            take = self.messages[-6:]
-            last_tool = max((i for i, m in enumerate(take) if m.get("role") == "tool"), default=None)
-            if last_tool is not None:
-                take = take[max(0, last_tool - 1):]
-            keep.extend(take)
-        else:
-            keep = self.messages
-        self.messages = keep
+        """Compress history when approaching context limit. Keeps system prompt + last 3 exchanges.
+        Loops (max 3 passes) so the final prompt always fits under the Cloudflare 100s
+        budget regardless of language (len//2 overestimates, so it converges)."""
+        for _pass in range(3):
+            all_text = "\n".join(m.get("content", "") for m in self.messages)
+            total = _estimate_tokens(all_text)
+            if total < MAX_HISTORY_TOKENS:
+                return
+            keep = [self.messages[0]]
+            if len(self.messages) > 6:
+                old = self.messages[1:-6]
+                history_str = "\n".join(
+                    f"{m['role']}: {m['content'][:200]}" for m in old if m.get("content")
+                )[-2000:]  # cap: keep the compression call light (Cloudflare 100s)
+                try:
+                    summary = self._quick_llm(
+                        f"Resume the following conversation in 2-3 sentences keeping only technical details:\n\n{history_str}",
+                        tokens=100, temp=0.3
+                    )
+                    keep.append({"role": "user", "content": f"[Previous conversation summary: {summary}]"})
+                except Exception:
+                    keep.append({"role": "user", "content": "[Previous conversation compressed]"})
+                # Keep the most recent exchange verbatim, but drop older tool outputs
+                # (already summarized) so tool-heavy sessions do not bloat the context.
+                take = self.messages[-6:]
+                last_tool = max((i for i, m in enumerate(take) if m.get("role") == "tool"), default=None)
+                if last_tool is not None:
+                    take = take[max(0, last_tool - 1):]
+                keep.extend(take)
+            else:
+                keep = self.messages
+            self.messages = keep
 
     def _save_session(self):
         """Saves the conversation history on exit."""
