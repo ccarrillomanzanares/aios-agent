@@ -828,13 +828,17 @@ def browser_click(selector: str) -> str:
         "if(!el)return 'NOT_FOUND';el.click();return 'CLICKED';})()"
     )
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+    if "exceptionDetails" in res:
+        return _json.dumps({"ok": False, "result": "EXCEPTION: " + str(res["exceptionDetails"])[:300]}, ensure_ascii=False)
     val = res.get("result", {}).get("value", "")
     return _json.dumps({"ok": val == "CLICKED", "result": val}, ensure_ascii=False)
 
 
 def browser_type(selector: str, text: str) -> str:
-    """Type text into an input/textarea by CSS selector OR by visible text
-    (e.g. 'input[name=q]', 'Search'). Falls back to matching visible text."""
+    """Type text into an input/textarea/contenteditable by CSS selector, visible
+    text, or ref. Falls back to matching visible text. contenteditable editors
+    (CodeMirror/Ace/Monaco) use execCommand('insertText'). Never fails silently:
+    exceptionDetails are reported."""
     import json as _json
     _ensure_browser()
     txt = _json.dumps(text)
@@ -842,14 +846,22 @@ def browser_type(selector: str, text: str) -> str:
         "(function(){var el=" + _find_by_text(selector) + ";"
         "if(!el)return 'NOT_FOUND';"
         "el.focus();"
+        "var ce=el.getAttribute('contenteditable')||el.getAttribute('role')==='textbox'||el.tagName==='DIV'||el.tagName==='SPAN';"
+        "if(ce){document.execCommand('insertText',false," + txt + ");"
+        "el.dispatchEvent(new Event('input',{bubbles:true}));"
+        "el.dispatchEvent(new Event('change',{bubbles:true}));"
+        "return 'TYPED';}"
         "var set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value')"
         "||Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value');"
+        "if(!set)return 'NO_SET';"
         "set.set.call(el," + txt + ");"
         "el.dispatchEvent(new Event('input',{bubbles:true}));"
         "el.dispatchEvent(new Event('change',{bubbles:true}));"
         "return 'TYPED';})()"
     )
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+    if "exceptionDetails" in res:
+        return _json.dumps({"ok": False, "result": "EXCEPTION: " + str(res["exceptionDetails"])[:300]}, ensure_ascii=False)
     val = res.get("result", {}).get("value", "")
     return _json.dumps({"ok": val == "TYPED", "result": val}, ensure_ascii=False)
 
@@ -902,20 +914,28 @@ def browser_elements(limit: int = 30) -> str:
 
 
 def _find_by_text(sel: str) -> str:
-    """JS that resolves a selector OR falls back to matching visible text
-    (innerText/aria-label/value/placeholder, case-insensitive). Returns the
-    element or null — used by browser_click/browser_type so the agent can
-    click by what it SEES (e.g. "Create your first dashboard") instead of
-    guessing a fragile CSS selector."""
+    """JS that resolves a CSS selector, a visible-text match, OR a ref from
+    browser_elements (e.g. 'btn-delete'). Selector failures are caught (a bare
+    'btn-delete' throws as CSS); text matching is substring case-insensitive;
+    ref matching recomputes the same deterministic ref browser_elements emits
+    and compares normalized. Returns the element or null."""
     import json as _json
     s = _json.dumps(sel)
     return (
-        "(function(){var sel=" + s + ";var el=document.querySelector(sel);"
-        "if(!el){var sels='button, a, input, textarea, select, [role=\"button\"], [role=\"link\"], [role=\"textbox\"]';"
+        "(function(){var sel=" + s + ";var el=null;"
+        "try{el=document.querySelector(sel);}catch(e){}"
+        "if(!el){var sels='button, a, input, textarea, select, [role=\"button\"], [role=\"link\"], [role=\"textbox\"], [role=\"menuitem\"], [role=\"tab\"]';"
         "var els=document.querySelectorAll(sels);var q=String(sel).toLowerCase();"
+        "var qn=q.replace(/[^a-z0-9]+/g,'');"
         "for(var i=0;i<els.length;i++){var e=els[i];"
-        "var t=(e.innerText||e.getAttribute('aria-label')||e.value||e.getAttribute('placeholder')||'').toLowerCase();"
-        "if(t.indexOf(q)!==-1){el=e;break;}}}"
+        "var t=(e.innerText||e.getAttribute('aria-label')||e.value||e.getAttribute('placeholder')||'');"
+        "var tl=t.toLowerCase();"
+        "if(tl.indexOf(q)!==-1){el=e;break;}"
+        "var tag=e.tagName.toLowerCase();"
+        "var base=tl.replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30);"
+        "var prefix={button:'btn',a:'link',input:'inp',textarea:'inp',select:'sel'}[tag]||'el';"
+        "var ref=prefix+'-'+(base||tag);"
+        "if((ref===q)||(ref===qn)||(ref.replace(/-/g,'')===qn)){el=e;break;}}}"
         "return el?el:null;})()"
     )
 
