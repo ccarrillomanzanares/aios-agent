@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.19.0 - 2026-09-08 22:40
+
+### features
+
+- **Proveedor "LLM VPS (llama-hardened)"** en el setup: seleccionable junto a los cloud providers, con dos modelos:
+  - `k2-horizon:7b` → `webuillama.ccmai.org/v1/chat/completions` (K2-Horizon-7B Q4_K_M, llama-server fork MBZUAI-IFM)
+  - `qwen3.5:9b` → `webuillama.ccmai.org/ollama/v1/chat/completions` (Qwen3.5-9B, mismo stack, ruta separada)
+  - Misma `X-API-Key` para ambos; el menú propaga la URL por modelo (3er elemento de la tupla).
+
+### breaking change
+
+- **Ollama Hardened → llama-hardened**: el stack del VPS cambia de motor. `ollama-core` (Ollama 0.32.15) no puede servir K2 (arquitectura MoVA aún sin soporte en su llama.cpp), así que el stack pasa a **llama-server del fork MBZUAI-IFM** tras Caddy X-API-Key. El endpoint `/v1` sirve K2 y `/ollama/*` sirve Qwen3.5. Ollama queda parado como reserva (modelos intactos en su volumen).
+
 ## v0.18.6 - 2026-09-08 17:05
 
 ### features
