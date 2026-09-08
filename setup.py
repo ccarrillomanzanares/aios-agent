@@ -902,20 +902,21 @@ PROVIDERS = [
         "context_limit": 128000,
     },
     {
-        "name": "Ollama Hardened",
+        "name": "OpenRouter",
+        "models": [],
+        "env": "OPENROUTER_API_KEY",
+        "context_limit": 128000,
+    },
+    {
+        "name": "LLM VPS (llama-hardened)",
         "models": [
-            ("qwen3.5:9b", "Qwen3.5 9B - reasoning + tool calling (6.6GB)"),
+            ("k2-horizon:7b", "K2-Horizon-7B - reasoning + tool calling (VPS)", "https://webuillama.ccmai.org/v1/chat/completions"),
+            ("qwen3.5:9b", "Qwen3.5 9B - reasoning + tool calling (VPS)", "https://webuillama.ccmai.org/ollama/v1/chat/completions"),
         ],
         "env": "OLLAMA_HARDENED_API_KEY",
         "context_limit": 32768,
         "base_url": "https://webuillama.ccmai.org/v1/chat/completions",
         "auth_type": "x-api-key",
-    },
-    {
-        "name": "OpenRouter",
-        "models": [],
-        "env": "OPENROUTER_API_KEY",
-        "context_limit": 128000,
     },
 ]
 
@@ -927,18 +928,18 @@ def select_provider_and_model():
         wg("Select the cloud provider:")
         for i, p in enumerate(PROVIDERS, 1):
             wg(f"  {i}) {p['name']}")
-        wg("  9) Other (custom endpoint)")
-        wg("  10) Back")
+        wg(f"  {len(PROVIDERS) + 1}) Other (custom endpoint)")
+        wg(f"  {len(PROVIDERS) + 2}) Back")
         wg("")
         try:
-            opt = int(wg_input("  Select (1-10): "))
+            opt = int(wg_input(f"  Select (1-{len(PROVIDERS) + 2}): "))
         except ValueError:
-            wg("Invalid option. Choose 1-10.")
+            wg(f"Invalid option. Choose 1-{len(PROVIDERS) + 2}.")
             continue
 
-        if opt == 10:
+        if opt == len(PROVIDERS) + 2:
             return None, None
-        if opt == 9:
+        if opt == len(PROVIDERS) + 1:
             wg("")
             wg("Custom provider (Other):")
             name = wg_input("  Provider name: ").strip()
@@ -961,8 +962,8 @@ def select_provider_and_model():
             prov = {"name": name, "models": [(model, model)], "env": "OTHER_API_KEY",
                     "context_limit": 128000, "base_url": url, "auth_type": auth_type}
             return prov, model
-        if opt < 1 or opt > 8:
-            wg("Invalid option. Choose 1-10.")
+        if opt < 1 or opt > len(PROVIDERS):
+            wg(f"Invalid option. Choose 1-{len(PROVIDERS) + 2}.")
             continue
 
         prov = PROVIDERS[opt - 1]
@@ -995,7 +996,14 @@ def select_provider_and_model():
                 wg(f"Invalid option. Choose a-{chr(96 + len(prov['models']))}, or q.")
                 continue
 
-            return prov, prov["models"][idx][0]
+            entry = prov["models"][idx]
+            chosen = entry[0]
+            # Models with their own endpoint (e.g. VPS models on different routes
+            # like /v1 vs /ollama): override the provider base_url per model.
+            if len(entry) > 2:
+                prov = dict(prov)
+                prov["base_url"] = entry[2]
+            return prov, chosen
 
 
 def _legacy_box(title, lines):
