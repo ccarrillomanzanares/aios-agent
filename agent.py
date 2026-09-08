@@ -379,7 +379,7 @@ class Agent:
             old = self.messages[1:-6]
             history_str = "\n".join(
                 f"{m['role']}: {m['content'][:200]}" for m in old if m.get("content")
-            )
+            )[-2000:]  # cap: keep the compression call light (Cloudflare 100s)
             try:
                 summary = self._quick_llm(
                     f"Resume the following conversation in 2-3 sentences keeping only technical details:\n\n{history_str}",
