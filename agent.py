@@ -766,15 +766,22 @@ class Agent:
                             break
                     if _consec >= 3:
                         _out(f"  ⚠ Same tool call repeated {_consec}x — no progress, stopping.\n")
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.get("id", "call_0"),
-                            "content": json.dumps({
-                                "error": f"Tool {name} with identical arguments has been called {_consec} times in a row.",
-                                "instruction": "STOP repeating this tool call. The state is not changing. Ask the user what they want to do, or try a different approach (e.g. browser_navigate to the correct URL first, then read the page)."
-                            }, ensure_ascii=False)
-                        })
-                        break
+                        # Hard stop: do NOT feed the error back to the LLM as a tool
+                        # result. Reasoning models (K2-Horizon) interpret the error as
+                        # "command failed, retry" and loop forever. Cut the turn and
+                        # return an honest summary to the user instead.
+                        final_response = (
+                            f"⚠ He repetido la misma llamada a {name} {_consec} veces "
+                            f"seguidas sin que el estado cambie, así que corto aquí para "
+                            f"no quedarme en bucle. Última llamada: "
+                            f"{func.get('arguments', '')[:120]}"
+                        )
+                        self.messages.append({"role": "assistant", "content": final_response})
+                        try:
+                            self._save_session()
+                        except Exception:
+                            pass
+                        return final_response
 
                     # Show the tool BEFORE executing (so a long command does not
                     # look like it "does nothing" — the ⚙ is visible immediately).
