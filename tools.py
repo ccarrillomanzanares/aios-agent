@@ -818,12 +818,13 @@ def browser_eval(expr: str) -> str:
 
 
 def browser_click(selector: str) -> str:
-    """Click an element by CSS selector (e.g. '#accept', 'button.primary')."""
+    """Click an element by CSS selector OR by visible text (e.g. '#accept',
+    'button.primary', 'Create your first dashboard'). Falls back to matching
+    visible text when the selector is not found."""
     import json as _json
     _ensure_browser()
-    sel = _json.dumps(selector)
     expr = (
-        f"(function(){{var el=document.querySelector({sel});"
+        "(function(){var el=" + _find_by_text(selector) + ";"
         "if(!el)return 'NOT_FOUND';el.click();return 'CLICKED';})()"
     )
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
@@ -832,18 +833,18 @@ def browser_click(selector: str) -> str:
 
 
 def browser_type(selector: str, text: str) -> str:
-    """Type text into an input/textarea by CSS selector."""
+    """Type text into an input/textarea by CSS selector OR by visible text
+    (e.g. 'input[name=q]', 'Search'). Falls back to matching visible text."""
     import json as _json
     _ensure_browser()
-    sel = _json.dumps(selector)
     txt = _json.dumps(text)
     expr = (
-        f"(function(){{var el=document.querySelector({sel});"
+        "(function(){var el=" + _find_by_text(selector) + ";"
         "if(!el)return 'NOT_FOUND';"
         "el.focus();"
         "var set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value')"
         "||Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value');"
-        f"set.set.call(el,{txt});"
+        "set.set.call(el," + txt + ");"
         "el.dispatchEvent(new Event('input',{bubbles:true}));"
         "el.dispatchEvent(new Event('change',{bubbles:true}));"
         "return 'TYPED';})()"
@@ -851,6 +852,72 @@ def browser_type(selector: str, text: str) -> str:
     res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
     val = res.get("result", {}).get("value", "")
     return _json.dumps({"ok": val == "TYPED", "result": val}, ensure_ascii=False)
+
+
+def browser_elements(limit: int = 30) -> str:
+    """Inventory the interactive elements of the current page (buttons, links, inputs).
+    Returns a JSON list with a readable ref, tag, visible text and a robust CSS selector
+    for each — the agent can SEE what is on the page before clicking, instead of
+    guessing selectors (mirrors Hermes drive_preview action="elements")."""
+    import json as _json
+    _ensure_browser()
+    lim = max(1, min(int(limit), 100))
+    expr = (
+        "(function(){"
+        "var sels='button, a, input, textarea, select, [role=\"button\"], [role=\"link\"], [role=\"textbox\"], [role=\"menuitem\"], [role=\"tab\"], [role=\"checkbox\"], [role=\"radio\"]';"
+        "var els=document.querySelectorAll(sels);var out=[];var seen={};"
+        "for(var i=0;i<els.length&&out.length<" + str(lim) + ";i++){"
+        "var el=els[i];var r=el.getBoundingClientRect();"
+        "if(r.width===0&&r.height===0)continue;"
+        "var st=window.getComputedStyle(el);if(st.display==='none'||st.visibility==='hidden')continue;"
+        "var tag=el.tagName.toLowerCase();var text='';"
+        "if(el.value!==undefined&&el.value!=='')text=el.value;"
+        "else if(el.getAttribute('aria-label'))text=el.getAttribute('aria-label');"
+        "else if(el.getAttribute('placeholder'))text=el.getAttribute('placeholder');"
+        "else if(el.innerText)text=el.innerText.trim().slice(0,80);"
+        "else if(el.textContent)text=el.textContent.trim().slice(0,80);"
+        "if(!text)text=tag;"
+        "var base=text.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30);"
+        "var prefix={button:'btn',a:'link',input:'inp',textarea:'inp',select:'sel'}[tag]||'el';"
+        "var ref=prefix+'-'+(base||tag);"
+        "if(seen[ref]){ref=ref+'-'+i;}seen[ref]=1;"
+        "var sel='';"
+        "if(el.id)sel='#'+CSS.escape(el.id);"
+        "else if(el.getAttribute('data-testid'))sel='[data-testid=\"'+el.getAttribute('data-testid')+'\"]';"
+        "else if(el.getAttribute('name'))sel=tag+'[name=\"'+el.getAttribute('name')+'\"]';"
+        "else if(el.getAttribute('href'))sel=tag+'[href=\"'+el.getAttribute('href')+'\"]';"
+        "else sel=tag+':nth-of-type('+(Array.prototype.indexOf.call(el.parentNode.children,el)+1)+')';"
+        "out.push({ref:ref,tag:tag,text:text,selector:sel});"
+        "}return JSON.stringify(out);})()"
+    )
+    res = _cdp_call("Runtime.evaluate", {"expression": expr, "returnByValue": True})
+    if "exceptionDetails" in res:
+        return _json.dumps({"error": str(res["exceptionDetails"])[:500]}, ensure_ascii=False)
+    val = res.get("result", {}).get("value", "[]")
+    try:
+        items = _json.loads(val)
+    except Exception:
+        items = []
+    return _json.dumps({"ok": True, "count": len(items), "elements": items}, ensure_ascii=False)
+
+
+def _find_by_text(sel: str) -> str:
+    """JS that resolves a selector OR falls back to matching visible text
+    (innerText/aria-label/value/placeholder, case-insensitive). Returns the
+    element or null — used by browser_click/browser_type so the agent can
+    click by what it SEES (e.g. "Create your first dashboard") instead of
+    guessing a fragile CSS selector."""
+    import json as _json
+    s = _json.dumps(sel)
+    return (
+        "(function(){var sel=" + s + ";var el=document.querySelector(sel);"
+        "if(!el){var sels='button, a, input, textarea, select, [role=\"button\"], [role=\"link\"], [role=\"textbox\"]';"
+        "var els=document.querySelectorAll(sels);var q=String(sel).toLowerCase();"
+        "for(var i=0;i<els.length;i++){var e=els[i];"
+        "var t=(e.innerText||e.getAttribute('aria-label')||e.value||e.getAttribute('placeholder')||'').toLowerCase();"
+        "if(t.indexOf(q)!==-1){el=e;break;}}}"
+        "return el?el:null;})()"
+    )
 
 
 TOOLS = [
@@ -1161,10 +1228,23 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the input"},
+                    "selector": {"type": "string", "description": "CSS selector of the input, or the visible text of its label/placeholder"},
                     "text": {"type": "string", "description": "Text to type"}
                 },
                 "required": ["selector", "text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_elements",
+            "description": "Inventory the interactive elements of the current page (buttons, links, inputs) as readable refs with visible text and CSS selectors. ALWAYS call this before clicking/typing to see what is on the page — like Hermes drive_preview action='elements'. Then click/type by ref text or selector.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max elements to return (default 30, max 100)"}
+                }
             }
         }
     },
@@ -1252,6 +1332,7 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "browser_eval": browser_eval,
         "browser_click": browser_click,
         "browser_type": browser_type,
+        "browser_elements": browser_elements,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
