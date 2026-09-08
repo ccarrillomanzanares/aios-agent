@@ -21,7 +21,7 @@ def _aios_version():
                     return m.group(1)
     except Exception:
         pass
-    return "1.1.3"
+    return "v0.0.0-dev"
 
 VERSION = _aios_version()
 CONFIG_SRC = Path.home() / ".aios" / "config.yaml"
