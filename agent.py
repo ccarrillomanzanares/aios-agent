@@ -210,7 +210,7 @@ else:
         # with a small budget the model stops at finish=length and returns empty.
         MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
 
-MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.10)
+MAX_HISTORY_TOKENS = int(_LOCAL_CONTEXT * 0.95) if os.environ.get("AIOS_MODE") in ("local", "hybrid") else int(_cloud_context * 0.06)
 SESSION_FILE = Path("data") / f"session_{os.environ.get('AIOS_MODE', 'local')}.json"
 
 
@@ -226,8 +226,8 @@ def _estimate_tokens(text: str) -> int:
             return len(resp.json().get("tokens", []))
     except Exception:
         pass
-    # Fallback: rough estimate
-    return len(text) // 2
+    # Fallback: rough estimate (4 chars ~= 1 token, same as _count_tokens)
+    return len(text) // 4
 
 
 def _rules_common():
