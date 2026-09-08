@@ -733,18 +733,32 @@ def _recv_exact(sock, n):
 
 
 def _cdp_call(method, params=None, timeout=30):
-    """Send a CDP command and wait for its response."""
+    """Send a CDP command and wait for its response. Auto-reconnects if the
+    WebSocket died (e.g. user closed Chromium)."""
     global _CDP_WS
     import json as _json
     if _CDP_WS is None:
         _CDP_WS = _browser_ws()
-    _ws_send(_CDP_WS, _json.dumps({"id": 1, "method": method, "params": params or {}}))
-    while True:
-        msg = _json.loads(_ws_recv(_CDP_WS, timeout))
-        if msg.get("id") == 1:
-            if "error" in msg:
-                raise RuntimeError(f"CDP {method}: {msg['error']}")
-            return msg.get("result", {})
+    try:
+        _ws_send(_CDP_WS, _json.dumps({"id": 1, "method": method, "params": params or {}}))
+        while True:
+            msg = _json.loads(_ws_recv(_CDP_WS, timeout))
+            if msg.get("id") == 1:
+                if "error" in msg:
+                    raise RuntimeError(f"CDP {method}: {msg['error']}")
+                return msg.get("result", {})
+    except (RuntimeError, OSError):
+        # WS died mid-call: reconnect once and retry. If the browser is gone,
+        # _browser_ws() raises a clear error that execute_tool returns as JSON.
+        _CDP_WS = None
+        _CDP_WS = _browser_ws()
+        _ws_send(_CDP_WS, _json.dumps({"id": 1, "method": method, "params": params or {}}))
+        while True:
+            msg = _json.loads(_ws_recv(_CDP_WS, timeout))
+            if msg.get("id") == 1:
+                if "error" in msg:
+                    raise RuntimeError(f"CDP {method}: {msg['error']}")
+                return msg.get("result", {})
 
 
 def _browser_ws():
@@ -1360,3 +1374,8 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         return handlers[name](**args)
     except TypeError as e:
         return json.dumps({"error": f"Invalid arguments: {e}"}, ensure_ascii=False)
+    except Exception as e:
+        # Any other exception (e.g. RuntimeError "ws connection closed" when the
+        # user closed Chromium) must NOT kill the agent process. Return it as a
+        # tool result so the model can recover (e.g. re-open the browser).
+        return json.dumps({"error": f"{type(e).__name__}: {e}"}, ensure_ascii=False)
