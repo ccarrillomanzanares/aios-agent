@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.18.6 - 2026-09-08 17:05
+
+### features
+
+- **Barge-in (interrumpir al agente)**: durante el turno del agente (mientras escribe o ejecuta tools), **Tab** pausa y abre un mini-input para añadir más información por texto; **Ctrl+R** captura la info por voz (micrófono + STT). El turno se corta suavemente y el agente se relanza con la info como nueva consulta, conservando el contexto. Sin Ctrl+C. Documentado en `shortcuts.txt` (F1).
+- **browser_elements**: nueva tool que inventaría los elementos interactivos de la página (botones, enlaces, inputs) como refs legibles (`btn-create-dashboard`, `inp-search`) con texto visible y selector CSS — el agente VE la página antes de clicar (como Hermes `drive_preview action="elements"`).
+- **browser_click/browser_type con fallback por texto**: si el selector no existe, busca por texto visible (`innerText`/`aria-label`/`value`/`placeholder`, case-insensitive) — clic por lo que se VE ("Create your first dashboard") sin adivinar selectores.
+- **Prompt browser actualizado**: el agente debe llamar `browser_elements()` ANTES de clicar/escribir (workflow navigate → elements → click/type).
+
+### fixes
+
+- **estimador de tokens len//2** (sobreestima para todos los idiomas europeos, medido 2.8-4.4 chars/token reales vs 2 estimados): comprime antes, nunca llega al límite de 100s de Cloudflare.
+- **compresión en bucle (máx 3 pasadas)**: si tras comprimir el historial sigue > umbral, comprime otra vez — el prompt final siempre cabe.
+- **cap de 2000 chars en el texto a resumir**: la llamada de compresión es ligera (~15-20s) aunque el historial sea enorme.
+
 ## v0.18.5 - 2026-09-07 20:21
 
 ### features
