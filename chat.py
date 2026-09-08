@@ -619,7 +619,7 @@ def main():
             continue
 
         if query.lower() == "/reset":
-            agent.messages = []
+            agent.reset()  # keeps the system prompt (identity + rules)
             agent._save_session()
             print("  Session cleared. New conversation.")
             continue
