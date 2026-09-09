@@ -473,8 +473,22 @@ def ocr(path: str = "") -> str:
 
     env = _display_env()
     try:
+        # Use only languages actually installed. tesseract fails (empty output
+        # or error) if -l names a missing traineddata; AIOS ships only
+        # eng/afr/osd — ask for eng+spa only if spa.traineddata exists.
+        langs = "eng"
+        try:
+            rl = subprocess.run(["tesseract", "--list-langs"], env=env,
+                                capture_output=True, text=True, timeout=10)
+            avail = set(rl.stdout.splitlines())
+            if "spa" in avail and "eng" in avail:
+                langs = "eng+spa"
+            elif "spa" in avail:
+                langs = "spa"
+        except Exception:
+            pass
         r = subprocess.run(
-            ["tesseract", image_path, "stdout", "-l", "eng+spa"],
+            ["tesseract", image_path, "stdout", "-l", langs],
             env=env,
             capture_output=True,
             text=True,
@@ -484,11 +498,11 @@ def ocr(path: str = "") -> str:
         if r.returncode != 0:
             stderr = r.stderr.strip()[:1000]
             return json.dumps(
-                {"error": "OCR failed", "stderr": stderr, "text": text},
+                {"error": "OCR failed", "stderr": stderr, "text": text, "langs": langs},
                 ensure_ascii=False,
             )
         return json.dumps(
-            {"path": image_path, "text": text, "length": len(r.stdout.strip())},
+            {"path": image_path, "text": text, "length": len(r.stdout.strip()), "langs": langs},
             ensure_ascii=False,
         )
     except subprocess.TimeoutExpired as e:

@@ -251,6 +251,12 @@ _LOCAL_CONTEXT = _auto_context(_ram_gb())
 # local = 1/8 of RAM-derived context (leaves 7/8 for system+tools+history)
 if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
     MAX_TOKENS = max(4096, _cloud_context // 4)
+    # K2-Horizon is a very verbose reasoning model: it can spend the whole
+    # budget thinking without ever producing content or a tool call
+    # (verified 9 Sep 2026: 8192 tokens × 2 turns = ~40 min, finish=length,
+    # chunks=0, tools=0). Constrain it hard so a turn stays usable.
+    if "k2" in os.environ.get("AIOS_CLOUD_MODEL", "").lower():
+        MAX_TOKENS = min(MAX_TOKENS, 2048)
 else:
     MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
     if THINK_LOCAL:
@@ -345,6 +351,8 @@ What you can do for the user:
 - Vision: read text from images (OCR - tesseract), take screenshots (scrot), control the desktop (xdotool).
 - Web browsing: use Chromium with the browser_* tools (browser_navigate, browser_eval, browser_elements, browser_click, browser_type). They read the real page DOM — no OCR needed. NEVER use process_send to control a browser (it writes to stdin, browsers ignore it). Use xdotool/OCR only as a last resort.
   Browser workflow: browser_navigate(url) to open a page, then browser_elements() to SEE the interactive elements — ALWAYS call this before clicking/typing. browser_click/browser_type accept a CSS selector OR the visible text (e.g. "Configure visualization", "Create your first dashboard"). IGNORE the ref field of browser_elements (it is only a human-readable label, not a selector); use the element's visible text or the selector field instead. If a click/type returns NOT_FOUND, re-run browser_elements() to see the current page state (it may have changed after navigation) and pick the right text/selector — do NOT guess refs or CSS selectors. browser_eval("document.body.innerText") reads the visible text, browser_eval("document.title") the title. Example: to search flights, navigate to the site, call browser_elements() to find the cookie-accept button and the search inputs, click/type by their visible text, and read the results.
+  IMPORTANTE browser_eval: devuelve el VALOR DE RETORNO de la expresión, NO la salida de console.log (console.log devuelve null siempre). Para listar botones/inputs usa expresiones que DEVUELVAN: Array.from(document.querySelectorAll('button')).map((b,i)=>i+':'+b.textContent.trim()).filter(x=>x).join('\\n'). NO uses console.log.
+  Para tareas de UI complejas (crear dashboards, formularios multi-paso): trabaja en PASOS PEQUEÑOS — una acción por turno de tool, verifica (browser_eval document.URL + título, o browser_elements) y continúa. No intentes hacer todo en una sola llamada.
 - Install/remove packages with sven (official repositories only).
 - Configure the system: network (WiFi, DNS), Xorg/i3 desktop, systemd services, the local LLM server (llama-server, port 8083).
 - Screen recording: $mod+Print toggles recording of the screen (saved as a video file, e.g. /tmp/grabacion.mp4). Tell the user about it when they ask how to record the screen.
@@ -357,6 +365,8 @@ _LOCAL_IDENTITY = """You are AIOS, the assistant of the AIOS Linux system (LFS +
 Expert Linux sysadmin. You can run commands, edit files, search the web, read text from images (OCR), take screenshots and control the desktop.
 - Web browsing: use Chromium with the browser_* tools (browser_navigate, browser_eval, browser_elements, browser_click, browser_type). They read the real page DOM — no OCR needed. NEVER use process_send to control a browser (it writes to stdin, browsers ignore it). Use xdotool/OCR only as a last resort.
   Browser workflow: browser_navigate(url) to open a page, then browser_elements() to SEE the interactive elements — ALWAYS call this before clicking/typing. browser_click/browser_type accept a CSS selector OR the visible text (e.g. "Configure visualization", "Create your first dashboard"). IGNORE the ref field of browser_elements (it is only a human-readable label, not a selector); use the element's visible text or the selector field instead. If a click/type returns NOT_FOUND, re-run browser_elements() to see the current page state (it may have changed after navigation) and pick the right text/selector — do NOT guess refs or CSS selectors. browser_eval("document.body.innerText") reads the visible text, browser_eval("document.title") the title. Example: to search flights, navigate to the site, call browser_elements() to find the cookie-accept button and the search inputs, click/type by their visible text, and read the results.
+  IMPORTANTE browser_eval: devuelve el VALOR DE RETORNO de la expresión, NO la salida de console.log (console.log devuelve null siempre). Para listar botones/inputs usa expresiones que DEVUELVAN: Array.from(document.querySelectorAll('button')).map((b,i)=>i+':'+b.textContent.trim()).filter(x=>x).join('\\n'). NO uses console.log.
+  Para tareas de UI complejas (crear dashboards, formularios multi-paso): trabaja en PASOS PEQUEÑOS — una acción por turno de tool, verifica (browser_eval document.URL + título, o browser_elements) y continúa. No intentes hacer todo en una sola llamada.
 Screen recording: $mod+Print toggles recording of the screen (saved as a video file, e.g. /tmp/grabacion.mp4). Tell the user about it when they ask how to record the screen.
 Update AIOS itself: run 'aios-update' (updates agent, scripts and configs; requires internet and sudo).
 
@@ -552,6 +562,13 @@ class Agent:
 
         self.messages.append({"role": "user", "content": query})
 
+        # Save early so long turns are monitorable/recoverable even if the
+        # process dies mid-generation (before final _save_session).
+        try:
+            self._save_session()
+        except Exception:
+            pass
+
         final_response = ""
         empty_retries = 0
         for _ in range(MAX_TURNS):
@@ -569,12 +586,24 @@ class Agent:
                 payload["chat_template_kwargs"] = {"enable_thinking": THINK_LOCAL}
             if AIOS_MODE in ("cloud", "hybrid") and CLOUD_MODEL:
                 payload["model"] = CLOUD_MODEL
+            _is_k2 = "k2" in (CLOUD_MODEL or "").lower()
+            if _is_k2:
+                # K2-Horizon reason endlessly at high effort (verified 9 Sep
+                # 2026: a single turn spent 8192 tokens thinking, ~20 min, no
+                # output). Force low reasoning depth + tight budget.
+                payload.setdefault("chat_template_kwargs", {})["reasoning_effort"] = "low"
 
             try:
                 resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=300, stream=True, verify=VERIFY_TLS)
                 resp.raise_for_status()
             except Exception as e:
                 return f"LLM connection error: {e}"
+
+            # Total-generation watchdog: even with stream=True the per-read
+            # timeout never fires while chunks keep arriving, so a single
+            # overzealous reasoning turn can burn 20-40 min. Cap wall time per
+            # LLM call at 240s; on expiry, treat it like finish=length.
+            _gen_deadline = time.time() + 240
 
             content_chunks = []
             reasoning_chunks = []
@@ -596,6 +625,13 @@ class Agent:
                 fd_cb, old_cb = _cbreak_on()
 
                 for raw_line in resp.iter_lines():
+                    # Generation watchdog: kill an overlong single-turn loop.
+                    if time.time() > _gen_deadline:
+                        if not finish_reason:
+                            finish_reason = "length"  # treat as reasoning budget exhausted
+                        if stream_log:
+                            stream_log.write(f"--- WATCHDOG deadline hit at {time.strftime('%H:%M:%S')} ---\n")
+                        break
                     if not raw_line:
                         continue
                     line = raw_line.decode("utf-8")
@@ -702,7 +738,11 @@ class Agent:
             # finish_reason (connection broke mid-tool-call) or (b) finish=length
             # with empty content (model exhausted max_tokens only reasoning — DeepSeek
             # reasoning_content). With max_tokens already increased this is rare.
-            if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1:
+            # EXCEPTION: K2-Horizon — it reasons so verbosely that an empty
+            # length turn means its thinking loop ran away; retrying only burns
+            # another ~20 min. For K2, degrade to an honest message instead.
+            _is_k2 = "k2" in (CLOUD_MODEL or "").lower()
+            if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1 and not _is_k2:
                 empty_retries += 1
                 print(f"\n  Empty stream ({_empty_reason(finish, reasoning_chunks)}). Retrying...")
                 continue
