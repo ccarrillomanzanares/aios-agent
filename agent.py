@@ -812,34 +812,12 @@ class Agent:
                         args = {}
 
 
-                    # --- Anti-repeat: only guard against blind re-running a command
-                    # that ALREADY FAILED with the same command string. Exact-repeat
-                    # counting was removed (Sep 2026): it produced false positives on
-                    # legitimate retries (e.g. `sven install` after a network timeout)
-                    # and crashed with a NameError on `_tool_history`. ---
-                    if name == "run_command":
-                        _cmd = args.get('command', '')
-                        _last_errors = getattr(self, '_last_run_errors', {})
-                        _prev = _last_errors.get(_cmd)
-                        if _prev and _prev.get("exit_code") != 0:
-                            # Already tried this exact command and it failed; ask model to analyse instead of retrying
-                            _out(f"  ⚠ Command already failed before: {_cmd[:60]}...\n")
-                            self.messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc.get("id", "call_0"),
-                                "content": json.dumps({
-                                    "error": "Command previously failed with the same command string",
-                                    "previous_exit_code": _prev.get("exit_code"),
-                                    "previous_stderr": _prev.get("stderr", "")[:500],
-                                    "instruction": "Do not run the same failing command again. Diagnose the previous error first (e.g. systemctl status, journalctl -u, ls -l)."
-                                }, ensure_ascii=False)
-                            })
-                            break
-
-                    # --- Anti-loop: same tool + same args 3x in a row → stop.
-                    # Prevents blind loops (e.g. browser_eval on the wrong page)
-                    # that also saturate the cloud LLM (524 timeouts).
-                    _loop_key = (name, func.get('arguments', ''))
+                    # --- Anti-loop FIRST: same tool + same args 3x in a row → stop.
+                    # Counts on EVERY call (even ones blocked below), so a model
+                    # that insists on the same failing command gets cut at 3
+                    # instead of looping forever. Whitespace-stripped args so
+                    # minor variations count as the same call. ---
+                    _loop_key = (name, func.get('arguments', '').strip())
                     _loop_hist = getattr(self, '_loop_hist', [])
                     _loop_hist.append(_loop_key)
                     if len(_loop_hist) > 9:
@@ -869,6 +847,32 @@ class Agent:
                         except Exception:
                             pass
                         return final_response
+
+                    # --- Anti-repeat: only guard against blind re-running a command
+                    # that ALREADY FAILED with the same command string. Exact-repeat
+                    # counting was removed (Sep 2026): it produced false positives on
+                    # legitimate retries (e.g. `sven install` after a network timeout)
+                    # and crashed with a NameError on `_tool_history`. ---
+                    # `continue` (not `break`): skip ONLY this tool call so the
+                    # anti-loop above can still count and cut the turn.
+                    if name == "run_command":
+                        _cmd = args.get('command', '')
+                        _last_errors = getattr(self, '_last_run_errors', {})
+                        _prev = _last_errors.get(_cmd)
+                        if _prev and _prev.get("exit_code") != 0:
+                            # Already tried this exact command and it failed; ask model to analyse instead of retrying
+                            _out(f"  ⚠ Command already failed before: {_cmd[:60]}...\n")
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id", "call_0"),
+                                "content": json.dumps({
+                                    "error": "Command previously failed with the same command string",
+                                    "previous_exit_code": _prev.get("exit_code"),
+                                    "previous_stderr": _prev.get("stderr", "")[:500],
+                                    "instruction": "Do not run the same failing command again. Diagnose the previous error first (e.g. systemctl status, journalctl -u, ls -l)."
+                                }, ensure_ascii=False)
+                            })
+                            continue
 
                     # Show the tool BEFORE executing (so a long command does not
                     # look like it "does nothing" — the ⚙ is visible immediately).
