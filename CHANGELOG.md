@@ -17,6 +17,8 @@
 - **browser_eval prompt**: returns value (not console.log) + small steps in UI.
 - **OCR**: uses only installed languages (eng) instead of eng+spa which failed.
 - **Software inventory**: auto-record installs/removals + `get_installed_info` tool + markdown fact sheets.
+- **Anti-loop order fix**: the loop guard now runs BEFORE the "command previously failed" guard (which used `break` and skipped the counter — K2 looped ~18x on the same failing command). `continue` (not `break`) + whitespace-stripped args.
+- **Cleanup**: removed dead tools from the registry and code (`mcp_call`, `run_playbook`, `process_send`, module `playbook.py`); deleted the discarded vision-ladder GGUFs on the VPS (SmolVLM 256M/500M/2.2B) — only K2 + Gemma-3-4B remain; vision policy added to the prompt (describe_screen → browser_eval → ocr → screenshot).
 
 ## v0.19.0 - 2026-09-08 22:40
 

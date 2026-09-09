@@ -136,10 +136,6 @@ def process_start(command: str, timeout: int = 30) -> str:
     return _manager.start(command, timeout)
 
 
-def process_send(proc_id: str, text: str, timeout: int = 30) -> str:
-    return _manager.send(proc_id, text, timeout)
-
-
 def process_close(proc_id: str) -> str:
     return _manager.close(proc_id)
 

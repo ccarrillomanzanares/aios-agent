@@ -61,7 +61,6 @@ MANIFEST=(
   "agent/setup.py        /usr/local/bin/aios-agent/setup.py"
   "agent/tools.py        /usr/local/bin/aios-agent/tools.py"
   "agent/memory.py       /usr/local/bin/aios-agent/memory.py"
-  "agent/playbook.py     /usr/local/bin/aios-agent/playbook.py"
   "agent/process.py      /usr/local/bin/aios-agent/process.py"
   # --- Installer and system scripts (repo root/scripts → /usr/local/bin/) ---
   "agent/aios-install        /usr/local/bin/aios-install"

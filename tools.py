@@ -11,8 +11,7 @@ from pathlib import Path
 
 import requests
 import yaml
-from playbook import run_playbook
-from process import process_start, process_send, process_close, process_list
+from process import process_start, process_close, process_list
 
 
 # sudo password cache (session only): run_command passes it to sudo -S.
@@ -346,35 +345,6 @@ def git_operation(op: str, args: str = "") -> str:
     except Exception as e:
         return json.dumps({"stdout": "", "stderr": str(e), "exit_code": -1}, ensure_ascii=False)
 
-
-def mcp_call(server: str, tool: str, args: str = "{}") -> str:
-    """Call a tool on an MCP server via HTTP. Returns JSON."""
-    try:
-        parsed_args = json.loads(args) if args else {}
-    except json.JSONDecodeError as e:
-        return json.dumps({"error": f"args is not valid JSON: {e}"}, ensure_ascii=False)
-    base = server if server.startswith("http://") or server.startswith("https://") else f"http://{server}"
-    base = base.rstrip("/")
-    endpoints = [f"{base}/v1/tools/{tool}", f"{base}/tools/{tool}", f"{base}/mcp/{tool}", f"{base}/{tool}"]
-    last_error = ""
-    for endpoint in endpoints:
-        try:
-            r = requests.post(endpoint, json=parsed_args, timeout=15)
-            if r.status_code in (404, 405):
-                last_error = f"{endpoint} -> {r.status_code}"
-                continue
-            r.raise_for_status()
-            return json.dumps({"server": server, "tool": tool, "result": r.json() if r.text else {}}, ensure_ascii=False)
-        except requests.exceptions.ConnectionError as e:
-            last_error = f"Could not connect to {server}: {e}"
-            break
-        except requests.exceptions.Timeout:
-            last_error = f"Timeout connecting to {server}"
-            break
-        except Exception as e:
-            last_error = f"{endpoint} -> {e}"
-            continue
-    return json.dumps({"error": f"MCP server did not respond or tool '{tool}' does not exist", "details": last_error}, ensure_ascii=False)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1063,36 +1033,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "mcp_call",
-            "description": "Call a tool on an MCP server via HTTP.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "server": {"type": "string"},
-                    "tool": {"type": "string"},
-                    "args": {"type": "string", "description": "JSON arguments (default {})"}
-                },
-                "required": ["server", "tool"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_playbook",
-            "description": "Execute a YAML playbook with sequential steps.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path to .yml playbook"}
-                },
-                "required": ["path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "process_start",
             "description": "Start a long-running interactive process.",
             "parameters": {
@@ -1102,22 +1042,6 @@ TOOLS = [
                     "timeout": {"type": "integer", "description": "Timeout (default 30)"}
                 },
                 "required": ["command"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "process_send",
-            "description": "Send text to a running process.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "proc_id": {"type": "string"},
-                    "text": {"type": "string"},
-                    "timeout": {"type": "integer"}
-                },
-                "required": ["proc_id", "text"]
             }
         }
     },
@@ -1460,10 +1384,7 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "write_file": write_file,
         "web_search": web_search,
         "git_operation": git_operation,
-        "mcp_call": mcp_call,
-        "run_playbook": run_playbook,
         "process_start": process_start,
-        "process_send": process_send,
         "process_close": process_close,
         "process_list": process_list,
         "cloud_reasoning": lambda **kw: cloud_reasoning(kw, context=context),
