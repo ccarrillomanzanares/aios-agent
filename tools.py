@@ -240,6 +240,14 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
                             time.sleep(3)
                         continue
 
+            # Software inventory hook: record successful installs/removes so the
+            # agent remembers what is installed without re-scanning every time.
+            try:
+                from software_inventory import update_inventory
+                update_inventory(current_command, r.returncode)
+            except Exception:
+                pass
+
             return json.dumps({"stdout": stdout, "stderr": stderr, "exit_code": r.returncode,
                               "elapsed": round(time.time() - t0, 2)}, ensure_ascii=False)
         except subprocess.TimeoutExpired:
@@ -1282,6 +1290,19 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_installed_info",
+            "description": "Query the software inventory (auto-recorded when software is installed/removed). With no pkg, lists all installed packages with versions. With pkg, returns details + fact sheet for one package. Use this instead of re-scanning the system when asked about installed software.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pkg": {"type": "string", "description": "Package name to query (empty = list all)"}
+                }
+            }
+        }
+    },
 ]
 
 
@@ -1341,6 +1362,12 @@ def get_context_usage(args: dict, context=None) -> str:
 
 
 # Handler to execute tools
+def get_installed_info(pkg: str = "") -> str:
+    """Query the software inventory (auto-recorded on install/remove)."""
+    from software_inventory import get_installed_info as _gii
+    return _gii(pkg)
+
+
 def execute_tool(name: str, args: dict, context=None) -> str:
     handlers = {
         "run_command": run_command,
@@ -1367,6 +1394,7 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "browser_click": browser_click,
         "browser_type": browser_type,
         "browser_elements": browser_elements,
+        "get_installed_info": get_installed_info,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
