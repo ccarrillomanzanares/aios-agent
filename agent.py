@@ -447,10 +447,55 @@ class Agent:
                     f"{m['role']}: {m['content'][:200]}" for m in old if m.get("content")
                 )[-2000:]  # cap: keep the compression call light (Cloudflare 100s)
                 try:
+                    # Extract real keywords from the old messages BEFORE asking
+                    # the LLM to summarize. Reasoning models (K2-Horizon) can
+                    # fabricate a plausible-but-false summary (verified 9 Sep
+                    # 2026: it invented a Node.js/Express/MongoDB conversation
+                    # that never happened). We only accept a summary that
+                    # actually mentions the real topics.
+                    import re as _re
+                    _words = _re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", history_str.lower())
+                    _stop = {"the", "and", "for", "with", "that", "this", "you", "your",
+                             "was", "are", "not", "but", "from", "have", "has", "had",
+                             "will", "would", "can", "could", "should", "into", "them",
+                             "then", "than", "they", "there", "their", "what", "when",
+                             "where", "which", "while", "who", "why", "how", "all",
+                             "any", "are", "been", "being", "both", "did", "does",
+                             "doing", "each", "few", "more", "most", "other", "some",
+                             "such", "only", "own", "same", "so", "than", "too", "very",
+                             "just", "about", "after", "also", "because", "before",
+                             "between", "during", "through", "under", "again", "once",
+                             "here", "there", "out", "up", "down", "off", "over", "under"}
+                    # Roles and tool names are noise, not topics — never use them
+                    # as grounding keywords.
+                    _stop |= {"user", "assistant", "tool", "browser", "browser_click",
+                              "browser_eval", "browser_elements", "browser_navigate",
+                              "browser_type", "run_command", "read_file", "write_file",
+                              "get_installed_info", "screenshot", "ocr", "xdotool",
+                              "process_start", "process_send", "process_list",
+                              "list_desktop_apps", "web_search", "get_context_usage",
+                              "cloud_reasoning", "error", "result", "ok", "true", "false"}
+                    _kw = [w for w in _words if w not in _stop]
+                    # Stable top-N: sort once by frequency, keep order ties stable
+                    # (set() would shuffle and could drop the real topic keyword).
+                    _freq = {}
+                    for w in _kw:
+                        _freq[w] = _freq.get(w, 0) + 1
+                    _kw = sorted(_freq.items(), key=lambda kv: (-kv[1], kv[0]))[:12]
+                    _kw = [w for w, _ in _kw]
                     summary = self._quick_llm(
                         f"Resume the following conversation in 2-3 sentences keeping only technical details:\n\n{history_str}",
                         tokens=100, temp=0.3
                     )
+                    # Verify the summary is grounded: it must mention at least 2
+                    # of the real keywords. Otherwise the model hallucinated —
+                    # fall back to an honest generic summary.
+                    _sl = summary.lower()
+                    _hits = sum(1 for w in _kw if w in _sl)
+                    if _hits < 2 or not _kw:
+                        summary = ("[Previous conversation summary: se estaba trabajando en una tarea "
+                                   "con herramientas (browser, comandos, archivos). El detalle exacto se "
+                                   "perdió en la compresión — pide al usuario que re-explique si hace falta.]")
                     keep.append({"role": "user", "content": f"[Previous conversation summary: {summary}]"})
                 except Exception:
                     keep.append({"role": "user", "content": "[Previous conversation compressed]"})
