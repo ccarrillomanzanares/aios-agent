@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.20.0 - 2026-09-09 12:45
+
+### features
+
+- **Visión por IA (opcional)**: nueva tool `describe_screen()` — captura la pantalla y la describe con **Gemma-3-4B** (VLM multimodal) en el VPS. Reconoce apps, logos y texto de UI (verificado: identificó el editor de Grafana, "Prometheus default", "Kick start your query"...).
+- **Stack llama-hardened ampliado**: tercer contenedor `llama-vision` (Gemma-3-4B Q4_K_M + mmproj) en `/vision/*` con la misma X-API-Key. El análisis tarda ~43s (12.6s prompt + 30.8s gen).
+- **Opcional por privacidad**: el setup pregunta *"¿Quieres visión por IA?"* (solo para el proveedor LLM VPS). Si se declina, el agente sigue con browser/OCR. La config guarda `vision.enabled` + endpoint + key.
+- **Escalera de modelos probada**: SmolVLM-256M (175MB) ❌, SmolVLM-500M (437MB) ❌, SmolVLM2-2.2B (1.9GB) ⚠️ impreciso, **Gemma-3-4B (2.5GB) ✅** — el más pequeño que funciona.
+
+### fixes
+
+- **Compresión anti-alucinación**: el resumen del LLM se verifica contra keywords reales del historial; si no las menciona (K2 inventó una conversación Node.js/MongoDB falsa), se rechaza y se usa un resumen honesto.
+- **K2 domesticado**: `MAX_TOKENS` 2048 + `reasoning_effort: low` + watchdog 240s + sin retry — un turno ya no quema 40 min pensando.
+- **Prompt API-FIRST**: `fetch()` desde `browser_eval` para apps web autenticadas (Grafana, Prometheus, Jenkins, GitLab...).
+- **Prompt browser_eval**: devuelve valor (no console.log) + pasos pequeños en UI.
+- **OCR**: usa solo idiomas instalados (eng) en vez de eng+spa que fallaba.
+- **Inventario de software**: auto-registro de instalaciones/desinstalaciones + tool `get_installed_info` + fichas markdown.
+
 ## v0.19.0 - 2026-09-08 22:40
 
 ### features
