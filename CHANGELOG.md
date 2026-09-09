@@ -4,47 +4,47 @@
 
 ### features
 
-- **Visión por IA (opcional)**: nueva tool `describe_screen()` — captura la pantalla y la describe con **Gemma-3-4B** (VLM multimodal) en el VPS. Reconoce apps, logos y texto de UI (verificado: identificó el editor de Grafana, "Prometheus default", "Kick start your query"...).
-- **Stack llama-hardened ampliado**: tercer contenedor `llama-vision` (Gemma-3-4B Q4_K_M + mmproj) en `/vision/*` con la misma X-API-Key. El análisis tarda ~43s (12.6s prompt + 30.8s gen).
-- **Opcional por privacidad**: el setup pregunta *"¿Quieres visión por IA?"* (solo para el proveedor LLM VPS). Si se declina, el agente sigue con browser/OCR. La config guarda `vision.enabled` + endpoint + key.
-- **Escalera de modelos probada**: SmolVLM-256M (175MB) ❌, SmolVLM-500M (437MB) ❌, SmolVLM2-2.2B (1.9GB) ⚠️ impreciso, **Gemma-3-4B (2.5GB) ✅** — el más pequeño que funciona.
+- **AI vision (optional)**: new `describe_screen()` tool — captures the screen and describes it with **Gemma-3-4B** (multimodal VLM) on the VPS. Recognizes apps, logos and UI text (verified: identified the Grafana editor, "Prometheus default", "Kick start your query"...).
+- **llama-hardened stack extended**: third container `llama-vision` (Gemma-3-4B Q4_K_M + mmproj) on `/vision/*` with the same X-API-Key. Analysis takes ~43s (12.6s prompt + 30.8s gen).
+- **Optional for privacy**: setup asks *"Enable vision?"* (only for the LLM VPS provider). If declined, the agent keeps using browser/OCR. Config stores `vision.enabled` + endpoint + key.
+- **Model ladder tested**: SmolVLM-256M (175MB) ❌, SmolVLM-500M (437MB) ❌, SmolVLM2-2.2B (1.9GB) ⚠️ imprecise, **Gemma-3-4B (2.5GB) ✅** — the smallest that works.
 
 ### fixes
 
-- **Compresión anti-alucinación**: el resumen del LLM se verifica contra keywords reales del historial; si no las menciona (K2 inventó una conversación Node.js/MongoDB falsa), se rechaza y se usa un resumen honesto.
-- **K2 domesticado**: `MAX_TOKENS` 2048 + `reasoning_effort: low` + watchdog 240s + sin retry — un turno ya no quema 40 min pensando.
-- **Prompt API-FIRST**: `fetch()` desde `browser_eval` para apps web autenticadas (Grafana, Prometheus, Jenkins, GitLab...).
-- **Prompt browser_eval**: devuelve valor (no console.log) + pasos pequeños en UI.
-- **OCR**: usa solo idiomas instalados (eng) en vez de eng+spa que fallaba.
-- **Inventario de software**: auto-registro de instalaciones/desinstalaciones + tool `get_installed_info` + fichas markdown.
+- **Anti-hallucination compression**: the LLM summary is verified against real keywords from the history; if it does not mention them (K2 invented a fake Node.js/MongoDB conversation), it is rejected and an honest summary is used.
+- **K2 tamed**: `MAX_TOKENS` 2048 + `reasoning_effort: low` + 240s watchdog + no retry — a turn no longer burns 40 min thinking.
+- **API-FIRST prompt**: `fetch()` from `browser_eval` for authenticated web apps (Grafana, Prometheus, Jenkins, GitLab...).
+- **browser_eval prompt**: returns value (not console.log) + small steps in UI.
+- **OCR**: uses only installed languages (eng) instead of eng+spa which failed.
+- **Software inventory**: auto-record installs/removals + `get_installed_info` tool + markdown fact sheets.
 
 ## v0.19.0 - 2026-09-08 22:40
 
 ### features
 
-- **Proveedor "LLM VPS (llama-hardened)"** en el setup: seleccionable junto a los cloud providers, con dos modelos:
+- **"LLM VPS (llama-hardened)" provider** in setup: selectable alongside cloud providers, with two models:
   - `k2-horizon:7b` → `webuillama.ccmai.org/v1/chat/completions` (K2-Horizon-7B Q4_K_M, llama-server fork MBZUAI-IFM)
-  - `qwen3.5:9b` → `webuillama.ccmai.org/ollama/v1/chat/completions` (Qwen3.5-9B, mismo stack, ruta separada)
-  - Misma `X-API-Key` para ambos; el menú propaga la URL por modelo (3er elemento de la tupla).
+  - `qwen3.5:9b` → `webuillama.ccmai.org/ollama/v1/chat/completions` (Qwen3.5-9B, same stack, separate route)
+  - Same `X-API-Key` for both; the menu propagates the URL per model (3rd tuple element).
 
 ### breaking change
 
-- **Ollama Hardened → llama-hardened**: el stack del VPS cambia de motor. `ollama-core` (Ollama 0.32.15) no puede servir K2 (arquitectura MoVA aún sin soporte en su llama.cpp), así que el stack pasa a **llama-server del fork MBZUAI-IFM** tras Caddy X-API-Key. El endpoint `/v1` sirve K2 y `/ollama/*` sirve Qwen3.5. Ollama queda parado como reserva (modelos intactos en su volumen).
+- **Ollama Hardened → llama-hardened**: the VPS stack changes engine. `ollama-core` (Ollama 0.32.15) cannot serve K2 (MoVA architecture not yet supported in its llama.cpp), so the stack moves to **llama-server from the MBZUAI-IFM fork** behind Caddy X-API-Key. `/v1` serves K2 and `/ollama/*` serves Qwen3.5. Ollama stays stopped as reserve (models intact in its volume).
 
 ## v0.18.6 - 2026-09-08 17:05
 
 ### features
 
-- **Barge-in (interrumpir al agente)**: durante el turno del agente (mientras escribe o ejecuta tools), **Tab** pausa y abre un mini-input para añadir más información por texto; **Ctrl+R** captura la info por voz (micrófono + STT). El turno se corta suavemente y el agente se relanza con la info como nueva consulta, conservando el contexto. Sin Ctrl+C. Documentado en `shortcuts.txt` (F1).
-- **browser_elements**: nueva tool que inventaría los elementos interactivos de la página (botones, enlaces, inputs) como refs legibles (`btn-create-dashboard`, `inp-search`) con texto visible y selector CSS — el agente VE la página antes de clicar (como Hermes `drive_preview action="elements"`).
-- **browser_click/browser_type con fallback por texto**: si el selector no existe, busca por texto visible (`innerText`/`aria-label`/`value`/`placeholder`, case-insensitive) — clic por lo que se VE ("Create your first dashboard") sin adivinar selectores.
-- **Prompt browser actualizado**: el agente debe llamar `browser_elements()` ANTES de clicar/escribir (workflow navigate → elements → click/type).
+- **Barge-in (interrupt the agent)**: during the agent's turn (while it writes or runs tools), **Tab** pauses and opens a mini-input to add more information by text; **Ctrl+R** captures info by voice (microphone + STT). The turn is cut gently and the agent relaunches with the info as a new query, keeping context. No Ctrl+C. Documented in `shortcuts.txt` (F1).
+- **browser_elements**: new tool that inventories the page's interactive elements (buttons, links, inputs) as readable refs (`btn-create-dashboard`, `inp-search`) with visible text and CSS selector — the agent SEES the page before clicking (like Hermes `drive_preview action="elements"`).
+- **browser_click/browser_type with text fallback**: if the selector doesn't exist, it searches by visible text (`innerText`/`aria-label`/`value`/`placeholder`, case-insensitive) — click by what you SEE ("Create your first dashboard") without guessing selectors.
+- **Browser prompt updated**: the agent must call `browser_elements()` BEFORE clicking/typing (workflow navigate → elements → click/type).
 
 ### fixes
 
-- **estimador de tokens len//2** (sobreestima para todos los idiomas europeos, medido 2.8-4.4 chars/token reales vs 2 estimados): comprime antes, nunca llega al límite de 100s de Cloudflare.
-- **compresión en bucle (máx 3 pasadas)**: si tras comprimir el historial sigue > umbral, comprime otra vez — el prompt final siempre cabe.
-- **cap de 2000 chars en el texto a resumir**: la llamada de compresión es ligera (~15-20s) aunque el historial sea enorme.
+- **token estimator len//2** (overestimates for all European languages, measured 2.8-4.4 chars/token real vs 2 estimated): compresses earlier, never reaches Cloudflare's 100s limit.
+- **compression loop (max 3 passes)**: if after compressing the history is still above the threshold, compress again — the final prompt always fits.
+- **2000 char cap on the text to summarize**: the compression call is light (~15-20s) even with a huge history.
 
 ## v0.18.5 - 2026-09-07 20:21
 
@@ -76,7 +76,7 @@
 - **compression summary as `user` (not `system`)**: the no-thinking model `frob/qwen3.5-instruct:9b` requires `system` at the start of the history; a summary inserted as `system` in the middle caused 500 `Jinja Exception: System message must be at the beginning`.
 - **cloud compression threshold 20% -> 10%**: keeps prompt-eval (~25 tok/s on CPU) under the timeout with large contexts.
 - **tool output cap**: ANSI strip + truncation to 1200/1000 chars (was 5000/2000) — command outputs no longer bloat the context and slow the reasoning model.
-- **MAX_TURNS 10 -> 25** + when exhausted the agent asks `(continue) Aún no he terminado... ¿Quieres que continúe?` instead of `(no response)`.
+- **MAX_TURNS 10 -> 25** + when exhausted the agent asks `(continue) I haven't finished yet... Do you want me to continue?` instead of `(no response)`.
 - **procedural memory filter**: no longer caches greetings/trivial queries (hola, gracias, ok...), short answers (<80 chars) or `(continue)` status messages.
 - **OCR eng+spa**: tesseract with Spanish for Spanish pages.
 - **bracketed paste in `_read_line()`** (setup.py): copy/paste works in the API key prompt.
@@ -129,7 +129,6 @@
 - **context/tokens**: cloud `max_tokens` now scales with the context (`_cloud_context // 4`) instead of a fixed 4096, and the Ollama Hardened `context_limit` raised 8K → 32K — fixes empty responses from reasoning models exhausting the token budget.
 - **status bar**: `CTX` block now resolves the Ollama Hardened context limit (32K) instead of the 128K default.
 
-
 ## v0.17.1 - 2026-08-30 14:10
 
 ### fixes
@@ -147,7 +146,7 @@
 
 ### i18n
 
-- All comments and user-facing strings translated to English (agent, installer, README, docs, scripts). Fixes `<think>` tag corruption.
+- All comments and user-facing strings translated to English (agent, installer, README, docs, scripts). Fixes ` thinking` tag corruption.
 
 ### quotes
 
@@ -238,7 +237,7 @@
 ### local thinking switch (ON/OFF) + relative context/threads in disk installation
 
 - **Local thinking mode (Qwen3-8B)**: binary ON/OFF switch via `local.think` key in `config.yaml` (default OFF).
-  - `agent.py`: `THINK_LOCAL` (env `AIOS_LOCAL_THINK`) controls the `/no_think` token in the query, the "Do not use <think> tags" system prompt rule and `max_tokens` (min. 2048 when thinking, because reasoning consumes tokens before the response). `_quick_llm` always uses `/no_think`.
+  - `agent.py`: `THINK_LOCAL` (env `AIOS_LOCAL_THINK`) controls the `/no_think` token in the query, the "Do not use  thinking tags" system prompt rule and `max_tokens` (min. 2048 when thinking, because reasoning consumes tokens before the response). `_quick_llm` always uses `/no_think`.
   - `chat.py`: passes `AIOS_LOCAL_THINK` to the environment before importing `agent`.
   - `setup.py`: asks "Enable thinking mode? [y/N]" in live and install.
   - `aios-install`: new flag `--think 0|1`.
