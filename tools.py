@@ -1317,6 +1317,19 @@ TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "describe_screen",
+            "description": "Capture the screen and describe it with the vision model (recognizes apps, logos, UI text). Use when the user says something is 'on screen' or 'in the browser' and you need to SEE it. If it returns 'Vision not enabled', fall back to browser_eval/OCR.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Optional: what to look for (default: describe the screen)"}
+                }
+            }
+        }
+    },
 ]
 
 
@@ -1382,6 +1395,63 @@ def get_installed_info(pkg: str = "") -> str:
     return _gii(pkg)
 
 
+def describe_screen(prompt: str = "Describe this screen. What application is open? What text is visible?") -> str:
+    """Capture the screen and describe it with the vision model (Gemma-3-4B).
+
+    Returns JSON with the model's description. Requires vision.enabled=true in
+    config.yaml and the /vision endpoint reachable. Falls back to an error the
+    agent can handle (use browser_eval/OCR instead).
+    """
+    import base64 as _b64
+    import os as _os
+    import urllib.request as _url
+    import json as _json
+
+    # 1. Screenshot
+    res = screenshot()
+    try:
+        parsed = _json.loads(res)
+        if "error" in parsed:
+            return res
+    except Exception:
+        pass
+    path = SCREENSHOT_PATH
+    if not _os.path.exists(path):
+        return _json.dumps({"error": "Screenshot not available"}, ensure_ascii=False)
+
+    # 2. Vision endpoint from config/env
+    endpoint = _os.environ.get("AIOS_VISION_ENDPOINT", "")
+    api_key = _os.environ.get("AIOS_VISION_API_KEY", "")
+    if not endpoint:
+        return _json.dumps({"error": "Vision not enabled (AIOS_VISION_ENDPOINT not set). Use browser_eval/OCR instead."}, ensure_ascii=False)
+
+    try:
+        with open(path, "rb") as f:
+            b64 = _b64.b64encode(f.read()).decode()
+        data_uri = "data:image/png;base64," + b64
+        payload = {
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": data_uri}},
+                    {"type": "text", "text": prompt},
+                ]
+            }],
+            "max_tokens": 400,
+            "temperature": 0.2,
+        }
+        headers = {"Content-Type": "application/json", "User-Agent": "AIOS-Vision/1.0"}
+        if api_key:
+            headers["X-API-Key"] = api_key
+        req = _url.Request(endpoint, data=_json.dumps(payload).encode(), headers=headers)
+        with _url.urlopen(req, timeout=180) as r:
+            d = _json.loads(r.read().decode())
+        content = d["choices"][0]["message"].get("content", "")
+        return _json.dumps({"ok": True, "description": content}, ensure_ascii=False)
+    except Exception as e:
+        return _json.dumps({"error": f"Vision failed: {e}"}, ensure_ascii=False)
+
+
 def execute_tool(name: str, args: dict, context=None) -> str:
     handlers = {
         "run_command": run_command,
@@ -1409,6 +1479,7 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "browser_type": browser_type,
         "browser_elements": browser_elements,
         "get_installed_info": get_installed_info,
+        "describe_screen": describe_screen,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
