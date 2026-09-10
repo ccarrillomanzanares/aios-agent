@@ -251,12 +251,6 @@ _LOCAL_CONTEXT = _auto_context(_ram_gb())
 # local = 1/8 of RAM-derived context (leaves 7/8 for system+tools+history)
 if os.environ.get("AIOS_MODE") in ("cloud", "hybrid"):
     MAX_TOKENS = max(4096, _cloud_context // 4)
-    # K2-Horizon is a very verbose reasoning model: it can spend the whole
-    # budget thinking without ever producing content or a tool call
-    # (verified 9 Sep 2026: 8192 tokens × 2 turns = ~40 min, finish=length,
-    # chunks=0, tools=0). Constrain it hard so a turn stays usable.
-    if "k2" in os.environ.get("AIOS_CLOUD_MODEL", "").lower():
-        MAX_TOKENS = min(MAX_TOKENS, 2048)
 else:
     MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
     if THINK_LOCAL:
@@ -449,7 +443,7 @@ class Agent:
                 )[-2000:]  # cap: keep the compression call light (Cloudflare 100s)
                 try:
                     # Extract real keywords from the old messages BEFORE asking
-                    # the LLM to summarize. Reasoning models (K2-Horizon) can
+                    # the LLM to summarize. Reasoning models can
                     # fabricate a plausible-but-false summary (verified 9 Sep
                     # 2026: it invented a Node.js/Express/MongoDB conversation
                     # that never happened). We only accept a summary that
@@ -781,11 +775,7 @@ class Agent:
             # finish_reason (connection broke mid-tool-call) or (b) finish=length
             # with empty content (model exhausted max_tokens only reasoning — DeepSeek
             # reasoning_content). With max_tokens already increased this is rare.
-            # EXCEPTION: K2-Horizon — it reasons so verbosely that an empty
-            # length turn means its thinking loop ran away; retrying only burns
-            # another ~20 min. For K2, degrade to an honest message instead.
-            _is_k2 = "k2" in (CLOUD_MODEL or "").lower()
-            if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1 and not _is_k2:
+            if (not finish or finish == "length") and not content and not msg.get("tool_calls") and empty_retries < 1:
                 empty_retries += 1
                 print(f"\n  Empty stream ({_empty_reason(finish, reasoning_chunks)}). Retrying...")
                 continue
