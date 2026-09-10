@@ -910,7 +910,7 @@ PROVIDERS = [
     {
         "name": "LLM VPS (llama-hardened)",
         "models": [
-            ("k2-horizon:7b", "K2-Horizon-7B - reasoning + tool calling (VPS)", "https://webuillama.ccmai.org/v1/chat/completions"),
+            ("nemotron-3.5-lightning", "Nemotron-3.5-Lightning 30B-A3B - agentic tool calling (VPS)", "https://webuillama.ccmai.org/v1/chat/completions"),
             ("qwen3.5:9b", "Qwen3.5 9B - reasoning + tool calling (VPS)", "https://webuillama.ccmai.org/ollama/v1/chat/completions"),
         ],
         "env": "OLLAMA_HARDENED_API_KEY",

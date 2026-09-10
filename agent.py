@@ -634,12 +634,7 @@ class Agent:
                 payload["chat_template_kwargs"] = {"enable_thinking": THINK_LOCAL}
             if AIOS_MODE in ("cloud", "hybrid") and CLOUD_MODEL:
                 payload["model"] = CLOUD_MODEL
-            _is_k2 = "k2" in (CLOUD_MODEL or "").lower()
-            if _is_k2:
-                # K2-Horizon reason endlessly at high effort (verified 9 Sep
-                # 2026: a single turn spent 8192 tokens thinking, ~20 min, no
-                # output). Force low reasoning depth + tight budget.
-                payload.setdefault("chat_template_kwargs", {})["reasoning_effort"] = "low"
+                payload["chat_template_kwargs"] = {"enable_thinking": THINK_LOCAL}
 
             try:
                 resp = requests.post(LLAMA_SERVER, json=payload, headers=CLOUD_HEADERS, timeout=300, stream=True, verify=VERIFY_TLS)
@@ -833,7 +828,7 @@ class Agent:
                     if _consec >= 3:
                         _out(f"  ⚠ Same tool call repeated {_consec}x — no progress, stopping.\n")
                         # Hard stop: do NOT feed the error back to the LLM as a tool
-                        # result. Reasoning models (K2-Horizon) interpret the error as
+                        # result. Reasoning models interpret the error as
                         # "command failed, retry" and loop forever. Cut the turn and
                         # return an honest summary to the user instead.
                         final_response = (
