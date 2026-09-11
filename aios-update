@@ -14,6 +14,8 @@ BACKUP=/var/backups/aios-update
 REPO_AGENT=https://github.com/ccarrillomanzanares/aios-agent.git
 REPO_LFS=https://github.com/ccarrillomanzanares/aios-lfs.git
 DATE=$(date +%Y%m%d-%H%M)
+SELF=/usr/local/bin/aios-update   # this script (handled separately, see loop)
+SELF_PENDING=0                    # 1 = a new aios-update is waiting to be installed
 
 # Subtle colors
 GRN='\033[0;32m'; YEL='\033[1;33m'; CYA='\033[0;36m'; RST='\033[0m'
@@ -102,6 +104,19 @@ for entry in "${MANIFEST[@]}"; do
   esac
   [ -f "$file" ] || { warn "missing in repo: $src (skipping)"; continue; }
 
+  # aios-update cannot overwrite itself while running: bash reads this script
+  # incrementally, so replacing the file mid-run makes it re-read the new file
+  # from the old byte offset -> syntax error and the whole loop aborts.
+  # Defer it and re-exec the new copy at the very end.
+  if [ "$dst" = "$SELF" ]; then
+    if [ "$(md5sum < "$file" | cut -d' ' -f1)" = "$(md5sum < "$SELF" | cut -d' ' -f1)" ]; then
+      same=$((same+1))
+    else
+      SELF_PENDING=1
+    fi
+    continue
+  fi
+
   if [ -f "$dst" ] && [ "$(md5sum < "$file" | cut -d' ' -f1)" = "$(md5sum < "$dst" | cut -d' ' -f1)" ]; then
     same=$((same+1))
     continue
@@ -141,4 +156,21 @@ else
     warn "i3 config/status changed — reload i3 (Super+Shift+r) to apply."
   fi
 fi
+
+# 4. Self-update last: by now this script has been fully read, so replacing it
+#    is safe. Re-exec the new copy once so the deferred update takes effect.
+if [ "$SELF_PENDING" = 1 ] && [ -f "$CACHE/aios-agent/aios-update" ]; then
+  if [ "${AIOS_UPDATE_REEXEC:-0}" = "1" ]; then
+    warn "aios-update itself changed again during re-exec; install it manually"
+  else
+    mkdir -p "$BACKUP/$DATE/usr/local/bin"
+    cp -a "$SELF" "$BACKUP/$DATE/usr/local/bin/aios-update" 2>/dev/null || true
+    cp "$CACHE/aios-agent/aios-update" "$SELF"
+    chmod 755 "$SELF" 2>/dev/null || true
+    ok "updated $SELF (re-running to apply)"
+    export AIOS_UPDATE_REEXEC=1
+    exec "$SELF" "$@"
+  fi
+fi
+
 exit 0
