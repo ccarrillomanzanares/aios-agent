@@ -34,6 +34,10 @@ SYSTEM_CONF = Path("/etc/aios-torrent.conf")
 USER_CONF = Path.home() / ".aios" / "torrent.conf"
 CACHE_DIR = Path.home() / ".cache" / "aios-torrent"
 LAST_SEARCH = CACHE_DIR / "last_search.json"
+# A search result list is only valid for a while: the numbers are positional, so a
+# stale list would make "download 1" grab an unrelated film. After this many
+# minutes the agent must search again.
+SEARCH_TTL_MIN = 60
 MPV_LOG = Path("/tmp/aios-mpv.log")
 
 DEFAULTS = {
@@ -109,19 +113,30 @@ def _get(url, timeout=25):
         return json.loads(r.read().decode("utf-8", "replace"))
 
 
-def _cache_search(results):
+def _cache_search(results, query):
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        LAST_SEARCH.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
+        LAST_SEARCH.write_text(json.dumps(
+            {"query": query, "time": time.time(), "results": results},
+            ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception:
         pass
 
 
 def last_results():
+    """Cached results of the last search: the list, its query and its age."""
     try:
-        return json.loads(LAST_SEARCH.read_text(encoding="utf-8"))
+        d = json.loads(LAST_SEARCH.read_text(encoding="utf-8"))
     except Exception:
-        return []
+        return [], "", None
+    if isinstance(d, list):  # older cache format
+        return d, "", None
+    age_min = None
+    try:
+        age_min = (time.time() - float(d.get("time") or 0)) / 60
+    except Exception:
+        pass
+    return (d.get("results") or []), (d.get("query") or ""), age_min
 
 
 # ---------------------------------------------------------------- indexers
@@ -231,7 +246,7 @@ def search(query, category="video", limit=8):
             "category": it["category"],
             "magnet": magnet_for(it["info_hash"], it["title"][:80], trackers),
         })
-    _cache_search(results)
+    _cache_search(results, query)
     return results
 
 
@@ -387,11 +402,18 @@ def ensure_daemon():
 
 # ---------------------------------------------------------------- downloads
 
-def download(target, name=None):
+def download(target, name=None, from_beginning=True):
     """Add a magnet link, a .torrent URL or a search index (1..N).
 
     Called straight from the model, so anything can arrive: an int, a string, a
     magnet pasted whole, or a 40-hex infohash. All of it is accepted.
+
+    from_beginning=True (default) sets sequential_download: BitTorrent fetches
+    pieces in random order, so without this the video is unwatchable until the
+    WHOLE torrent is done — the start of the file, which a player needs first, is
+    usually among the last pieces to arrive. Sequential download means the file
+    can be played (and watched) while it is still downloading, which is the point
+    of the feature.
     """
     if target is None:
         return {"error": "no magnet or url given"}
@@ -401,32 +423,58 @@ def download(target, name=None):
     if not target:
         return {"error": "no magnet or url given"}
     if target.isdigit():
-        cached = last_results()
+        cached, cached_query, age_min = last_results()
         n = int(target)
+        if not cached:
+            return {"error": "there are no saved search results — call torrent_search first",
+                    "hint": "the number refers to a previous search"}
+        if age_min is not None and age_min > SEARCH_TTL_MIN:
+            return {"error": f"the saved search results are {int(age_min)} minutes old; "
+                             "search again so the number is not ambiguous"}
         if not (1 <= n <= len(cached)):
             return {"error": f"index {n} out of range (last search had {len(cached)} results)"}
         target = cached[n - 1]["magnet"]
         name = cached[n - 1]["title"]
+        picked_from = {"from_search": cached_query or "(previous search)",
+                       "result": f"{n} of {len(cached)}"}
     elif re.fullmatch(r"[0-9a-fA-F]{40}", target):
         # a bare infohash: models often strip the magnet wrapper
         target = magnet_for(target, name or "", config()["trackers"])
+        picked_from = None
     elif not (target.startswith("magnet:") or target.startswith("http")
               or target.startswith("https") or target.startswith("ftp")):
         return {"error": f"not a magnet link, .torrent url or search number: {target[:60]!r}"}
+    else:
+        picked_from = None
 
     ensure_daemon()
-    res = _rpc("torrent-add", {"filename": target, "paused": False})
+    add_args = {"filename": target, "paused": False}
+    if from_beginning:
+        add_args["sequential_download"] = True
+    res = _rpc("torrent-add", add_args)
     out = res.get("arguments", {})
     added = out.get("torrent-added") or out.get("torrent-duplicate")
+    added_id = added.get("id") if isinstance(added, dict) else None
+    if added_id and from_beginning:
+        # torrent-add may ignore the flag (or the torrent may already exist), so
+        # enforce it explicitly — otherwise "watch it while it downloads" silently
+        # does not work.
+        try:
+            _rpc("torrent-set", {"ids": [added_id], "sequential_download": True})
+        except Exception:
+            pass
     if isinstance(added, dict):
-        return {"added": added.get("name") or name, "id": added.get("id"),
-                "duplicate": bool(out.get("torrent-duplicate")),
-                "download_dir": _expand(config()["download_dir"]),
-                "status": "downloading in the background",
-                "next": "Tell the user what you started (name, size) and END YOUR TURN. "
-                        "Do NOT call torrent_status now and do NOT poll it: the download "
-                        "takes minutes or hours. Call torrent_status only if the user "
-                        "asks how it is going."}
+        out = {"added": added.get("name") or name, "id": added.get("id"),
+               "duplicate": bool(out.get("torrent-duplicate")),
+               "download_dir": _expand(config()["download_dir"]),
+               "status": "downloading in the background"}
+        if picked_from:
+            out.update(picked_from)
+        out["next"] = ("Tell the user what you started (name, size) and END YOUR TURN. "
+                       "Do NOT call torrent_status now and do NOT poll it: the download "
+                       "takes minutes or hours. Call torrent_status only if the user "
+                       "asks how it is going.")
+        return out
     return {"error": res.get("result", "unknown error"), "raw": out}
 
 
@@ -605,31 +653,131 @@ def play(path=None, fullscreen=True, torrent_id=None):
 
     # Only one player at a time: without this, asking for a second film leaves the
     # first mpv running and the user hears two soundtracks at once.
-    try:
-        subprocess.run(["pkill", "-f", r"mpv .*--really-quiet"], timeout=10,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.4)
-    except Exception:
-        pass
+    #
+    # ⚠️ Never `pkill -f "mpv ..."`: the pattern would match the pkill command's OWN
+    # command line, so it kills this process (the agent) instead — and because the
+    # agent dies mid-tool-call, the model only sees a generic error and retries in a
+    # loop, with the download percentage still moving so the anti-repeat guard never
+    # fires. Kill by exact binary name + /proc check instead.
+    _kill_previous_players(player)
 
     # Audio: keep mpv's default (auto). In AIOS the desktop session runs PipeWire
     # (wireplumber + pipewire sockets under /run/user/1000), so mpv finds it via
     # XDG_RUNTIME_DIR — which the agent's own environment already provides. Forcing
     # --ao=alsa here would BYPASS PipeWire and fail on a busy device.
-    args = [player, "--really-quiet", "--force-window=yes", "--keep-open=no",
+    #
+    # --msg-level=all=error instead of --really-quiet: with --really-quiet a failing
+    # mpv writes NOTHING to the log, so the diagnostics below reported an unrelated
+    # VDPAU warning as if it were the cause.
+    args = [player, "--msg-level=all=error", "--force-window=yes", "--keep-open=no",
             "--save-position-on-quit=yes", "--no-terminal"]
     if fullscreen:
         args.append("--fullscreen")
     args.append(str(target))
     try:
         with open(MPV_LOG, "ab") as log:
-            subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
-                             start_new_session=True)
+            proc = subprocess.Popen(args, stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                                    start_new_session=True)
     except FileNotFoundError:
-        return {"error": f"player not found: {player}"}
+        return {"error": f"player not found: {player}",
+                "hint": "install it with: sudo sven install mpv"}
+    except Exception as e:
+        return {"error": f"could not start {Path(player).name}: {type(e).__name__}: {e}"}
+
+    # Don't claim success on a Popen that already died: with a partially downloaded
+    # file mpv can exit at once and the user would get a black screen while the
+    # agent says "it's playing". Wait a moment and check what really happened.
+    time.sleep(3)
+    if proc.poll() is not None:
+        pct = info.get("downloaded_percent")
+        head_ok = head_downloaded(info.get("torrent_id")) if info.get("torrent_id") else None
+        # The honest, actionable diagnosis: mpv only needs the START of the file, so
+        # a torrent whose first pieces are still missing cannot play at all, however
+        # high the overall percentage looks (BitTorrent fetches pieces out of order).
+        return {"playing": False, "error": f"{Path(player).name} could not play the file (exit code {proc.returncode})",
+                "file": str(target),
+                "downloaded_percent": pct,
+                "start_of_video_downloaded": head_ok,
+                "reason": "the beginning of the video is not on disk yet — a player needs "
+                          "the first pieces, not just a high percentage",
+                "what_to_do": "wait and call torrent_play again later; new downloads are "
+                              "fetched sequentially so the start arrives first",
+                "tell_the_user": "that playback could NOT start yet because the beginning "
+                                 "of the video has not been downloaded"}
+
     out = {"playing": str(target), "player": Path(player).name, "fullscreen": bool(fullscreen)}
     out.update(info)
+    if info.get("partial"):
+        out["note"] = ("Playing the partially downloaded file. It may stop when playback "
+                       "catches up with the download; resume the same call later.")
     return out
+
+
+def _tail_file(path, max_bytes=2000):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            return f.read().decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
+def head_downloaded(torrent_id, pieces=12):
+    """True if the first `pieces` of the torrent are already on disk.
+
+    A player needs the START of the file: with a non-sequential download the
+    beginning often arrives last, so a torrent at 30% can still be unplayable while
+    one at 8% plays fine. This is what decides whether playing now makes sense.
+    """
+    import base64 as _b64
+    try:
+        r = _rpc("torrent-get", {"ids": [_as_int(torrent_id)],
+                                 "fields": ["pieces", "pieceCount", "percentDone", "isFinished"]})
+        t = (r.get("arguments", {}).get("torrents") or [None])[0]
+        if not t:
+            return None
+        if t.get("isFinished"):
+            return True
+        raw = _b64.b64decode(t.get("pieces") or "")
+        n = min(pieces, t.get("pieceCount") or 0)
+        if n == 0 or not raw:
+            return None
+        for i in range(n):
+            byte = raw[i // 8]
+            if not ((byte >> (7 - (i % 8))) & 1):
+                return False
+        return True
+    except Exception:
+        return None
+
+
+def _kill_previous_players(player):
+    """Stop players started by us, without ever matching this process.
+
+    pgrep -x matches the exact binary name ('mpv'), so neither the pkill/pgrep
+    command lines nor the agent's own python process can ever match. Each PID is
+    re-checked against its /proc/<pid>/exe before being signalled.
+    """
+    name = Path(player).name or "mpv"
+    try:
+        r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return
+    mine = os.getpid()
+    for tok in (r.stdout or "").split():
+        if not tok.isdigit():
+            continue
+        pid = int(tok)
+        if pid == mine:
+            continue
+        try:
+            if os.path.realpath(f"/proc/{pid}/exe").endswith("/" + name):
+                os.kill(pid, 15)
+        except OSError:
+            continue
+    time.sleep(0.4)
 
 
 def _media_ext(p):
@@ -647,12 +795,20 @@ def _media_ext(p):
     return None
 
 
+def _status_list(torrent_id=None):
+    """status() returns a dict for the model; internal callers want the plain list."""
+    res = status(torrent_id)
+    if isinstance(res, dict):
+        return res.get("torrents") or []
+    return res or []
+
+
 def _media_of_torrent(tid):
     """(path, info) of the media file of a torrent, if any is already on disk."""
-    st = status(tid)
-    if not st:
+    lst = _status_list(tid)
+    if not lst:
         return None
-    t = st[0]
+    t = lst[0]
     root = Path(t["dir"]).expanduser()
     name = t.get("name") or ""
     cands = []

@@ -336,7 +336,8 @@ AIOS facts:
   * torrent_search(query) -> numbered list of films/series/music/documents with size and seeders. The numbers stay valid for the next call.
   * torrent_download("<number>") starts it (also accepts a magnet link or a .torrent URL). Files go to the download folder (default ~/Downloads).
   * torrent_status([id]) -> percent, speed, peers, ETA, finished. Report progress with it ONLY when the user asks how it is going — do NOT poll it in a loop: a download takes minutes or hours, and repeating the call just burns turns. Start it, tell the user it is downloading, and stop your turn.
-  * torrent_play([id]) plays a finished file with mpv, fullscreen; with no id it plays the newest media file downloaded.
+  * torrent_play([id]) plays a file with mpv, fullscreen; with no id it plays the newest media file downloaded. It CAN play while the download is still running (mpv plays the partial file) — but only if the BEGINNING of the video is already downloaded: a new download fetches pieces sequentially, so the start arrives first, but if it has not arrived yet the tool returns an explicit error saying so, and you must wait (torrent_status) and try again later.
+  * CRITICAL: report ONLY what the tool returned. If torrent_play returns an "error", NOTHING is playing — say so and explain the reason it gives. NEVER say "it is playing", "it is ready" or "enjoy the film" unless the result contains a "playing" field. Claiming playback that is not happening is the worst possible answer here.
   * torrent_control(action, id): start | stop | verify | remove | remove-data.
   * Example: "I want to watch Metropolis by Fritz Lang" -> torrent_search("Metropolis 1927 Fritz Lang"), show the options (size/seeders), torrent_download the chosen number, tell the user it is downloading (and that torrent_play will play it when a file exists — mpv can even play it while it is still downloading).
   * Ask the user before downloading something large (>4 GB) and before remove-data (it deletes files).
@@ -809,11 +810,13 @@ class Agent:
                         args = {}
 
 
-                    # --- Anti-loop FIRST: same tool + same args 3x in a row → stop.
-                    # Counts on EVERY call (even ones blocked below), so a model
-                    # that insists on the same failing command gets cut at 3
-                    # instead of looping forever. Whitespace-stripped args so
-                    # minor variations count as the same call. ---
+                    # --- Anti-loop FIRST: the same tool + same args 3x in the recent
+                    # window → stop. Counts on EVERY call (even ones blocked below).
+                    #
+                    # ⚠️ The original version only counted CONSECUTIVE repeats, so a
+                    # model alternating two calls (play, status, play, status, ...)
+                    # never reached 3 and looped for 28 turns without ever answering
+                    # the user. Counting within the window catches that pattern too.
                     _loop_key = (name, func.get('arguments', '').strip())
                     _loop_hist = getattr(self, '_loop_hist', [])
                     _loop_hist.append(_loop_key)
@@ -826,17 +829,21 @@ class Agent:
                             _consec += 1
                         else:
                             break
-                    if _consec >= 3:
-                        _out(f"  ⚠ Same tool call repeated {_consec}x — no progress, stopping.\n")
+                    _total = sum(1 for _k in _loop_hist if _k == _loop_key)
+                    if _consec >= 3 or _total >= 3:
+                        _out(f"  ⚠ Same tool call repeated {max(_consec, _total)}x — no progress, stopping.\n")
                         # Hard stop: do NOT feed the error back to the LLM as a tool
                         # result. Reasoning models interpret the error as
                         # "command failed, retry" and loop forever. Cut the turn and
                         # return an honest summary to the user instead.
+                        # Written in English like the rest of the code/UI; the model
+                        # relays it in the user's language (project rule).
                         final_response = (
-                            f"⚠ He repetido la misma llamada a {name} {_consec} veces "
-                            f"seguidas sin que el estado cambie, así que corto aquí para "
-                            f"no quedarme en bucle. Última llamada: "
-                            f"{func.get('arguments', '')[:120]}"
+                            f"⚠ I stopped after calling {name} "
+                            f"{max(_consec, _total)} times without progress — it kept "
+                            f"returning the same result. Last call: "
+                            f"{func.get('arguments', '')[:120]}. "
+                            f"Tell me how you want to continue."
                         )
                         self.messages.append({"role": "assistant", "content": final_response})
                         try:
