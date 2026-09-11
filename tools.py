@@ -1245,7 +1245,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "torrent_search",
-            "description": "Search torrents (movies, series, music, documents) by free text and return a numbered list with name, size and seeders. ALWAYS use this to find something to watch or download — never invent names or links. The results are remembered: pass the number to torrent_download.",
+            "description": "Search torrents (movies, series, music, documents) by free text and return a numbered list with name, size and seeders. Each result also says whether it can be played WHILE downloading (MKV: yes; MP4: often not) — use it when the user wants to watch before the download finishes. ALWAYS use this to find something to watch or download — never invent names or links. The results are remembered: pass the number to torrent_download.",
             "parameters": {
                 "type": "object",
                 "properties": {

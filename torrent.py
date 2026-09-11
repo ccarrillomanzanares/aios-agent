@@ -235,16 +235,30 @@ def search(query, category="video", limit=8):
     trackers = cfg["trackers"]
     results = []
     for n, it in enumerate(items, 1):
+        title = it["title"]
+        low = title.lower()
+        # Tell the agent which releases can be watched WHILE downloading: MKV/WebM
+        # carry their headers at the start; a plain MP4 keeps its index at the end
+        # and only plays once complete.
+        if ".mkv" in low or "mkv" in low:
+            playable_early = "yes (matroska: plays while downloading)"
+        elif "faststart" in low or "webm" in low:
+            playable_early = "yes"
+        elif ".mp4" in low or " mp4" in low:
+            playable_early = "unknown (MP4 index may be at the end: often only plays when complete)"
+        else:
+            playable_early = "unknown"
         results.append({
             "n": n,
-            "title": it["title"][:90],
+            "title": title[:90],
             "size": human_size(it["size_bytes"]),
             "size_bytes": it["size_bytes"],
             "seeders": it["seeders"],
             "leechers": it["leechers"],
             "source": it["source"],
             "category": it["category"],
-            "magnet": magnet_for(it["info_hash"], it["title"][:80], trackers),
+            "playable_while_downloading": playable_early,
+            "magnet": magnet_for(it["info_hash"], title[:80], trackers),
         })
     _cache_search(results, query)
     return results
@@ -691,19 +705,33 @@ def play(path=None, fullscreen=True, torrent_id=None):
     if proc.poll() is not None:
         pct = info.get("downloaded_percent")
         head_ok = head_downloaded(info.get("torrent_id")) if info.get("torrent_id") else None
-        # The honest, actionable diagnosis: mpv only needs the START of the file, so
-        # a torrent whose first pieces are still missing cannot play at all, however
-        # high the overall percentage looks (BitTorrent fetches pieces out of order).
-        return {"playing": False, "error": f"{Path(player).name} could not play the file (exit code {proc.returncode})",
-                "file": str(target),
-                "downloaded_percent": pct,
-                "start_of_video_downloaded": head_ok,
-                "reason": "the beginning of the video is not on disk yet — a player needs "
-                          "the first pieces, not just a high percentage",
-                "what_to_do": "wait and call torrent_play again later; new downloads are "
-                              "fetched sequentially so the start arrives first",
-                "tell_the_user": "that playback could NOT start yet because the beginning "
-                                 "of the video has not been downloaded"}
+        kind, detail = container_info(target)
+        out = {"playing": False,
+               "error": f"{Path(player).name} could not play the file (exit code {proc.returncode})",
+               "file": str(target),
+               "downloaded_percent": pct,
+               "start_of_video_downloaded": head_ok,
+               "container": kind}
+        if kind == "mp4-index-at-end":
+            # The real reason, not a guess: this file cannot be watched before it is
+            # complete, because its index sits at the end.
+            out["reason"] = ("this MP4 stores its index (moov atom) at the END of the "
+                             "file, so it cannot be played until the download finishes — "
+                             "it is not a matter of waiting a little longer")
+            out["what_to_do"] = ("wait for the download to complete (torrent_status), "
+                                 "then torrent_play; alternatively choose a release in "
+                                 ".mkv or a faststart .mp4, which do play while downloading")
+            out["tell_the_user"] = ("that this film cannot be watched before it finishes "
+                                    "downloading because of how the MP4 is built, and "
+                                    "offer to play it when it is complete")
+        else:
+            out["reason"] = detail or ("the beginning of the video is not on disk yet — a "
+                                       "player needs the first pieces, not just a high percentage")
+            out["what_to_do"] = ("wait and call torrent_play again later; new downloads are "
+                                 "fetched sequentially so the start arrives first")
+            out["tell_the_user"] = ("that playback could NOT start yet because the beginning "
+                                    "of the video has not been downloaded")
+        return out
 
     out = {"playing": str(target), "player": Path(player).name, "fullscreen": bool(fullscreen)}
     out.update(info)
@@ -724,12 +752,16 @@ def _tail_file(path, max_bytes=2000):
         return ""
 
 
-def head_downloaded(torrent_id, pieces=12):
+def head_downloaded(torrent_id, pieces=4):
     """True if the first `pieces` of the torrent are already on disk.
 
     A player needs the START of the file: with a non-sequential download the
     beginning often arrives last, so a torrent at 30% can still be unplayable while
     one at 8% plays fine. This is what decides whether playing now makes sense.
+
+    Only the first few pieces are checked on purpose: the question is "has the
+    beginning arrived?", not "is a whole chunk of the start available". Asking for
+    12 pieces reported False at 21% of a torrent that did have its start on disk.
     """
     import base64 as _b64
     try:
@@ -751,6 +783,34 @@ def head_downloaded(torrent_id, pieces=12):
         return True
     except Exception:
         return None
+
+
+def container_info(path):
+    """What the container needs in order to be playable, from ffprobe.
+
+    MP4 keeps its index (the 'moov' atom) at the END of the file unless it was
+    created "faststart". That means an MP4 of this kind CANNOT be played while it
+    downloads, no matter how much of the beginning is on disk — mpv reports
+    "moov atom not found" and exits. Matroska/WebM instead carry their headers at
+    the start and play fine from the beginning.
+    Returns ("faststart-mp4"|"mp4-index-at-end"|"streamable"|"unknown", detail).
+    """
+    exe = shutil.which("ffprobe")
+    if not exe or not os.path.exists(path):
+        return "unknown", ""
+    try:
+        r = subprocess.run([exe, "-v", "error", "-show_entries",
+                            "format=format_name,duration", "-of", "default=nw=1", str(path)],
+                           capture_output=True, text=True, timeout=60)
+        out = (r.stdout or "").strip()
+        err = (r.stderr or "").strip()
+    except Exception as e:
+        return "unknown", f"{type(e).__name__}: {e}"
+    if "moov atom not found" in err:
+        return "mp4-index-at-end", "the MP4 index (moov atom) is at the end of the file"
+    if out:
+        return "streamable", out.replace("\n", ", ")
+    return "unknown", err[:200]
 
 
 def _kill_previous_players(player):
