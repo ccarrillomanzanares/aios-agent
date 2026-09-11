@@ -332,6 +332,15 @@ AIOS facts:
 - Update AIOS: `aios-update` (needs sudo). Install to disk: `aios-install`.
 - Screen recording: $mod+Print toggles /tmp/grabacion.mp4.
 - Local LLM: llama-server on 127.0.0.1:8083.
+- Media (BitTorrent + playback): use the dedicated tools, never raw commands.
+  * torrent_search(query) -> numbered list of films/series/music/documents with size and seeders. The numbers stay valid for the next call.
+  * torrent_download("<number>") starts it (also accepts a magnet link or a .torrent URL). Files go to the download folder (default ~/Downloads).
+  * torrent_status([id]) -> percent, speed, peers, ETA, finished. Poll it to report progress; a download takes time, do NOT add the same torrent again.
+  * torrent_play([id]) plays a finished file with mpv, fullscreen; with no id it plays the newest media file downloaded.
+  * torrent_control(action, id): start | stop | verify | remove | remove-data.
+  * Example: "I want to watch Metropolis by Fritz Lang" -> torrent_search("Metropolis 1927 Fritz Lang"), show the options (size/seeders), torrent_download the chosen number, torrent_status until it finishes, torrent_play.
+  * Ask the user before downloading something large (>4 GB) and before remove-data (it deletes files).
+  * Engine: transmission-daemon (local RPC 127.0.0.1:9091, started on demand); aria2c for plain HTTP/FTP documents; mpv is the player.
 
 If unsure whether a package or command exists in AIOS, CHECK it (sven search / which) instead of guessing.
 
@@ -469,7 +478,9 @@ class Agent:
                               "get_installed_info", "screenshot", "ocr", "xdotool",
                               "process_start", "process_list",
                               "list_desktop_apps", "web_search", "get_context_usage",
-                              "cloud_reasoning", "error", "result", "ok", "true", "false"}
+                              "cloud_reasoning", "error", "result", "ok", "true", "false",
+                              "torrent_search", "torrent_download", "torrent_status",
+                              "torrent_play", "torrent_control", "torrent", "magnet"}
                     _kw = [w for w in _words if w not in _stop]
                     # Stable top-N: sort once by frequency, keep order ties stable
                     # (set() would shuffle and could drop the real topic keyword).

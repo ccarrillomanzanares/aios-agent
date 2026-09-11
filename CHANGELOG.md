@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.21.0 - 2026-09-11 22:30
+
+### features
+
+- **BitTorrent client with media playback** (new module `torrent.py` + 5 agent tools). The user asks in plain language ("I want to watch Metropolis by Fritz Lang") and the agent searches, downloads and plays — no GUI needed.
+  - `torrent_search(query)` — searches **apibay.org** (The Pirate Bay API) and **torrents-csv.com**, merges and ranks by seeders, caches the numbered list so `torrent_download("<number>")` just works. Verified: "Metropolis 1927 Fritz Lang" → restored 1080p release, 115 seeders.
+  - `torrent_download` / `torrent_status` / `torrent_control` (start|stop|verify|remove|remove-data) — driven through the **transmission-daemon** RPC on 127.0.0.1:9091.
+  - `torrent_play([id])` — plays with **mpv** fullscreen (ffmpeg does the decoding); with no id it plays the newest media file downloaded.
+  - Verified end-to-end on the build tree: 263 MB torrent downloaded to 100% in 70 s (9.76 MB/s, 50 peers), then stop + remove-data clean.
+- **aria2c** for plain HTTP/FTP/FTP-magnet documents (PDFs, archives) — `torrent.fetch()`.
+- New packages installed with sven (official repos only): `transmission-cli` 4.1.3-2, `aria2` 1.37.0-3, `mpv` 0.41.0-6 (+ `ffmpeg`/`libbluray` refreshed to the same upstream so `libbluray.so.4` and `so.3` coexist).
+- Config in `/etc/aios-torrent.conf` (system defaults, shipped in aios-lfs) with a per-user override in `~/.aios/torrent.conf`; downloads default to `~/Downloads`.
+- `aios-update` deploys `torrent.py` and the new system configs (previously the manifest would have silently skipped them).
+
+### fixes
+
+- **transmission-daemon runs as the desktop user**: the Arch unit uses `User=transmission` (uid 169) and `/var/lib/transmission`, so downloads would not be readable/deletable by the user who watches them. New drop-in `transmission-daemon.service.d/user.conf` (aios-lfs) sets `User=aios`, `HOME`/XDG under `/home/aios` and `--download-dir /home/aios/Downloads`. No `Group=` line: AIOS' user aios has primary group `wheel`, and a wrong `Group=` fails the unit with 216/GROUP.
+- The daemon is **not enabled at boot** — `torrent.py` starts it on demand (systemctl, NOPASSWD in the AIOS live/installed model, with a direct-launch fallback), so an unused system keeps no extra service or open peer port.
+- Magnet building: Transmission 4.1.3 rejects a percent-encoded `xt=urn%3Abtih%3A<hash>` with "unrecognized info" — the xt value is now emitted verbatim (raw colons), only `dn`/`tr` are encoded.
+
 ## v0.20.0 - 2026-09-09 12:45
 
 ### features

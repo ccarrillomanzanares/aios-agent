@@ -1244,13 +1244,73 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "describe_screen",
-            "description": "Capture the screen and describe it with the vision model (recognizes apps, logos, UI text). Use when the user says something is 'on screen' or 'in the browser' and you need to SEE it. If it returns 'Vision not enabled', fall back to browser_eval/OCR.",
+            "name": "torrent_search",
+            "description": "Search torrents (movies, series, music, documents) by free text and return a numbered list with name, size and seeders. ALWAYS use this to find something to watch or download — never invent names or links. The results are remembered: pass the number to torrent_download.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prompt": {"type": "string", "description": "Optional: what to look for (default: describe the screen)"}
+                    "query": {"type": "string", "description": "What to search for, e.g. 'Metropolis 1927 Fritz Lang'"},
+                    "category": {"type": "string", "description": "'video' (default, movies/series first) or 'all'"},
+                    "limit": {"type": "integer", "description": "Max results (default 8)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "torrent_download",
+            "description": "Start downloading a torrent. Accepts the NUMBER of a previous torrent_search result (preferred), a magnet link, or a .torrent URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Search result number (e.g. '1'), magnet link or .torrent URL"}
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "torrent_status",
+            "description": "Progress of downloads (percent, speed, peers, ETA, finished flag). Use it to tell the user how a download is going and to know when it is ready to play.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "Torrent id (omit for all torrents)"}
                 }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "torrent_play",
+            "description": "Play a downloaded video/audio file with mpv. With no arguments it plays the newest media file in the download folder. Give an id to play that torrent's file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "Torrent id whose file should be played"},
+                    "path": {"type": "string", "description": "Explicit file path to play"},
+                    "fullscreen": {"type": "boolean", "description": "Fullscreen (default true)"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "torrent_control",
+            "description": "Manage a torrent: start, stop, verify, remove (keep files) or remove-data (delete files too).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "description": "start | stop | verify | remove | remove-data"},
+                    "id": {"type": "integer", "description": "Torrent id"}
+                },
+                "required": ["action", "id"]
             }
         }
     },
@@ -1310,6 +1370,56 @@ def get_context_usage(args: dict, context=None) -> str:
         pct = min(100, int(total * 100 / max_tokens))
         return json.dumps({"tokens_used": total, "max_tokens": max_tokens, "usage_pct": pct}, ensure_ascii=False)
     return json.dumps({"error": "No context available"}, ensure_ascii=False)
+
+
+# --- Torrent / media (torrent.py) ---
+
+def torrent_search(query: str, category: str = "video", limit: int = 8) -> str:
+    """Search torrents and remember the results for torrent_download."""
+    import torrent as _t
+    try:
+        return json.dumps({"results": _t.search(query, category=category, limit=limit),
+                           "hint": "call torrent_download with the result number"},
+                          ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"search failed: {e}"}, ensure_ascii=False)
+
+
+def torrent_download(target: str) -> str:
+    """Add a torrent: search result number, magnet link or .torrent URL."""
+    import torrent as _t
+    try:
+        return json.dumps(_t.download(str(target)), ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"could not add torrent: {e}"}, ensure_ascii=False)
+
+
+def torrent_status(id: int = None) -> str:
+    """Progress of one torrent (id) or all of them."""
+    import torrent as _t
+    try:
+        return json.dumps({"torrents": _t.status(id)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"status failed: {e}"}, ensure_ascii=False)
+
+
+def torrent_play(id: int = None, path: str = "", fullscreen: bool = True) -> str:
+    """Play a media file with mpv."""
+    import torrent as _t
+    try:
+        return json.dumps(_t.play(path or None, fullscreen=fullscreen, torrent_id=id),
+                          ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"playback failed: {e}"}, ensure_ascii=False)
+
+
+def torrent_control(action: str, id: int) -> str:
+    """start | stop | verify | remove | remove-data."""
+    import torrent as _t
+    try:
+        return json.dumps(_t.control(action, id), ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"control failed: {e}"}, ensure_ascii=False)
 
 
 # Handler to execute tools
@@ -1401,6 +1511,11 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "browser_elements": browser_elements,
         "get_installed_info": get_installed_info,
         "describe_screen": describe_screen,
+        "torrent_search": torrent_search,
+        "torrent_download": torrent_download,
+        "torrent_status": torrent_status,
+        "torrent_play": torrent_play,
+        "torrent_control": torrent_control,
     }
     if name not in handlers:
         return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)

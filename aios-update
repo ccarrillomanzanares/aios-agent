@@ -66,6 +66,7 @@ MANIFEST=(
   "agent/process.py      /usr/local/bin/aios-agent/process.py"
   "agent/voice.py        /usr/local/bin/aios-agent/voice.py"
   "agent/software_inventory.py /usr/local/bin/aios-agent/software_inventory.py"
+  "agent/torrent.py      /usr/local/bin/aios-agent/torrent.py"
   "agent/CHANGELOG.md    /usr/local/bin/aios-agent/CHANGELOG.md"
   # --- Installer and system scripts (repo root/scripts → /usr/local/bin/) ---
   "agent/aios-install        /usr/local/bin/aios-install"
@@ -91,6 +92,9 @@ MANIFEST=(
   "lfs/configs/home/aios/.config/i3/shortcuts.txt       /home/aios/.config/i3/shortcuts.txt"
   "lfs/configs/home/aios/.config/i3/status.py           /home/aios/.config/i3/status.py"
   "lfs/configs/home/aios/.config/i3/volume_bindings.conf /home/aios/.config/i3/volume_bindings.conf"
+  # --- System config (aios-lfs, configs/etc → /etc) ---
+  "lfs/configs/etc/aios-torrent.conf                                  /etc/aios-torrent.conf"
+  "lfs/configs/etc/systemd/system/transmission-daemon.service.d/user.conf /etc/systemd/system/transmission-daemon.service.d/user.conf"
 )
 
 changed=0; same=0
@@ -136,9 +140,17 @@ done
 
 # 3. Restart/notices
 agent_touched=0
-for f in /usr/local/bin/aios-agent/agent.py /usr/local/bin/aios-agent/chat.py /usr/local/bin/aios-agent/setup.py; do
+for f in /usr/local/bin/aios-agent/agent.py /usr/local/bin/aios-agent/chat.py /usr/local/bin/aios-agent/setup.py /usr/local/bin/aios-agent/torrent.py; do
   if [ -f "$BACKUP/$DATE${f}" ]; then agent_touched=1; fi
 done
+# systemd drop-ins may have changed (e.g. transmission-daemon user override):
+# reload so a later `systemctl start` picks the new unit up.
+if [ -f "$BACKUP/$DATE/etc/systemd/system/transmission-daemon.service.d/user.conf" ]; then
+  systemctl daemon-reload 2>/dev/null && ok "systemd units reloaded"
+  if systemctl is-active --quiet transmission-daemon 2>/dev/null; then
+    warn "transmission-daemon is running — restart it to apply the new settings: sudo systemctl restart transmission-daemon"
+  fi
+fi
 i3_touched=0
 for f in /home/aios/.config/i3/config /home/aios/.config/i3/status.py; do
   if [ -f "$BACKUP/$DATE${f}" ]; then i3_touched=1; fi
