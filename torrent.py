@@ -207,6 +207,11 @@ def search(query, category="video", limit=8):
         return (it["seeders"], exact, it["size_bytes"])
 
     items.sort(key=rank, reverse=True)
+    # Drop dead torrents (0 seeders) when there is anything alive: a release with
+    # no seeders never downloads, and offering it first wastes the user's time.
+    alive = [it for it in items if it["seeders"] > 0]
+    if alive:
+        items = alive
     items = items[:limit]
 
     trackers = cfg["trackers"]
@@ -270,23 +275,52 @@ def daemon_running():
         return False
 
 
-def ensure_daemon():
-    """Start transmission-daemon if it is not answering. Returns a status string.
+def _expand(p):
+    return os.path.expanduser(str(p or ""))
 
-    The daemon runs as the desktop user (see the systemd drop-in shipped in
-    aios-lfs: User=aios + config/download dirs under $HOME) so that downloaded
-    files belong to the same user that plays them. The unit is not enabled at
-    boot on purpose: it starts when the user first asks for something, which
-    keeps the live ISO and the old laptop idle when torrents are unused.
+
+def ensure_daemon():
+    """Start the BitTorrent daemon if it is not answering. Returns a status string.
+
+    AIOS runs this as the desktop user, which on the INSTALLED system has neither
+    passwordless sudo nor an active polkit — so `sudo -n systemctl start` and a
+    plain `systemctl start` both fail with "Access denied". A userspace daemon
+    needs no root at all (the RPC port 9091 and the peer port 51413 are >1024, and
+    the config/download dirs live in $HOME), so that is the primary path; systemd
+    is only a fallback (works on the live ISO / for an admin who enables the unit).
     """
     if daemon_running():
         return "already running"
-    # make sure the destination exists before the daemon starts writing
+    cfg = config()
+    dl = _expand(cfg["download_dir"])
     try:
-        Path(config()["download_dir"]).expanduser().mkdir(parents=True, exist_ok=True)
+        Path(dl).mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-    errs = []
+    conf_dir = Path.home() / ".config" / "transmission-daemon"
+
+    # --- primary: userspace daemon, owned by the user who will watch the media ---
+    try:
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(
+            [shutil.which("transmission-daemon") or "transmission-daemon",
+             "-f", "--log-level=error",
+             "--config-dir", str(conf_dir),
+             "--download-dir", dl,
+             "--allowed", "127.0.0.1,::1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True)
+        for _ in range(24):
+            if daemon_running():
+                return "started (user)"
+            time.sleep(0.5)
+    except Exception as e:
+        first_err = f"userspace launch: {e}"
+    else:
+        first_err = "userspace daemon did not answer on 127.0.0.1:9091"
+
+    # --- fallback: systemd (live ISO has passwordless sudo; admins may enable it) ---
+    errs = [first_err]
     for cmd in (["sudo", "-n", "systemctl", "start", "transmission-daemon"],
                 ["systemctl", "start", "transmission-daemon"]):
         try:
@@ -297,27 +331,12 @@ def ensure_daemon():
         if r.returncode == 0:
             for _ in range(20):
                 if daemon_running():
-                    return "started"
+                    return "started (systemd)"
                 time.sleep(0.5)
-            return "systemctl start returned 0 but RPC is not answering"
-        errs.append((r.stderr or r.stdout or "").strip()[:200])
-    # last resort: launch the daemon directly as this user (live ISO without unit)
-    cfg = config()
-    try:
-        subprocess.Popen([shutil.which("transmission-daemon") or "transmission-daemon",
-                          "-f", "--log-level=error",
-                          "--config-dir", str(Path.home() / ".config" / "transmission-daemon"),
-                          "--download-dir", str(Path(cfg["download_dir"]).expanduser()),
-                          "--allowed", "127.0.0.1,::1"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         stdin=subprocess.DEVNULL, start_new_session=True)
-    except Exception as e:
-        return "could not start transmission-daemon: " + " | ".join(errs + [str(e)])
-    for _ in range(24):
-        if daemon_running():
-            return "started (direct)"
-        time.sleep(0.5)
-    return "transmission-daemon did not come up: " + " | ".join(errs)
+            errs.append("systemctl returned 0 but RPC is not answering")
+        else:
+            errs.append((r.stderr or r.stdout or "").strip()[:200])
+    return "could not start transmission-daemon: " + " | ".join(errs)
 
 
 # ---------------------------------------------------------------- downloads
@@ -342,7 +361,7 @@ def download(target, name=None):
     if isinstance(added, dict):
         return {"added": added.get("name") or name, "id": added.get("id"),
                 "duplicate": bool(out.get("torrent-duplicate")),
-                "download_dir": config()["download_dir"]}
+                "download_dir": _expand(config()["download_dir"])}
     return {"error": res.get("result", "unknown error"), "raw": out}
 
 
@@ -375,8 +394,12 @@ def status(torrent_id=None, timeout=25):
             "eta": _eta(t.get("eta")),
             "peers": t.get("peersConnected"),
             "seeders": t.get("seeders"),
-            "dir": t.get("downloadDir"),
-            "finished": bool(t.get("isFinished")),
+            "dir": _expand(t.get("downloadDir")),
+            # isFinished only flips once the session has completed the torrent;
+            # data-wise "haveValid == sizeWhenDone" is the honest answer, which
+            # matters for playback (a 100% torrent plays even while seeding).
+            "finished": bool(t.get("isFinished")) or bool(t.get("haveValid")) and
+                        bool(t.get("sizeWhenDone")) and t.get("haveValid") >= t.get("sizeWhenDone"),
         }
         if t.get("error"):
             st["error"] = t.get("errorString") or t.get("error")
@@ -431,7 +454,7 @@ def newest_media(within_minutes=None):
         try:
             if not p.is_file() or p.name.startswith("."):
                 continue
-            if p.suffix.lower() not in VIDEO_EXT | AUDIO_EXT:
+            if _media_ext(p) is None:
                 continue
             m = p.stat().st_mtime
             if m >= cutoff and m > best_m:
@@ -442,23 +465,47 @@ def newest_media(within_minutes=None):
 
 
 def play(path=None, fullscreen=True, torrent_id=None):
-    """Play a file with mpv. With no path: newest file of the finished torrent (or download dir)."""
+    """Play a file with mpv.
+
+    Works with a finished torrent AND with a partially downloaded one (mpv plays
+    partial files); the result reports the torrent's completion so the agent can
+    tell the user what to expect. With no path/id: newest media file on disk.
+    """
     cfg = config()
     player = shutil.which(cfg["player"]) or cfg["player"]
+    info = {}
 
     if path and Path(path).exists():
         target = Path(path)
     elif torrent_id not in (None, ""):
-        target = _path_of_torrent(torrent_id)
-        if target is None:
-            return {"error": "torrent not found"}
+        found = _media_of_torrent(torrent_id)
+        if not found:
+            return {"error": f"no media file for torrent {torrent_id}",
+                    "hint": "the torrent may have no video/audio files, or the download "
+                            "has not produced any file yet — check torrent_status"}
+        target, info = found
     else:
         target = newest_media()
+        if target is None:
+            return {"error": "no media file found",
+                    "hint": f"looked in {_expand(cfg['download_dir'])} — check torrent_status first"}
 
     if target is None or not Path(target).exists():
-        return {"error": "no media file found",
-                "hint": f"looked in {cfg['download_dir']} — check torrent_status first"}
+        return {"error": "media file is not on disk"}
 
+    # Only one player at a time: without this, asking for a second film leaves the
+    # first mpv running and the user hears two soundtracks at once.
+    try:
+        subprocess.run(["pkill", "-f", r"mpv .*--really-quiet"], timeout=10,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.4)
+    except Exception:
+        pass
+
+    # Audio: keep mpv's default (auto). In AIOS the desktop session runs PipeWire
+    # (wireplumber + pipewire sockets under /run/user/1000), so mpv finds it via
+    # XDG_RUNTIME_DIR — which the agent's own environment already provides. Forcing
+    # --ao=alsa here would BYPASS PipeWire and fail on a busy device.
     args = [player, "--really-quiet", "--force-window=yes", "--keep-open=no",
             "--save-position-on-quit=yes", "--no-terminal"]
     if fullscreen:
@@ -470,28 +517,63 @@ def play(path=None, fullscreen=True, torrent_id=None):
                              start_new_session=True)
     except FileNotFoundError:
         return {"error": f"player not found: {player}"}
-    return {"playing": str(target), "player": Path(player).name, "fullscreen": bool(fullscreen)}
+    out = {"playing": str(target), "player": Path(player).name, "fullscreen": bool(fullscreen)}
+    out.update(info)
+    return out
 
 
-def _path_of_torrent(tid):
+def _media_ext(p):
+    """Video/audio extension of a path, tolerating download placeholders.
+
+    Transmission writes "Big Buck Bunny.mp4.part" while downloading, so the last
+    suffix is '.part' and the real media type is one suffix further in.
+    """
+    suffixes = [s.lower() for s in p.suffixes]
+    if p.suffix.lower() == ".part" and len(suffixes) > 1:
+        suffixes = suffixes[:-1]
+    for s in reversed(suffixes):
+        if s in VIDEO_EXT | AUDIO_EXT:
+            return s
+    return None
+
+
+def _media_of_torrent(tid):
+    """(path, info) of the media file of a torrent, if any is already on disk."""
     st = status(tid)
     if not st:
         return None
     t = st[0]
-    if not t.get("finished"):
-        return None
-    # single-file torrents land directly in the dir; multi-file ones in a subdir
-    cands = []
     root = Path(t["dir"]).expanduser()
-    for p in root.rglob("*"):
-        try:
-            if p.is_file() and p.suffix.lower() in VIDEO_EXT | AUDIO_EXT and t["name"][:30] in str(p):
+    name = t.get("name") or ""
+    cands = []
+    try:
+        for p in root.rglob("*"):
+            try:
+                if not p.is_file():
+                    continue
+                if _media_ext(p) is None:
+                    continue
+                # multi-file torrents live in a dir named after the torrent;
+                # single-file ones carry the torrent's name in the filename
+                if name[:30] and name[:30].lower() not in str(p).lower():
+                    continue
                 cands.append((p.stat().st_mtime, p))
-        except OSError:
-            continue
+            except OSError:
+                continue
+    except OSError:
+        return None
     if not cands:
         return None
-    return max(cands)[1]
+    path = max(cands)[1]
+    return path, {"torrent_id": t["id"], "torrent_name": t["name"],
+                  "downloaded_percent": t["percent"], "complete": bool(t["finished"]),
+                  "partial": path.suffix.lower() == ".part"}
+
+
+def _path_of_torrent(tid):
+    """Backward-compatible helper: path only (None if nothing playable yet)."""
+    found = _media_of_torrent(tid)
+    return found[0] if found else None
 
 
 # ---------------------------------------------------------------- aria2 (documents)
