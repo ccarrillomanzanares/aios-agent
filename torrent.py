@@ -184,7 +184,10 @@ INDEXERS = [_search_apibay, _search_torrents_csv]
 def search(query, category="video", limit=8):
     """Search torrents by free text. category: 'video' (movies/TV first) or 'all'."""
     cfg = config()
-    limit = int(limit or cfg["search_limit"])
+    limit = _as_int(limit) or _as_int(cfg["search_limit"]) or 8
+    # Small local models often send stray casing/spacing — normalise so neither
+    # the indexer query nor the apibay category lookup silently misses.
+    category = str(category or "video").strip().lower()
     cats = VIDEO_CATS + ["0"] if category in ("video", "movies", "all") else [category]
 
     seen, items = set(), []
@@ -342,8 +345,16 @@ def ensure_daemon():
 # ---------------------------------------------------------------- downloads
 
 def download(target, name=None):
-    """Add a magnet link or a .torrent URL. target may also be a search index (1..N)."""
-    target = (target or "").strip()
+    """Add a magnet link, a .torrent URL or a search index (1..N).
+
+    Called straight from the model, so anything can arrive: an int, a string, a
+    magnet pasted whole, or a 40-hex infohash. All of it is accepted.
+    """
+    if target is None:
+        return {"error": "no magnet or url given"}
+    if isinstance(target, (int, float)):
+        target = str(int(target))
+    target = str(target).strip()
     if not target:
         return {"error": "no magnet or url given"}
     if target.isdigit():
@@ -353,6 +364,12 @@ def download(target, name=None):
             return {"error": f"index {n} out of range (last search had {len(cached)} results)"}
         target = cached[n - 1]["magnet"]
         name = cached[n - 1]["title"]
+    elif re.fullmatch(r"[0-9a-fA-F]{40}", target):
+        # a bare infohash: models often strip the magnet wrapper
+        target = magnet_for(target, name or "", config()["trackers"])
+    elif not (target.startswith("magnet:") or target.startswith("http")
+              or target.startswith("https") or target.startswith("ftp")):
+        return {"error": f"not a magnet link, .torrent url or search number: {target[:60]!r}"}
 
     ensure_daemon()
     res = _rpc("torrent-add", {"filename": target, "paused": False})
@@ -375,9 +392,10 @@ def _torrent_fields():
 def status(torrent_id=None, timeout=25):
     """Status of one torrent (id) or all of them."""
     ensure_daemon()
+    torrent_id = _as_int(torrent_id)
     args = {"fields": _torrent_fields()}
-    if torrent_id not in (None, "", 0, "0"):
-        args["ids"] = [int(torrent_id)]
+    if torrent_id is not None:
+        args["ids"] = [torrent_id]
     res = _rpc("torrent-get", args, timeout=timeout)
     out = []
     for t in res.get("arguments", {}).get("torrents", []):
@@ -426,7 +444,9 @@ def _eta(sec):
 def control(action, torrent_id):
     """action: start | stop | remove | remove-data | verify."""
     ensure_daemon()
-    tid = [int(torrent_id)]
+    tid = [_as_int(torrent_id)]
+    if tid == [None]:
+        return {"error": f"invalid torrent id: {torrent_id!r}"}
     if action in ("start", "stop", "verify"):
         res = _rpc("torrent-" + action, {"ids": tid})
     elif action in ("remove", "remove-data"):
@@ -464,6 +484,37 @@ def newest_media(within_minutes=None):
     return best
 
 
+def _as_bool(v, default=True):
+    """Coerce a tool argument to bool.
+
+    Models are inconsistent: the same field arrives as true/1/"true"/"yes" from one
+    and as "false"/"" from another. A plain bool("false") is True, which would turn
+    fullscreen off into fullscreen on — hence the explicit parsing.
+    """
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in ("false", "0", "no", "off", "n", ""):
+        return False
+    if s in ("true", "1", "yes", "on", "y"):
+        return True
+    return default
+
+
+def _as_int(v):
+    """Coerce a tool argument to int, tolerating '3', 3.0, ' 3 ' — or None."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(float(str(v).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
 def play(path=None, fullscreen=True, torrent_id=None):
     """Play a file with mpv.
 
@@ -471,6 +522,8 @@ def play(path=None, fullscreen=True, torrent_id=None):
     partial files); the result reports the torrent's completion so the agent can
     tell the user what to expect. With no path/id: newest media file on disk.
     """
+    fullscreen = _as_bool(fullscreen, True)
+    torrent_id = _as_int(torrent_id)
     cfg = config()
     player = shutil.which(cfg["player"]) or cfg["player"]
     info = {}
