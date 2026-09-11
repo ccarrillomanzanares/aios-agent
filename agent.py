@@ -335,10 +335,10 @@ AIOS facts:
 - Media (BitTorrent + playback): use the dedicated tools, never raw commands.
   * torrent_search(query) -> numbered list of films/series/music/documents with size and seeders. The numbers stay valid for the next call.
   * torrent_download("<number>") starts it (also accepts a magnet link or a .torrent URL). Files go to the download folder (default ~/Downloads).
-  * torrent_status([id]) -> percent, speed, peers, ETA, finished. Poll it to report progress; a download takes time, do NOT add the same torrent again.
+  * torrent_status([id]) -> percent, speed, peers, ETA, finished. Report progress with it ONLY when the user asks how it is going — do NOT poll it in a loop: a download takes minutes or hours, and repeating the call just burns turns. Start it, tell the user it is downloading, and stop your turn.
   * torrent_play([id]) plays a finished file with mpv, fullscreen; with no id it plays the newest media file downloaded.
   * torrent_control(action, id): start | stop | verify | remove | remove-data.
-  * Example: "I want to watch Metropolis by Fritz Lang" -> torrent_search("Metropolis 1927 Fritz Lang"), show the options (size/seeders), torrent_download the chosen number, torrent_status until it finishes, torrent_play.
+  * Example: "I want to watch Metropolis by Fritz Lang" -> torrent_search("Metropolis 1927 Fritz Lang"), show the options (size/seeders), torrent_download the chosen number, tell the user it is downloading (and that torrent_play will play it when a file exists — mpv can even play it while it is still downloading).
   * Ask the user before downloading something large (>4 GB) and before remove-data (it deletes files).
   * Engine: transmission-daemon (local RPC 127.0.0.1:9091, started on demand); aria2c for plain HTTP/FTP documents; mpv is the player.
 

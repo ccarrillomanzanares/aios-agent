@@ -1395,12 +1395,18 @@ def torrent_download(target: str) -> str:
 
 
 def torrent_status(id: int = None) -> str:
-    """Progress of one torrent (id) or all of them."""
+    """Progress of one torrent (id) or all of them. Do not call it in a loop."""
     import torrent as _t
+    res = None
     try:
-        return json.dumps({"torrents": _t.status(id)}, ensure_ascii=False)
+        res = _t.status(id)
     except Exception as e:
         return json.dumps({"error": f"status failed: {e}"}, ensure_ascii=False)
+    # `status()` returns {"torrents": [...], "note": ...} so the model sees the
+    # "don't poll" reminder in the tool result itself (it ignores the prompt for it).
+    if isinstance(res, dict):
+        return json.dumps(res, ensure_ascii=False)
+    return json.dumps({"torrents": res}, ensure_ascii=False)
 
 
 def torrent_play(id: int = None, path: str = "", fullscreen: bool = True) -> str:

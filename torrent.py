@@ -282,6 +282,42 @@ def _expand(p):
     return os.path.expanduser(str(p or ""))
 
 
+def _user_daemon_pids():
+    """PIDs of transmission-daemon processes started by this user (any config)."""
+    try:
+        r = subprocess.run(["pgrep", "-f", "transmission-daemon"], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return []
+    pids = []
+    for tok in (r.stdout or "").split():
+        if tok.isdigit() and int(tok) != os.getpid():
+            pids.append(int(tok))
+    return pids
+
+
+def _start_user_daemon(conf_dir, dl):
+    """Launch the userspace daemon and wait for the RPC to answer."""
+    conf_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen(
+        [shutil.which("transmission-daemon") or "transmission-daemon",
+         "-f", "--log-level=error",
+         "--config-dir", str(conf_dir),
+         "--download-dir", dl,
+         "--allowed", "127.0.0.1,::1"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, start_new_session=True)
+
+
+def _wait_rpc(seconds=25):
+    """Wait for the RPC to answer. The old laptop takes ~10-20s to bind port 9091."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if daemon_running():
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def ensure_daemon():
     """Start the BitTorrent daemon if it is not answering. Returns a status string.
 
@@ -291,6 +327,11 @@ def ensure_daemon():
     needs no root at all (the RPC port 9091 and the peer port 51413 are >1024, and
     the config/download dirs live in $HOME), so that is the primary path; systemd
     is only a fallback (works on the live ISO / for an admin who enables the unit).
+
+    A daemon takes ~10-20s to bind its RPC port on the old laptop, so a call that
+    lands in that window sees "not answering" and would start a SECOND one — three
+    agents later you have three daemons fighting for port 9091. Hence: adopt
+    whatever is already there and re-check before launching anything new.
     """
     if daemon_running():
         return "already running"
@@ -302,27 +343,31 @@ def ensure_daemon():
         pass
     conf_dir = Path.home() / ".config" / "transmission-daemon"
 
-    # --- primary: userspace daemon, owned by the user who will watch the media ---
+    # 0. A daemon may already be on its way up: it needs no root and its config is
+    #    ours to use, so adopt it instead of racing it into a port clash.
+    if _user_daemon_pids():
+        for _ in range(3):
+            if _wait_rpc(25):
+                return "already running"
+            if not _user_daemon_pids():
+                break  # it died — fall through to starting a fresh one
+
+    # 1. primary: userspace daemon, owned by the user who will watch the media
+    first_err = None
     try:
-        conf_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(
-            [shutil.which("transmission-daemon") or "transmission-daemon",
-             "-f", "--log-level=error",
-             "--config-dir", str(conf_dir),
-             "--download-dir", dl,
-             "--allowed", "127.0.0.1,::1"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL, start_new_session=True)
-        for _ in range(24):
-            if daemon_running():
-                return "started (user)"
-            time.sleep(0.5)
+        if not _user_daemon_pids():
+            _start_user_daemon(conf_dir, dl)
     except Exception as e:
         first_err = f"userspace launch: {e}"
-    else:
+    if first_err is None:
+        if _wait_rpc(30):
+            return "started (user)"
+        # a daemon may still be coming up (slow disk); give it one more chance
+        if _user_daemon_pids() and _wait_rpc(20):
+            return "started (user)"
         first_err = "userspace daemon did not answer on 127.0.0.1:9091"
 
-    # --- fallback: systemd (live ISO has passwordless sudo; admins may enable it) ---
+    # 2. fallback: systemd (live ISO has passwordless sudo; admins may enable it)
     errs = [first_err]
     for cmd in (["sudo", "-n", "systemctl", "start", "transmission-daemon"],
                 ["systemctl", "start", "transmission-daemon"]):
@@ -332,10 +377,8 @@ def ensure_daemon():
             errs.append(f"{cmd[0]}: {e}")
             continue
         if r.returncode == 0:
-            for _ in range(20):
-                if daemon_running():
-                    return "started (systemd)"
-                time.sleep(0.5)
+            if _wait_rpc(20):
+                return "started (systemd)"
             errs.append("systemctl returned 0 but RPC is not answering")
         else:
             errs.append((r.stderr or r.stdout or "").strip()[:200])
@@ -378,7 +421,12 @@ def download(target, name=None):
     if isinstance(added, dict):
         return {"added": added.get("name") or name, "id": added.get("id"),
                 "duplicate": bool(out.get("torrent-duplicate")),
-                "download_dir": _expand(config()["download_dir"])}
+                "download_dir": _expand(config()["download_dir"]),
+                "status": "downloading in the background",
+                "next": "Tell the user what you started (name, size) and END YOUR TURN. "
+                        "Do NOT call torrent_status now and do NOT poll it: the download "
+                        "takes minutes or hours. Call torrent_status only if the user "
+                        "asks how it is going."}
     return {"error": res.get("result", "unknown error"), "raw": out}
 
 
@@ -390,7 +438,12 @@ def _torrent_fields():
 
 
 def status(torrent_id=None, timeout=25):
-    """Status of one torrent (id) or all of them."""
+    """Status of one torrent (id) or all of them.
+
+    The result carries a reminder not to poll: the model otherwise calls this in a
+    loop, hits the anti-repeat guard and ends its turn with a warning instead of
+    answering the user.
+    """
     ensure_daemon()
     torrent_id = _as_int(torrent_id)
     args = {"fields": _torrent_fields()}
@@ -422,7 +475,11 @@ def status(torrent_id=None, timeout=25):
         if t.get("error"):
             st["error"] = t.get("errorString") or t.get("error")
         out.append(st)
-    return out
+    if out:
+        return {"torrents": out,
+                "note": "Report this to the user in one line and END YOUR TURN. "
+                        "Do not call torrent_status again in this turn."}
+    return {"torrents": [], "note": "No torrents are downloading."}
 
 
 def _status_name(code):
