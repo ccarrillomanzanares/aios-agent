@@ -4,4 +4,5 @@
 aios-install text eol=lf
 aios-diag text eol=lf
 aios-session text eol=lf
+aios-update text eol=lf
 *.py text eol=lf

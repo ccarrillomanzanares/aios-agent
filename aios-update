@@ -53,7 +53,7 @@ fi
 
 # 2. Manifest: (source in cache, destination in the system)
 #    agent = aios-agent repo · lfs = aios-lfs repo (configs/)
-#    Mapping verified against the tree (Aug 26 2026)
+#    Mapping verified against the tree (Sep 11 2026)
 MANIFEST=(
   # --- Agent core (aios-agent repo root → /usr/local/bin/aios-agent/) ---
   "agent/agent.py        /usr/local/bin/aios-agent/agent.py"
@@ -62,6 +62,9 @@ MANIFEST=(
   "agent/tools.py        /usr/local/bin/aios-agent/tools.py"
   "agent/memory.py       /usr/local/bin/aios-agent/memory.py"
   "agent/process.py      /usr/local/bin/aios-agent/process.py"
+  "agent/voice.py        /usr/local/bin/aios-agent/voice.py"
+  "agent/software_inventory.py /usr/local/bin/aios-agent/software_inventory.py"
+  "agent/CHANGELOG.md    /usr/local/bin/aios-agent/CHANGELOG.md"
   # --- Installer and system scripts (repo root/scripts → /usr/local/bin/) ---
   "agent/aios-install        /usr/local/bin/aios-install"
   "agent/aios-theme          /usr/local/bin/aios-theme"
@@ -69,6 +72,7 @@ MANIFEST=(
   "agent/scripts/aios-keyboard /usr/local/bin/aios-keyboard"
   "agent/scripts/aios-session  /usr/local/bin/aios-session"
   "agent/aios-update         /usr/local/bin/aios-update"
+  "agent/CHANGELOG.md        /usr/local/bin/CHANGELOG.md"
   # --- Helper scripts (scripts/ → aios-agent/scripts/) ---
   "agent/scripts/firstboot.sh    /usr/local/bin/aios-agent/scripts/firstboot.sh"
   "agent/scripts/launch_llama.py /usr/local/bin/aios-agent/scripts/launch_llama.py"
@@ -76,6 +80,10 @@ MANIFEST=(
   "agent/scripts/toggle-grabacion.sh /usr/local/bin/aios-agent/scripts/toggle-grabacion.sh"
   "agent/scripts/parar_grabacion.sh  /usr/local/bin/aios-agent/scripts/parar_grabacion.sh"
   "agent/scripts/instalar-grabacion.sh /usr/local/bin/aios-agent/scripts/instalar-grabacion.sh"
+  "agent/scripts/aios-diag            /usr/local/bin/aios-agent/scripts/aios-diag"
+  "agent/scripts/audio-detect.py       /usr/local/bin/aios-agent/scripts/audio-detect.py"
+  "agent/scripts/screenshot.sh         /usr/local/bin/aios-agent/scripts/screenshot.sh"
+  "agent/scripts/setup-audio-voice.sh  /usr/local/bin/aios-agent/scripts/setup-audio-voice.sh"
   # --- Configs (aios-lfs repo, configs/ → /home/aios/.config/) ---
   "lfs/configs/home/aios/.config/i3/config              /home/aios/.config/i3/config"
   "lfs/configs/home/aios/.config/i3/shortcuts.txt       /home/aios/.config/i3/shortcuts.txt"
