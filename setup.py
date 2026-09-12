@@ -74,7 +74,7 @@ def _tic():
     n = int(sr * dur)
     pcm = bytearray()
     for i in range(n):
-        t = i / sr
+        t = i / s
         env = math.exp(-t / 0.012)
         pcm += struct.pack("<h", int(12000 * env * math.sin(2 * math.pi * freq * t)))
     try:
@@ -136,7 +136,7 @@ def _read_line():
     """Read a line with correct backspace, protected prompt, and paste support
     (fix 25 Aug + bracketed paste 4 Sep).
 
-    Uses raw mode + manual keyboard handling: backspace removes from the buffer
+    Uses raw mode + manual keyboard handling: backspace removes from the buffe
     (never the prompt), no stray '^' characters; Ctrl+C interrupts. Enables
     bracketed paste (ESC[?2004h) so pasted text is captured verbatim as a block
     instead of being interpreted key-by-key (which broke copy/paste)."""
@@ -1112,20 +1112,30 @@ def _chmod_config():
         pass
 
 
-def _write_local_config(theme="wargames", voice=None):
+def _write_local_config(theme="wargames", voice=None, model_dir=None):
     """Write config.yaml in local mode and start the llama service."""
     import yaml
-    model_path = Path("/usr/local/share/aios/models") / LOCAL_MODELS[0]["file"]
+    base = Path(model_dir) if model_dir else Path("/usr/local/share/aios/models")
+    model_path = base / LOCAL_MODELS[0]["file"]
     if not model_path.exists():
-        wg(f"Model {LOCAL_MODELS[0]['file']} not found.")
-        wg("Use the LLM ISO or place it at /usr/local/share/aios/models/")
-        return False
+        # Try the model AIOS actually downloads (aio_download.MODEL)
+        try:
+            sys.path.insert(0, "/usr/local/bin/aios-agent")
+            from aio_download import MODEL as _M
+            alt = base / _M["file"]
+        except Exception:
+            alt = None
+        if alt and alt.exists():
+            model_path = alt
+        else:
+            wg(f"Model not found in {base}.")
+            wg("Download it from the menu, or use cloud mode.")
+            return False
 
     ram_gb = detect_ram_gb()
     ctx = auto_context(ram_gb)
-    # Local thinking mode: OFF by default (fast). ON reasons before answering.
-    think_opt = wg_input("Enable thinking mode? (slower, more precise) [y/N]: ").strip().lower()
-    think = think_opt in ("y", "yes")
+    # Thinking is NOT asked here: /think in the chat turns it on and off.
+    think = False
     config = {
         "mode": "local",
         "theme": theme,
@@ -1249,107 +1259,238 @@ def _cloud_flow(theme="wargames", voice=None):
             continue
 
 
-def _live_flow(online):
-    """Live mode: propose local or cloud."""
+# ---------------------------------------------------------------------------
+# Shared steps (live and install use the same ones)
+# ---------------------------------------------------------------------------
+
+def _download_local_model(dest_dir, installing=False):
+    """Offer the local model download, with the specs and a progress bar.
+
+    dest_dir is where the .gguf must end up:
+      * installing -> the target disk, so it is never copied twice
+      * live       -> ~/models (RAM-backed, see the capacity check)
+
+    Returns True if the model is in place (or already was), False if the use
+    backed out (caller goes back and re-asks local/cloud).
+    """
+    try:
+        sys.path.insert(0, "/usr/local/bin/aios-agent")
+        from aio_download import (describe_model, check_can_run_local,
+                                  download_model, MODEL)
+    except Exception as e:
+        wg(f"  Could not load the downloader: {e}")
+        return False
+
     wg("")
-    wg("AIOS live mode.")
+    for line in describe_model():
+        wg(line)
+    wg("")
+
+    verdict, msg = check_can_run_local(str(dest_dir))
+    wg(f"  {msg}")
+    wg("")
+    if verdict == "no":
+        # Cannot work here: say so plainly and send the user back
+        if installing:
+            wg("  This computer cannot run the local model.")
+        else:
+            wg("  This computer cannot run the local model in live mode.")
+            wg("  Install AIOS (if the disk has room) or use cloud mode instead.")
+        wg("")
+        wg_input("  Press Enter to go back...")
+        return False
+    if verdict == "tight":
+        wg("  It should run, but slowly. Cloud mode needs no download.")
+        wg("")
+
+    if not installing:
+        wg("  Note: in live mode the download stays in RAM and is lost on reboot.")
+        wg("        Install AIOS to keep it.")
+        wg("")
+
+    ans = wg_input(f"  Download the model now ({MODEL['size_label']})? (y/N): ").strip().lower()
+    if ans not in ("y", "yes"):
+        wg("  Download cancelled.")
+        return False
+
+    wg("")
+    wg(f"  Downloading {MODEL['name']} ({MODEL['size_label']}). This can take a while...")
+    wg("")
+    ok, res = download_model(dest_dir=str(dest_dir))
+    wg("")
+    if not ok:
+        wg(f"  Download failed: {res}")
+        wg("  You can retry later; the partial file is kept and will resume.")
+        wg("")
+        wg_input("  Press Enter to go back...")
+        return False
+    wg(f"  Model ready: {res}")
+    return True
+
+
+def _default_voice():
+    """Theme and voice are no longer asked at setup: /theme, /voice and /sound
+    are chat commands. Defaults are the safe offline ones."""
+    return {"tts": "off", "stt": "off", "tts_lang": "auto"}
+
+
+def _confirm_model_download():
+    """Show the specs and the machine check, and ask whether to download.
+
+    Used by INSTALL only. The download itself happens in aios-install (afte
+    the target disk is mounted) because in the live root writes go to RAM.
+    """
+    try:
+        sys.path.insert(0, "/usr/local/bin/aios-agent")
+        from aio_download import describe_model, check_can_run_local, MODEL
+    except Exception as e:
+        wg(f"  Could not load the model info: {e}")
+        return False
+
+    wg("")
+    for line in describe_model():
+        wg(line)
+    wg("")
+
+    # RAM/CPU check only: the disk space check belongs to aios-install, which
+    # is the one that knows the target disk.
+    verdict, msg = check_can_run_local()
+    wg(f"  {msg}")
+    wg("")
+    if verdict == "no":
+        wg("  Running the local model here is not realistic.")
+        wg("  Cloud mode needs no download and no minimum hardware.")
+        wg("")
+        return False
+    wg("  The model will be downloaded to the disk during installation.")
+    wg("")
+    ans = wg_input(f"  Download the model during installation ({MODEL['size_label']})? (y/N): ").strip().lower()
+    return ans in ("y", "yes")
+
+
+def _ask_local_or_cloud(online):
+    """The ONE local/cloud question, shared by live and install.
+
+    Returns "local" or "cloud" (never None: if cloud is impossible it falls back).
+    """
+    wg("")
     wg("How do you want to use the agent?")
-    wg("  1) LOCAL - the built-in Qwen3.5-9B model (no internet needed)")
-    wg("     Requires: CPU at least like an Intel i5-1035G1 (4 cores / 8 threads,")
-    wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 12 GB RAM (16 GB recommended).")
-    wg("     Note: runs slow, about human typing speed.")
-    wg(_check_local_requirements())
-    wg("  2) CLOUD - an external model via API")
+    wg("  1) LOCAL  - the AI model runs on this computer (downloads once,")
+    wg("              then works without internet)")
+    wg("  2) CLOUD  - an external model through an API (needs internet)")
     wg("")
     while True:
-        m = wg_input("> ")
+        m = wg_input("> ").strip()
         if m in ("1", "2"):
             break
         wg("Invalid option. Please choose 1 or 2.")
 
     if m == "2" and not online:
-        wg("Cloud mode requires internet (none detected).")
+        wg("")
+        wg("Cloud mode needs internet, and none was detected.")
         opt = wg_input("Use LOCAL mode instead? (Y/n): ").strip().lower()
         if opt in ("", "y", "yes"):
             wg("Switching to LOCAL.")
-            m = "1"
-        else:
-            return  # back to menu
+            return "local"
+        return "local"   # nothing else is possible offline
+    return "cloud" if m == "2" else "local"
 
-    # Final mode: theme and voice are chosen ONCE.
-    theme = _select_theme()
-    voice = _voice_flow()
 
-    if m == "2":
-        if _cloud_flow(theme, voice):
-            _sp.run(["aios-theme", theme], capture_output=True)
+def _live_flow(online):
+    """Live mode: local (download the model) or cloud. Returns True when setup
+    is complete and the agent should start."""
+    wg("")
+    wg("AIOS live mode.")
+
+    mode = _ask_local_or_cloud(online)
+
+    if mode == "cloud":
+        wg("")
+        if _cloud_flow("wargames", _default_voice()):
             wg("Setup complete. Starting the AIOS agent...")
             return True
         wg("Cloud setup cancelled. Falling back to LOCAL.")
+        mode = "local"
 
-    wg("")
-    wg("LOCAL mode - Qwen3.5-9B (Q4_K_M)")
-    if _write_local_config(theme, voice):
-        _sp.run(["aios-theme", theme], capture_output=True)
+    # Local: the model must be on this machine. In live there is no disk, so it
+    # goes to the overlay (RAM). _download_local_model checks the room first.
+    dest = Path.home() / "models"
+    if not _download_local_model(dest, installing=False):
+        # The user backed out: offer cloud one more time instead of dead-ending.
+        if online:
+            wg("")
+            wg("No local model. Cloud mode uses the VPS model and needs no download.")
+            ans = wg_input("Use cloud mode? (Y/n): ").strip().lower()
+            if ans in ("", "y", "yes"):
+                if _cloud_flow("wargames", _default_voice()):
+                    wg("Setup complete. Starting the AIOS agent...")
+                    return True
+        wg("Setup not completed.")
+        return False
+
+    if _write_local_config("wargames", _default_voice(), model_dir=dest):
         wg("Setup complete. Starting the AIOS agent...")
         return True
     return False
-
-
 def _install_flow(online):
-    """Install mode: local or cloud, then aios-install --mode."""
+    """Install mode: local or cloud, then aios-install.
+
+    The model is NOT downloaded here: in install mode the live root is an
+    overlay backed by RAM, so a 22 GB file would have nowhere to go. setup.py
+    only shows the specs and asks for consent; aios-install does the download
+    AFTER mounting the target disk, where the space is real.
+
+    No theme/voice/thinking/time questions: those are chat commands now
+    (/theme, /voice, /think) and aios-time.
+    """
     wg("")
     wg("Installing AIOS to the hard disk.")
-    wg("How do you want to use the agent on the installed system?")
-    wg("  1) LOCAL - the built-in Qwen3.5-9B model")
-    wg("     Requires: CPU at least like an Intel i5-1035G1 (4 cores / 8 threads,")
-    wg("     1.0 GHz base / 3.6 GHz boost, 6 MB cache), 12 GB RAM (16 GB recommended).")
-    wg("     Note: runs slow, about human typing speed.")
-    wg(_check_local_requirements())
-    wg("  2) CLOUD - an external model via API")
-    wg("")
-    while True:
-        m = wg_input("> ")
-        if m in ("1", "2"):
-            break
-        wg("Invalid option. Please choose 1 or 2.")
 
-    mode = "local"
-    theme = "wargames"
-    if m == "2" and not online:
-        wg("Cloud mode requires internet (none detected).")
-        opt = wg_input("Use LOCAL mode instead? (Y/n): ").strip().lower()
-        if opt in ("", "y", "yes"):
-            wg("Switching to LOCAL.")
-            m = "1"
-        else:
-            return  # back to menu
+    mode = _ask_local_or_cloud(online)
 
-    # Final mode: theme and voice ONCE.
-    theme = _select_theme()
-    voice = _voice_flow()
-
-    if m == "2" and online:
-        if _cloud_flow(theme, voice):
+    if mode == "cloud":
+        wg("")
+        if _cloud_flow("wargames", _default_voice()):
             mode = "cloud"
         else:
             wg("Cloud setup cancelled. Falling back to LOCAL.")
+            mode = "local"
 
-    # Local thinking mode: OFF by default. Only asked in local mode.
-    think = False
+    download = 0
     if mode == "local":
-        think_opt = wg_input("Enable thinking mode? (slower, more precise) [y/N]: ").strip().lower()
-        think = think_opt in ("y", "yes")
+        # Specs + consent here; the actual download happens in aios-install,
+        # once the target disk is mounted.
+        download = 1 if _confirm_model_download() else 0
+        if not download:
+            if online:
+                wg("")
+                wg("Without the model, local mode cannot work.")
+                wg("Cloud mode uses an external API and needs no download.")
+                ans = wg_input("Use cloud mode instead? (Y/n): ").strip().lower()
+                if ans in ("", "y", "yes"):
+                    if _cloud_flow("wargames", _default_voice()):
+                        mode = "cloud"
+                    else:
+                        wg("Installation cancelled.")
+                        wg_input("Press Enter to return to the menu...")
+                        return
+                else:
+                    wg("Installation cancelled.")
+                    wg_input("Press Enter to return to the menu...")
+                    return
+            else:
+                wg("")
+                wg("Local mode needs the model, and cloud mode needs internet.")
+                wg("Installation cancelled.")
+                wg_input("Press Enter to return to the menu...")
+                return
 
-    wg("")
-    ntp_opt = wg_input("Set the correct time automatically and choose your timezone? (y/N): ").strip().lower()
-    if ntp_opt == "y":
-        setup_ntp(standalone=False)
     wg("")
     wg("Launching the installer...")
-    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", theme, "--layout", _KB_LAYOUT,
-                   "--think", "1" if think else "0",
-                   "--tts", voice["tts"], "--stt", voice["stt"]])
+    ret = _sp.run(["sudo", "aios-install", "--mode", mode, "--theme", "wargames",
+                   "--layout", _KB_LAYOUT, "--think", "0",
+                   "--download", str(download),
+                   "--tts", "off", "--stt", "off"])
     if ret.returncode == 2:
         wg("Installation cancelled.")
         wg_input("Press Enter to return to the menu...")
@@ -1363,8 +1504,6 @@ def _install_flow(online):
     again = wg_input("Reboot now? (y/N): ").strip().lower()
     if again == "y":
         _sp.run(["sudo", "reboot"])
-
-
 def setup_ntp(standalone=True):
     """Configure automatic time via external NTP server (systemd-timesyncd) and
     the local timezone. standalone=False: called from the install flow (no final
@@ -1416,7 +1555,7 @@ def _zone_entries(prefix=""):
 
 def _select_timezone():
     """Interactively select the timezone (hierarchical continents -> regions ->
-    cities), or type it directly. Applies /etc/localtime. Universal: works for
+    cities), or type it directly. Applies /etc/localtime. Universal: works fo
     any user in the world (reads tzdata, no hardcoded zone)."""
     ZONEINFO = Path("/usr/share/zoneinfo")
 
@@ -1460,7 +1599,7 @@ def _select_timezone():
             else:
                 wg("  That zone does not exist. Try again or pick from the list.")
             continue
-        # hierarchical picker
+        # hierarchical picke
         zone = _pick_zone_menu()
         if zone:
             _apply(zone)
@@ -1548,7 +1687,7 @@ def main():
     _open_audio()
     clear()
 
-    # Greeting (first boot) - movie quote + welcome + help (25 Aug)
+    # Greeting (first boot)
     wg(_pick_quote())
     time.sleep(0.4)
     wg("You have just booted Artificial Intelligence Operating System.")
@@ -1556,36 +1695,31 @@ def main():
     wg("(Chat commands like /sound, /voice, /theme work after setup, once the agent/LLM starts.)")
     wg("")
 
-    # Keyboard layout (first boot) — applies TTY + X11 and is persisted
+    # Keyboard layout (first boot) - first question, applies TTY + X11, persisted
     global _KB_LAYOUT
     _KB_LAYOUT = _select_layout()
     wg("")
 
-    # Main menu (loop: after live or install it returns to menu; only "0" exits)
+    # Main menu (only 0 exits)
     while True:
         wg("What would you like to do?")
         wg("")
         wg("  1) Test AIOS in live mode, without installing")
         wg("  2) Install AIOS to the hard disk")
-        wg("  3) Set date & time (NTP + timezone)")
         wg("  0) Exit to shell")
         wg("")
         wg("Note: AIOS has only been tested on machines without multi-boot setups.")
         wg("DISCLAIMER: installation will ERASE ALL DATA on the disk.")
         wg("There is no warranty of any kind, expressed or implied.")
         wg("")
-        choice = wg_input("> ")
+        choice = wg_input("> ").strip()
         if choice == "0":
             break
-        elif choice == "3":
-            wg("")
-            setup_ntp(standalone=True)
-            continue
-        elif choice not in ("1", "2"):
-            wg("Invalid option. Please choose 0, 1, 2 or 3.")
+        if choice not in ("1", "2"):
+            wg("Invalid option. Please choose 0, 1 or 2.")
             continue
 
-        # Internet check
+        # Internet check (both modes need it: local to download, cloud to work)
         wg("")
         wg("Checking internet connection...")
         online = _iface_has_internet()
@@ -1600,8 +1734,7 @@ def main():
                 if not online:
                     ip, gw = _net_summary()
                     wg("Still no internet connection.")
-                    wg(f"  (IP: {ip or 'none'} · Gateway: {gw or 'none'} — no external host is reachable)")
-                    wg("CLOUD mode will not be available — it will fall back to LOCAL.")
+                    wg(f"  (IP: {ip or 'none'} - Gateway: {gw or 'none'} - no external host is reachable)")
             else:
                 wg("Continuing without internet.")
 
@@ -1609,16 +1742,4 @@ def main():
             _install_flow(online)
         else:
             if _live_flow(online):
-                break  # setup completed → exit setup.py (autolaunch starts the agent)
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n  Exiting.")
-    except Exception as e:
-        print(f"\n  Error: {e}")
-    finally:
-        _close_audio()
-    os._exit(0)
+                break  # setup completed -> exit setup.py (autolaunch starts the agent)
