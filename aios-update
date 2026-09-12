@@ -67,10 +67,12 @@ MANIFEST=(
   "agent/voice.py        /usr/local/bin/aios-agent/voice.py"
   "agent/software_inventory.py /usr/local/bin/aios-agent/software_inventory.py"
   "agent/torrent.py      /usr/local/bin/aios-agent/torrent.py"
+  "agent/aio_download.py /usr/local/bin/aios-agent/aio_download.py"
   "agent/CHANGELOG.md    /usr/local/bin/aios-agent/CHANGELOG.md"
   # --- Installer and system scripts (repo root/scripts → /usr/local/bin/) ---
   "agent/aios-install        /usr/local/bin/aios-install"
   "agent/aios-theme          /usr/local/bin/aios-theme"
+  "agent/aios-time           /usr/local/bin/aios-time"
   "agent/aios-xterm          /usr/local/bin/aios-xterm"
   "agent/scripts/aios-keyboard /usr/local/bin/aios-keyboard"
   "agent/scripts/aios-session  /usr/local/bin/aios-session"

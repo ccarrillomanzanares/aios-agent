@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""aios-time - set the timezone and automatic time sync (NTP).
+
+Was a step in the installer; now it is a command, so it can be run any time
+(and by the agent, through run_command).
+
+Usage:
+  aios-time                  show status and configure interactively
+  aios-time status           show current time / NTP / timezone
+  aios-time ntp [SERVER]     enable automatic time sync (default: pool.ntp.org)
+  aios-time zone ZONE        set the timezone (e.g. Europe/Madrid)
+  aios-time list [PREFIX]    list valid timezone names
+
+Examples:
+  aios-time zone Europe/Madrid
+  aios-time list America/
+  aios-time ntp
+"""
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ZONEINFO = Path("/usr/share/zoneinfo")
+DEFAULT_NTP = "pool.ntp.org"
+SKIP_DIRS = {"posix", "right", "SystemV"}
+SKIP_FILES = {"Factory", "SECURITY", "leapseconds", "iso3166.tab", "zone.tab",
+              "zone1970.tab", "tzdata.zi", "leap-seconds.list"}
+
+
+def _run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def _sudo(cmd):
+    """Run a command with root. Live has NOPASSWD; an installed system asks fo
+    the password. `sudo -n` first so a non-interactive caller (the agent) gets a
+    clean error instead of hanging on a password prompt."""
+    if os.geteuid() == 0:
+        return _run(cmd)
+    r = _run(["sudo", "-n"] + cmd)
+    if r.returncode != 0 and "password" in (r.stderr or "").lower():
+        # No cached credentials and no tty to ask on: fail loudly, do not hang.
+        if not sys.stdin.isatty():
+            return _run(["sudo", "-n"] + cmd)  # same result, reported below
+        return _run(["sudo"] + cmd)
+    return 
+
+
+# --------------------------------------------------------------------------- #
+# Queries
+# --------------------------------------------------------------------------- #
+
+def current_status():
+    """Return (ok, dict) with the current time settings."""
+    r = _run(["timedatectl", "status"])
+    if r.returncode != 0:
+        return False, {}
+    info = {}
+    for line in r.stdout.splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            info[k.strip()] = v.strip()
+    return True, info
+
+
+def valid_zone(name):
+    p = ZONEINFO / name
+    try:
+        return p.exists() and (p.is_file() or p.is_symlink())
+    except OSError:
+        return False
+
+
+def all_zones(prefix=""):
+    """Every valid zone name; filtered by prefix when given."""
+    out = []
+    for root, dirs, files in os.walk(ZONEINFO):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        for f in files:
+            if f in SKIP_FILES or f.endswith((".tab", ".zi", ".list")):
+                continue
+            rel = os.path.relpath(os.path.join(root, f), ZONEINFO).replace(os.sep, "/")
+            out.append(rel)
+    out.sort()
+    if prefix:
+        p = prefix.strip("/")
+        out = [z for z in out if z.startswith(p)]
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Actions
+# --------------------------------------------------------------------------- #
+
+def set_ntp(server=DEFAULT_NTP):
+    server = (server or DEFAULT_NTP).strip() or DEFAULT_NTP
+    print(f"Configuring automatic time sync with {server}...")
+    r = _sudo(["tee", "/etc/systemd/timesyncd.conf"])
+    # tee via stdin
+    if os.geteuid() == 0:
+        try:
+            Path("/etc/systemd/timesyncd.conf").write_text(f"[Time]\nNTP={server}\n")
+            r = _run(["true"])
+        except OSError as e:
+            print(f"  ERROR writing /etc/systemd/timesyncd.conf: {e}")
+            return False
+    else:
+        r = subprocess.run(["sudo", "tee", "/etc/systemd/timesyncd.conf"],
+                           input=f"[Time]\nNTP={server}\n", capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  ERROR: {(r.stderr or '').strip() or 'could not write timesyncd.conf'}")
+        print("  (needs root: run this command yourself as root/sudo)")
+        return False
+
+    for cmd in (["systemctl", "enable", "systemd-timesyncd"],
+                ["systemctl", "restart", "systemd-timesyncd"],
+                ["timedatectl", "set-ntp", "true"]):
+        rr = _sudo(cmd)
+        if rr.returncode != 0 and "systemctl" in cmd[0]:
+            print(f"  WARN: {' '.join(cmd)}: {(rr.stderr or '').strip()}")
+    print("  Automatic time sync enabled.")
+    return True
+
+
+def set_zone(name):
+    name = name.strip().strip("/")
+    if not valid_zone(name):
+        print(f"Unknown timezone: {name}")
+        sugg = [z for z in all_zones(name) if z.startswith(name)][:8] \
+            if name else all_zones()[:8]
+        if sugg:
+            print("Did you mean:")
+            for s in sugg:
+                print(f"  {s}")
+        return False
+    target = f"/usr/share/zoneinfo/{name}"
+    r = _sudo(["ln", "-sf", target, "/etc/localtime"])
+    if r.returncode != 0:
+        print(f"  ERROR setting the timezone: {(r.stderr or '').strip()}")
+        print("  (needs root: run this command yourself as root/sudo)")
+        return False
+    print(f"Timezone set to {name}.")
+    try:
+        import datetime
+        print(f"  Local time now: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
+    except Exception:
+        pass
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# Interactive
+# --------------------------------------------------------------------------- #
+
+def _pick_zone_menu():
+    """Hierarchical picker: continent -> region -> city."""
+    parts = []
+    while True:
+        base = ZONEINFO.joinpath(*parts)
+        try:
+            entries = sorted(e.name for e in base.iterdir())
+        except OSError:
+            entries = []
+        entries = [e for e in entries if e not in SKIP_DIRS and e not in SKIP_FILES
+                   and not e.startswith(".")]
+        if not entries:
+            if parts:
+                parts.pop()
+                continue
+            return None
+        dirs = [e for e in entries if (base / e).is_dir()]
+        files = [e for e in entries if not (base / e).is_dir()]
+        listing = dirs + files
+
+        print()
+        if parts:
+            print(f"  Timezone: /{'/'.join(parts)}/")
+        for i, e in enumerate(listing, 1):
+            mark = "/" if (base / e).is_dir() else ""
+            print(f"  {i:>3}) {e}{mark}")
+        print("    0) Go back      b) Type it manually")
+        raw = input("> ").strip()
+        if raw == "0":
+            if parts:
+                parts.pop()
+                continue
+            return None
+        if raw.lower() == "b":
+            typed = input("  Timezone (e.g. Europe/Madrid): ").strip()
+            if typed and valid_zone(typed):
+                return typed.strip("/")
+            if typed:
+                print(f"  Unknown timezone: {typed}")
+            continue
+        if not raw.isdigit():
+            print("  Invalid choice.")
+            continue
+        n = int(raw)
+        if not (1 <= n <= len(listing)):
+            print("  Invalid choice.")
+            continue
+        chosen = listing[n - 1]
+        full = "/".join(parts + [chosen])
+        if (ZONEINFO / full).is_dir():
+            parts.append(chosen)
+        else:
+            return full
+
+
+def show_status():
+    ok, info = current_status()
+    if not ok:
+        print("Could not read the time status (timedatectl failed).")
+        return
+    order = ["Local time", "Universal time", "Time zone", "NTP service",
+             "NTP synchronized", "RTC in local TZ"]
+    for k in order:
+        if k in info:
+            print(f"  {k:<18} {info[k]}")
+    for k, v in info.items():
+        if k not in order:
+            print(f"  {k:<18} {v}")
+
+
+def interactive():
+    print("AIOS - date and time\n")
+    print("Current settings:")
+    show_status()
+    print()
+    ans = input("Sync the clock automatically over the internet (NTP)? (y/N): ").strip().lower()
+    if ans in ("y", "yes"):
+        srv = input(f"  NTP server [{DEFAULT_NTP}]: ").strip() or DEFAULT_NTP
+        set_ntp(srv)
+    print()
+    ans = input("Set your timezone so the clock shows local time? (y/N): ").strip().lower()
+    if ans in ("y", "yes"):
+        typed = input("  Timezone (Enter to pick from a list): ").strip()
+        if typed and valid_zone(typed):
+            set_zone(typed.strip("/"))
+        else:
+            if typed:
+                print(f"  Unknown timezone: {typed}")
+            zone = _pick_zone_menu()
+            if zone:
+                set_zone(zone)
+            else:
+                print("  No timezone chosen.")
+    print()
+    print("Done. Current settings:")
+    show_status()
+
+
+USAGE = """aios-time - set the timezone and automatic time sync (NTP)
+
+Usage:
+  aios-time                  show status and configure interactively
+  aios-time status           show current time / NTP / timezone
+  aios-time ntp [SERVER]     enable automatic time sync (default: pool.ntp.org)
+  aios-time zone ZONE        set the timezone (e.g. Europe/Madrid)
+  aios-time list [PREFIX]    list valid timezone names
+"""
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        if not sys.stdin.isatty():
+            show_status()
+            return 0
+        try:
+            interactive()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return 1
+        return 0
+
+    cmd = args[0].lower()
+    if cmd in ("status", "-s", "--status"):
+        show_status()
+        return 0
+    if cmd in ("help", "-h", "--help"):
+        print(USAGE)
+        return 0
+    if cmd == "ntp":
+        server = args[1] if len(args) > 1 else DEFAULT_NTP
+        return 0 if set_ntp(server) else 1
+    if cmd == "zone":
+        if len(args) < 2:
+            print("Usage: aios-time zone ZONE   (e.g. aios-time zone Europe/Madrid)")
+            return 2
+        return 0 if set_zone(args[1]) else 1
+    if cmd == "list":
+        prefix = args[1] if len(args) > 1 else ""
+        zones = all_zones(prefix)
+        if not zones:
+            print(f"No timezone matches '{prefix}'.")
+            return 1
+        for z in zones:
+            print(z)
+        return 0
+
+    print(f"Unknown option: {args[0]}\n")
+    print(USAGE)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        sys.exit(1)
