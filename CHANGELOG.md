@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.22.0 - 2026-09-11 23:55
+
+### fixes
+
+- **The AIOS LLM (Nemotron-3.5-Lightning, fine-tuned) now works with thinking ON *and* OFF, both with tool calling.** The previous fine-tune returned an **empty response** (1 token, `finish=stop`) whenever `enable_thinking=false`: the agent went mute on any request that needed a tool call ("hello" answered, "check the running containers" did not).
+  - Root cause: at training time the chat template was rendered **without** `enable_thinking`, so it emitted a **closed, empty reasoning block** (` thinking`) in front of the tool call. The model learned that transition and was out of distribution when a real reasoning block opened at inference.
+  - Fix in the re-training: `mask_generation_prompt: true` + `mask_reasoning_content: true` (the template's own tokens are no longer supervised), tool-call `arguments` kept as a **mapping** (the Nemotron template iterates them with `|items`), and `model.output_hidden_states: true`.
+  - Verified against the public endpoint in **both** modes: `run_command {"command":"sven install vim"}` — with `enable_thinking: true` and `false`.
+- **Model, dataset, recipes and scripts are now versioned** in the `aios-model` repo: behaviour dataset (249 pairs, 154 with real `tool_calls`), NeMo AutoModel recipes, the manual tensor-merge script and the training/deploy scripts.
+- The `enable_thinking` cloud patch in `agent.py` is no longer required: the model handles both modes, so `/think on` and `/think off` both work.
+
 ## v0.21.0 - 2026-09-11 22:30
 
 ### features
