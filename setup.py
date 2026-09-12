@@ -910,12 +910,11 @@ PROVIDERS = [
     {
         "name": "LLM VPS (llama-hardened)",
         "models": [
-            ("nemotron-3.5-lightning", "Nemotron-3.5-Lightning 30B-A3B - agentic tool calling (VPS)", "https://webuillama.ccmai.org/v1/chat/completions"),
-            ("qwen3.5:9b", "Qwen3.5 9B - reasoning + tool calling (VPS)", "https://webuillama.ccmai.org/ollama/v1/chat/completions"),
+            ("qwen3.6-35b-a3b", "Qwen3.6-35B-A3B - MoE, tool calling + vision (VPS)", "https://webuillama.ccmai.org/ollama/v1/chat/completions"),
         ],
         "env": "OLLAMA_HARDENED_API_KEY",
-        "context_limit": 32768,
-        "base_url": "https://webuillama.ccmai.org/v1/chat/completions",
+        "context_limit": 16384,
+        "base_url": "https://webuillama.ccmai.org/ollama/v1/chat/completions",
         "auth_type": "x-api-key",
     },
 ]
@@ -1167,20 +1166,21 @@ def _write_cloud_config(prov_data, model, key, theme="wargames", voice=None):
         yaml.dump(config, f, default_flow_style=False)
 
     _upsert_env(prov_data["env"], key)
-    # Vision (optional): ask only for the VPS provider (llama-hardened), where
-    # the /vision endpoint exists. Users who decline keep browser/OCR.
+    # Vision (optional): only for the VPS provider (llama-hardened). The Qwen3.6
+    # model is multimodal, so the SAME endpoint serves text and images.
+    # Users who decline keep browser/OCR.
     vision = {}
     if prov_data.get("name") == "LLM VPS (llama-hardened)":
         wg("")
         wg("  Vision by AI (optional): lets the agent SEE the screen and")
-        wg("  recognize apps/logos/UI (Gemma-3-4B on the VPS).")
+        wg("  recognize apps/logos/UI (Qwen3.6-35B on the VPS).")
         wg("  Privacy: sends screenshots to the VPS. Without it, the agent")
         wg("  uses browser/OCR only.")
         v_opt = wg_input("  Enable vision? (y/N): ").strip().lower()
         if v_opt in ("y", "yes"):
             vision = {
                 "enabled": True,
-                "endpoint": "https://webuillama.ccmai.org/vision/v1/chat/completions",
+                "endpoint": "https://webuillama.ccmai.org/ollama/v1/chat/completions",
                 "api_key": key,
             }
             wg("  Vision enabled.")

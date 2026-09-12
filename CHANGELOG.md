@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.23.0 - 2026-09-12 19:12
+
+### features
+
+- **The AIOS LLM is now Qwen3.6-35B-A3B** (MoE, ~3B active of 35B, multimodal) instead of the fine-tuned Nemotron-3.5-Lightning. It does **text AND vision in one model**, so the separate vision container is gone.
+  - Chosen over the Nemotron for three measured reasons: **Apache 2.0 license** (the Nemotron was OpenMDW-1.1, with a patent clause — relevant for a globally distributed ISO), **identical behaviour in thinking ON and OFF** (94.3% in both modes, vs 97.1%/91.4% for the Nemotron), and **better tool-call discipline** (`CONFIRM` 3/4 vs 2/4, `TOOL` 17/17 vs 16/17 in the OFF mode).
+  - The Nemotron was faster (~26 tok/s vs ~9 tok/s on the CPU-only VPS) and scored slightly higher on thinking ON. Both trade-offs were accepted by Carlos after using it: *"lo noto muchísimo mejor que cualquier otro agente/llm que hemos probado"*.
+  - Weights: `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` (21.1 GB) + `mmproj-qwen3.6-F16.gguf` (858 MB).
+- **Vision now goes through the same model.** `describe_screen()` points at the chat endpoint, so there is one model to run and one route to maintain instead of two.
+  - Verified with a purpose-made image (text `RACK 7 TEMP 63C`) — the model read it back exactly.
+  - Verified on a real desktop: it reported the **window title** (`bios@aios:~`), the user, the hostname and what the terminal was doing. The previous 4B model could not do this.
+  - The `/vision/*` route and the `llama-vision` container (Gemma-3-4B + mmproj) were removed; the `vision.endpoint` default now points at the chat endpoint.
+- **`/v1` is kept as a legacy alias** and now serves the same model as `/ollama`, so existing configurations and any client pointed at `/v1` keep working unchanged.
+
+### fixes
+
+- **`describe_screen()` returned an EMPTY description.** It was the only LLM call in the agent that did **not** send `enable_thinking`; the model reasoned by default, spent all 400 `max_tokens` on `reasoning_content` and returned an empty `content`. Fixed by sending `enable_thinking: false`, like every other call in the agent. This bug existed before this release — the previous model happened to work anyway.
+- **`setup.py` would configure a broken installation.** The model list for the VPS provider still offered `nemotron-3.5-lightning` (removed) and `qwen3.5:9b` (no longer served), and the vision option wrote the now-removed `/vision` endpoint. Both corrected to the live model and endpoint.
+
+### infra
+
+- The `llama-hardened` stack is now **two containers** (`proxy` + `qwen`) instead of four. Removed: the `llama` (Nemotron) and `vision` (Gemma) services, their entrypoints, their Dockerfile `COPY` lines, the `/vision` Caddy block, the `depends_on` that referenced the removed service, the two Nemotron GGUFs (48 GB), the two Gemma GGUFs (3.3 GB), a stray second Gemma server that had been running unattended on port 8095 for 3 days, and the dead `k2-test` tree.
+- Free space on the VPS went from **60 GB to 136 GB**; RAM in use dropped from 30.5 GB to ~15 GB.
+- Backups of every file touched are in `~/llama-hardened/.bak-qwen36/`.
+
 ## v0.22.0 - 2026-09-11 23:55
 
 ### fixes
