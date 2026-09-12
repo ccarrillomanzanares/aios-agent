@@ -18,6 +18,15 @@
 - **In install mode the download happens in `aios-install`**, after the target disk is mounted. Reason: the live root is an overlay whose upper layer is a tmpfs in RAM, so a 22 GB file has nowhere to go there. `setup.py` only shows the specs and records consent (`--download 0|1`).
 - **In live mode the download stays in RAM** and is lost on reboot; the user is told this before downloading.
 
+### fixes
+
+- **A wrong answer can no longer kick you out of the installer.** Asked for explicitly: every read and every exit in `setup.py` and `aios-install` was audited, and ten places were fixed. The worst three:
+  - **`setup.py` had lost its entry point.** The menu rewrite consumed `main()` up to end-of-file and took the `if __name__ == "__main__"` block with it, so running `setup.py` did nothing at all. Restored.
+  - **`_read_line` spun forever on EOF** (reading past the end returned an empty string that the loop treated as a keypress). Both files fixed.
+  - **An empty password was accepted** and `chpasswd` then skipped it in silence, so the installed disk kept the factory password. Passwords are now length-checked, and `set_passwords` retries and verifies `/etc/shadow` actually changed.
+- **`select_disk` and the wipe confirmation re-ask instead of counting down.** Three bad answers used to cancel the installation outright; now they re-ask, and cancelling is an explicit `0` (the wipe prompt only offers it after three attempts). Nothing destructive moves earlier: the disk is untouched until you type the confirmation.
+- **Ctrl+C is not an exit inside the menus.** It returns to the menu (or re-asks the current question). `aios-install` exits with 2 = "cancelled", which puts you back in `setup.py`'s menu with a clean message instead of a traceback.
+
 ### removes
 
 - **No theme, voice (TTS/STT) or thinking questions** in the installer: `/theme`, `/voice`, `/sound` and `/think` are chat commands and have been for a while. The menu told the user about them while also asking the same thing another way.
