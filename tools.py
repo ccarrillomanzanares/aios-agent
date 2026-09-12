@@ -117,6 +117,13 @@ def _is_blocked_command(command: str) -> bool:
         return True
     if re.search(r'\bpkill\s+-9\s+(-f\s+)?(dockerd|containerd|systemd|init|Xorg|wpa_supplicant)', lower):
         return True
+    # --- AIOS PATCH (12 Sep 2026): irreversible vectors not covered ---
+    if re.search(r'\bshred\b', lower):
+        return True
+    if re.search(r'\bwipefs\b', lower):
+        return True
+    if re.search(r'\bbadblocks\b.*-w', lower):
+        return True
     return False
 
 
@@ -137,6 +144,28 @@ def _is_destructive_command(command: str) -> bool:
     if re.search(r'\bdockerd\b.*--host\s*=\s*tcp://', lower):
         return True
     if re.search(r'\bdockerd\b.*--host\s+tcp://', lower):
+        return True
+    # --- AIOS PATCH (12 Sep 2026): 6 vectors that slipped through ---
+    # exemption: anything under /tmp or /var/tmp needs no confirmation
+    _en_tmp = bool(re.search(r'(?<![\w/])/(var/)?tmp(?:/|\s|$)', lower))
+    # truncate to zero (truncate -s 0 X)
+    if re.search(r'\btruncate\b.*\s-?s\s*0\b', lower):
+        return not _en_tmp
+    # "> file" overwrites (single >, not >>)
+    if re.search(r'>\s*\S+', lower) and not re.search(r'>>', lower):
+        m = re.search(r'>\s*([^\s;|&]+)', lower)
+        if m:
+            destino = m.group(1)
+            if destino in ('/dev/null', '/dev/stdout', '/dev/stderr') or destino.startswith('/dev/fd'):
+                return False
+            if re.search(r'/dev/(sd|nvme|vd|hd)', destino):
+                return True
+            return not _en_tmp
+    # recursive delete via find
+    if re.search(r'\bfind\b.*\s-delete\b', lower):
+        return not _en_tmp
+    # move/rename system directories (bypasses rm because it does not delete)
+    if re.search(r'\bmv\b\s+/(var|etc|boot|usr|lib|bin|sbin|opt|root|home)\b', lower):
         return True
     return False
 
