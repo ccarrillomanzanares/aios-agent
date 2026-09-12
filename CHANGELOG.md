@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.24.0 - 2026-09-12 20:29
+
+### features
+
+- **The first-run setup is much shorter, and there is ONE ISO.** Local mode no longer ships the model inside the image: it is downloaded during setup. The `aios-withllm.iso` variant is gone. Model: **Qwen3.6-35B-A3B**, 22.1 GB, no GPU needed.
+- **New flow** (was ~18 questions, now ~8):
+  1. keyboard layout
+  2. main menu: live / install (only "0" exits)
+  3. internet check, offering WiFi when there is none — now in BOTH modes (local needs it to download, cloud needs it to work)
+  4. **local or cloud** (cloud is unchanged)
+  5. local → the model specs, a real hardware check and a download with a progress bar
+  6. cloud → provider + API key
+  7. install → disk, then passwords
+- **The model specs are shown before downloading**: recommended minimum 8 cores / 16 GB RAM, the reference machine where the speed was measured (AMD EPYC 16 cores @ 3.2 GHz, 62 GB, ~9 tok/s), and an explicit "no GPU is needed". A machine below the minimum gets a plain warning instead of being silently allowed to fail.
+- **The local/cloud question is now ONE function** (`_ask_local_or_cloud`) used by both live and install. It was duplicated verbatim in `_live_flow` and `_install_flow`, which is how the two flows drifted apart.
+- **In install mode the download happens in `aios-install`**, after the target disk is mounted. Reason: the live root is an overlay whose upper layer is a tmpfs in RAM, so a 22 GB file has nowhere to go there. `setup.py` only shows the specs and records consent (`--download 0|1`).
+- **In live mode the download stays in RAM** and is lost on reboot; the user is told this before downloading.
+
+### removes
+
+- **No theme, voice (TTS/STT) or thinking questions** in the installer: `/theme`, `/voice`, `/sound` and `/think` are chat commands and have been for a while. The menu told the user about them while also asking the same thing another way.
+- **No date/time step** in the installer: it is the new **`aios-time`** command.
+- **The duplicated destructive-format warning** in `setup.py` is gone (the installer keeps its own, clearer one).
+
+### new commands and files
+
+- **`aios-time`** — timezone and NTP, the step that used to live inside the installer:
+  `aios-time`, `aios-time status`, `aios-time ntp [SERVER]`, `aios-time zone ZONE`, `aios-time list [PREFIX]`.
+  Root commands try `sudo -n` first, so a non-interactive caller (the agent) gets a clean error instead of hanging on a password prompt; with no tty it prints the status instead of waiting.
+- **`aio_download.py`** — the downloader: writes to `.part` and renames only when complete, resumes with an HTTP Range request, verifies the byte count against Content-Length, and reports decimal units (22.1 GB, matching HuggingFace and browsers). `check_can_run_local()` returns ok/tight/no from the real cores and RAM.
+- Both are in `aios-update`'s MANIFEST, so updates deploy them.
+
+### notes
+
+- `_select_theme`, `_voice_flow` and `setup_ntp` are still in the file but no flow calls them: they remain as the implementation behind `/theme`, `/voice` and `aios-time`.
+- The new menu was verified with a simulator that runs `main()` against scripted answers over 8 scenarios: live/install × local/cloud, no internet, a machine that cannot run the model, invalid options, and backing out of the download.
+
 ## v0.23.0 - 2026-09-12 19:12
 
 ### features
