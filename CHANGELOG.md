@@ -27,6 +27,16 @@
 - **`select_disk` and the wipe confirmation re-ask instead of counting down.** Three bad answers used to cancel the installation outright; now they re-ask, and cancelling is an explicit `0` (the wipe prompt only offers it after three attempts). Nothing destructive moves earlier: the disk is untouched until you type the confirmation.
 - **Ctrl+C is not an exit inside the menus.** It returns to the menu (or re-asks the current question). `aios-install` exits with 2 = "cancelled", which puts you back in `setup.py`'s menu with a clean message instead of a traceback.
 
+### fixes
+
+- **The local model (9B) degenerated into a loop and never answered.** The installer launched `llama-server` with no sampling options at all, and llama-server's defaults have the repetition penalties **disabled** (`--repeat-penalty 1.00`, `--dry-multiplier 0.00`). Verified with the exact command `chat.py` uses and the exact request the agent sends:
+  ```
+  sin sampling:  1254 chars, 81 repetitions of ' | grep -v "^$"', finish=length
+  con sampling:   261 chars, no repetition,                       finish=stop
+  ```
+  It burned all its tokens repeating and never closed the command. The same root cause produced HTTP 500 on the VPS project server (the 35B model looped inside a tool call, so its arguments ended as invalid JSON).
+  - These cannot be set per request from the agent: `repeat_penalty` and `dry_multiplier` are not OpenAI API fields, so they have to be server launch options.
+- **The `aios-time` command and the model downloader are now in the ISO** (the installer needs both).
 ### removes
 
 - **No theme, voice (TTS/STT) or thinking questions** in the installer: `/theme`, `/voice`, `/sound` and `/think` are chat commands and have been for a while. The menu told the user about them while also asking the same thing another way.

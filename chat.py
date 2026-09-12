@@ -174,11 +174,43 @@ def _start_local_model(config):
 
     proc = subprocess.Popen(
 
+        # Anti-degeneration (13 Sep 2026). Without these, llama-server uses its
+
+        # defaults and those have the repetition penalties DISABLED
+
+        # (repeat-penalty 1.00, dry 0.00). A long repetitive generation then
+
+        # loops: the tool call degenerates, its arguments end as invalid JSON
+
+        # and the server answers HTTP 500 instead of a reply. Seen exactly like
+
+        # this on the VPS with the 35B MoE, and this launcher had the same gap.
+
+        # These cannot be set per request from the agent (repeat_penalty and
+
+        # dry_multiplier are not OpenAI API fields), so they belong here.
+
         ["llama-server", "-m", str(model_path),
 
          "--host", "127.0.0.1", "--port", str(port),
 
-         "-c", str(ctx), "-t", str(threads)],
+         "-c", str(ctx), "-t", str(threads),
+
+         "--repeat-penalty", "1.1",
+
+         "--repeat-last-n", "256",
+
+         "--dry-multiplier", "0.8",
+
+         "--dry-base", "1.75",
+
+         "--dry-allowed-length", "2",
+
+         "--top-p", "0.9",
+
+         "--top-k", "40",
+
+         "--min-p", "0.05"],
 
         env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
 

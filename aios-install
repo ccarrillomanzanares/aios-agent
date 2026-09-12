@@ -408,11 +408,15 @@ def install_grub(target, disk, root_part):
     run(["/usr/sbin/chroot", target, "/usr/sbin/grub-install", f"/dev/{disk}"])
     # Write fixed grub.cfg (grub-mkconfig generates graphical menu that hangs on VirtualBox)
     grub_cfg = Path(target) / "boot" / "grub" / "grub.cfg"
+    # Silent boot on the installed disk too: no GRUB menu (timeout_style=hidden
+    # hides the "Booting..." line), no kernel chatter, no blinking cursor.
     grub_cfg.write_text(f"""set default=0
 set timeout=0
+set timeout_style=hidden
+set quiet_boot=1
 
 menuentry "AIOS LFS" {{
-    linux /boot/vmlinuz-6.18.10-lfs root={root_part} rw console=tty0 quiet loglevel=3 systemd.show_status=false
+    linux /boot/vmlinuz-6.18.10-lfs root={root_part} rw console=tty0 quiet loglevel=3 systemd.show_status=false vt.global_cursor_default=0
     initrd /boot/initrd.img
 }}
 """)
