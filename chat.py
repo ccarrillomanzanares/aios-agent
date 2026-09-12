@@ -1103,29 +1103,209 @@ def main():
 
 
 
-        if query.lower() == "/voice":
+        if query.lower().startswith("/voice"):
+
+
+
+            # Menu like /theme (NOT in the installer: /voice and /theme are chat
+
+            # commands, so they work the same in live and installed).
 
             vc = config.setdefault("voice", {})
 
-            if vc.get("tts", "off") in (None, "off"):
+            _arg = query[6:].strip().lower()
 
-                vc["tts"] = _voice_engine
 
-            else:
 
-                _voice_engine = vc["tts"]
+            if _arg in ("on", "off"):
 
-                vc["tts"] = "off"
+                # shortcut: /voice on | /voice off
+
+                if _arg == "on":
+
+                    if vc.get("tts", "off") in (None, "off"):
+
+                        vc["tts"] = _voice_engine
+
+                else:
+
+                    _voice_engine = vc.get("tts") or _voice_engine
+
+                    vc["tts"] = "off"
+
+                    try:
+
+                        import voice
+
+                        voice.stop()
+
+                    except Exception:
+
+                        pass
 
                 try:
 
-                    import voice
+                    import yaml
 
-                    voice.stop()
+                    CONFIG_FILE.write_text(yaml.dump(config, default_flow_style=False))
 
                 except Exception:
 
                     pass
+
+                _write_voice_state(config)
+
+                print(f"  Voice output: {'ON' if vc.get('tts') not in (None, 'off') else 'OFF'} ({vc.get('tts')})")
+
+                continue
+
+
+
+            tts_opts = {"1": "off", "2": "espeak", "3": "gemini", "4": "openai"}
+
+            stt_opts = {"1": "off", "2": "vosk", "3": "gemini", "4": "openai"}
+
+            langs = ["es", "en", "fr", "de", "it", "pt", "ca"]
+
+
+
+            tts_now = vc.get("tts", "off") or "off"
+
+            stt_now = vc.get("stt", "off") or "off"
+
+            lang_now = vc.get("stt_lang") or "es"
+
+
+
+            print("  VOICE")
+
+            print(f"    1) Voice output (TTS): {tts_now}")
+
+            print("       off | espeak (local, offline) | gemini | openai")
+
+            print(f"    2) Voice input (STT):  {stt_now}")
+
+            print("       off | vosk (local, offline) | gemini | openai")
+
+            print(f"    3) Language:           {lang_now}")
+
+            print("       " + " | ".join(langs))
+
+            print("    (Enter = keep, q = cancel)")
+
+
+
+            sel = input("  Option (1-3): ").strip().lower()
+
+            if sel == "q":
+
+                print("  Voice unchanged.")
+
+                continue
+
+
+
+            def _ask(prompt, opts):
+
+                while True:
+
+                    v = input(prompt).strip().lower()
+
+                    if not v:
+
+                        return None
+
+                    if v in opts:
+
+                        return opts[v]
+
+                    print("    Invalid. Choose 1-4, or Enter to keep.")
+
+
+
+            if sel == "1":
+
+                r = _ask("    TTS (1 off, 2 espeak, 3 gemini, 4 openai) [keep]: ", tts_opts)
+
+                if r is not None:
+
+                    vc["tts"] = r
+
+                    if r in (None, "off"):
+
+                        try:
+
+                            import voice
+
+                            voice.stop()
+
+                        except Exception:
+
+                            pass
+
+                    else:
+
+                        _voice_engine = r
+
+            elif sel == "2":
+
+                r = _ask("    STT (1 off, 2 vosk, 3 gemini, 4 openai) [keep]: ", stt_opts)
+
+                if r is not None:
+
+                    vc["stt"] = r
+
+                    if r == "vosk":
+
+                        _l = vc.get("stt_lang") or "es"
+
+                        _mp = f"/usr/local/share/aios/vosk-model-{_l}"
+
+                        if _l == "es" and not os.path.isdir(_mp):
+
+                            _mp = "/usr/local/share/aios/vosk-model"
+
+                        if not os.path.isdir(_mp):
+
+                            print(f"    NOTE: no model for '{_l}' yet (looked in {_mp}).")
+
+                            print("          Speech recognition will do nothing until it is installed.")
+
+            elif sel == "3":
+
+                while True:
+
+                    v = input(f"    Language ({'/'.join(langs)}) [keep]: ").strip().lower()
+
+                    if not v:
+
+                        break
+
+                    if v in langs:
+
+                        vc["stt_lang"] = v
+
+                        _mp = f"/usr/local/share/aios/vosk-model-{v}"
+
+                        if v == "es" and not os.path.isdir(_mp):
+
+                            _mp = "/usr/local/share/aios/vosk-model"
+
+                        mark = "installed" if os.path.isdir(_mp) else "NOT installed"
+
+                        print(f"    Language set to {v} (STT model: {mark})")
+
+                        break
+
+                    print("    Unknown language. " + "/".join(langs))
+
+            else:
+
+                print("  Voice unchanged.")
+
+                continue
+
+
 
             try:
 
@@ -1139,7 +1319,11 @@ def main():
 
             _write_voice_state(config)
 
-            print(f"  Voice output: {'ON' if vc.get('tts') not in (None, 'off') else 'OFF'} ({_voice_engine})")
+
+
+            print(f"  Saved: TTS={vc.get('tts', 'off')} | STT={vc.get('stt', 'off')} | lang={vc.get('stt_lang') or 'es'}")
+
+            print("  (the change applies to the next turn)")
 
             continue
 

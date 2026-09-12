@@ -120,8 +120,10 @@ def _skip_pressed():
 
 def _read_key():
     """Non-blocking read of ONE raw key during the typewriter (cbreak mode).
-    Returns the byte (b" ", b"\t", b"\x12"...) or None if no key pressed.
-    Used for barge-in: Tab = add text info, Ctrl+R = add voice info."""
+    Returns the byte (b" ", b"\t", b"\x07"...) or None if no key pressed.
+    Used for barge-in: Tab = add text info, Ctrl+G = add voice info.
+    Ctrl+G, not Ctrl+R: readline binds Ctrl+R to reverse-search-history
+    and swallows the key before it reaches this loop."""
     try:
         import select
         if select.select([0], [], [], 0)[0]:
@@ -768,7 +770,7 @@ class Agent:
                                         _out(chunk[i + 1:])
                                         skip_rest = True
                                         break
-                                    if _k in (b"\t", b"\x12"):
+                                    if _k in (b"\t", b"\x07"):
                                         barged = "text" if _k == b"\t" else "voice"
                                         skip_rest = True
                                         break
@@ -934,7 +936,7 @@ class Agent:
                     _out(f"  ⚙ {name}({func.get('arguments','')})\n")
                     # Barge-in during tool phase: stop before executing.
                     _bk = _read_key()
-                    if _bk in (b"\t", b"\x12"):
+                    if _bk in (b"\t", b"\x07"):
                         _bmode = "text" if _bk == b"\t" else "voice"
                         _out("\n")
                         if _bmode == "text":

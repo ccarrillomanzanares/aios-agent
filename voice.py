@@ -46,7 +46,7 @@ def stop():
     with _LOCK:
         _PROCS.clear()
 
-_LANGS = ("es", "fr", "de", "it", "pt", "en")
+_LANGS = ("es", "fr", "de", "it", "pt", "en", "ca")
 
 
 # ---------------------------------------------------------------------------
@@ -233,10 +233,25 @@ def _vosk_stt(wav):
         from vosk import Model, KaldiRecognizer
     except Exception:
         return None
-    model_path = "/usr/local/share/aios/vosk-model-es"
-    if not os.path.isdir(model_path):
-        model_path = "/usr/local/share/aios/vosk-model"
-    if not os.path.isdir(model_path):
+    # One model per language: /usr/local/share/aios/vosk-model-<lang>.
+    # The language comes from voice.stt_lang (config.yaml); "es" is the fallback
+    # so a config without the key keeps working.
+    lang = (voice.get("stt_lang") or "es") if isinstance(voice, dict) else "es"
+    if lang not in _LANGS:
+        lang = "es"
+    candidates = [
+        f"/usr/local/share/aios/vosk-model-{lang}",
+        f"/usr/local/share/aios/vosk-model-{lang}-small",
+    ]
+    if lang == "es":
+        # legacy: before the multi-language support only Spanish shipped, under
+        # this unnamed path. It IS a Spanish model, so reusing it for "es" is
+        # correct -- but never for another language (that would transcribe
+        # French with a Spanish model and silently return nonsense).
+        candidates.append("/usr/local/share/aios/vosk-model")
+    model_path = next((p for p in candidates if os.path.isdir(p)), None)
+    if not model_path:
+        _log(f"_vosk_stt: no model for lang={lang!r}; looked in: {candidates}")
         return None
     model = Model(model_path)
     rec = KaldiRecognizer(model, 16000)

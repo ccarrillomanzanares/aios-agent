@@ -1055,65 +1055,12 @@ def _upsert_env(key_name, value):
         f.writelines(lines)
 
 
-def _voice_flow():
-    """Pick voice output (TTS) and input (STT); ask for the API key of cloud
-    engines (Gemini/OpenAI) and save it to .env, separate from the chat key.
-    Returns {"tts": ..., "stt": ..., "tts_lang": "auto"}."""
-    wg("")
-    wg("VOICE (optional) - the agent can talk and listen")
-    wg("")
-    wg("Voice output (text-to-speech):")
-    wg("  1) Off")
-    wg("  2) Local robotic voice (espeak-ng)     [offline]")
-    wg("  3) Cloud natural voice (Google Gemini) [API key]")
-    wg("  4) Cloud natural voice (OpenAI)        [API key]")
-    tts_map = {"1": "off", "2": "espeak", "3": "gemini", "4": "openai"}
-    while True:
-        t = wg_input("  Select (1-4) [2]: ").strip() or "2"
-        if t in tts_map:
-            break
-        wg("  Invalid option. Choose 1-4.")
-    tts = tts_map[t]
-
-    wg("")
-    wg("Voice input (speech-to-text):")
-    wg("  1) Off   2) Local (vosk)   3) Gemini   4) OpenAI")
-    stt_map = {"1": "off", "2": "vosk", "3": "gemini", "4": "openai"}
-    while True:
-        s = wg_input("  Select (1-4) [2]: ").strip() or "2"
-        if s in stt_map:
-            break
-        wg("  Invalid option. Choose 1-4.")
-    stt = stt_map[s]
-
-    # One key per cloud provider (shared between TTS and STT).
-    for eng in sorted({tts, stt}):
-        if eng not in VOICE_ENV:
-            continue
-        env_name = VOICE_ENV[eng]
-        prov_name = "Google Gemini" if eng == "gemini" else "OpenAI"
-        url = CLOUD_KEY_URLS.get(prov_name, "")
-        wg("")
-        wg(f"{prov_name} API key is required for voice ({eng}).")
-        if url:
-            wg(f"  Get one at: {url}")
-        key = wg_input(f"  {prov_name} API key (Enter to turn off {eng} voice): ").strip()
-        if not key:
-            if tts == eng:
-                tts = "off"
-            if stt == eng:
-                stt = "off"
-            continue
-        wg("  Testing key...")
-        base_url = CLOUD_ENDPOINTS.get(prov_name, "")
-        valid = validate_api_key(prov_name, key, base_url)
-        if valid is True:
-            wg(f"  {prov_name} key valid. Saved.")
-        else:
-            wg("  Could not verify the key (no internet or wrong key). Saving anyway.")
-        _upsert_env(env_name, key)
-
-    return {"tts": tts, "stt": stt, "tts_lang": "auto"}
+# NOTE: there is no voice flow in the installer on purpose. Voice (TTS/STT)
+# and its language are chosen from the CHAT, with the /voice menu -- exactly
+# like /theme, /think and /sound. That way one single code path serves both
+# live and installed, and the installer does not ask about voice at all.
+# The VOICE_ENV / CLOUD_KEY_URLS / CLOUD_ENDPOINTS tables below are still
+# used by the cloud flow (a voice cloud engine needs the same provider key).
 
 
 # ---------------------------------------------------------------------------
@@ -1165,7 +1112,8 @@ def _write_local_config(theme="wargames", voice=None, model_dir=None):
             "think": think,
         },
         "cloud": {"provider": None, "model": None},
-        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto"},
+        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto",
+                                   "stt_lang": "es"},
     }
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
@@ -1197,7 +1145,8 @@ def _write_cloud_config(prov_data, model, key, theme="wargames", voice=None):
             "auth_type": prov_data.get("auth_type", "bearer"),
             "provider_env": prov_data.get("env", ""),
         },
-        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto"},
+        "voice": voice or {"tts": "off", "stt": "off", "tts_lang": "auto",
+                                   "stt_lang": "es"},
     }
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
@@ -1346,9 +1295,10 @@ def _download_local_model(dest_dir, installing=False):
 
 
 def _default_voice():
-    """Theme and voice are no longer asked at setup: /theme, /voice and /sound
-    are chat commands. Defaults are the safe offline ones."""
-    return {"tts": "off", "stt": "off", "tts_lang": "auto"}
+    """Theme and voice are no longer asked at setup: /theme, /sound and the
+    /voice MENU (out TTS, in STT, language) are chat commands. Defaults are
+    the safe offline ones."""
+    return {"tts": "off", "stt": "off", "tts_lang": "auto", "stt_lang": "es"}
 
 
 def _confirm_model_download():
