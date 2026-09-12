@@ -526,7 +526,6 @@ class Agent:
             json.dump(self.messages, f, ensure_ascii=False)
 
     @staticmethod
-    @staticmethod
     def _tool_calls_are_valid(m):
         """A tool_call is only usable if it has a name and its arguments are
         parseable JSON.
@@ -560,6 +559,7 @@ class Agent:
                 return False
         return True
 
+    @staticmethod
     def _sanitize_messages(msgs):
         """Clean the history so the API accepts it (400 Bad Request if not):
         1. Assistant with tool_calls MUST be followed by tool messages for each tool_call_id.

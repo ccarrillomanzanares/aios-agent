@@ -20,14 +20,32 @@
 
 ### fixes
 
+- **A session could brick the agent: HTTP 500 on every message.** If the model
+  ever degenerated *inside a tool call* and that was saved, the session file kept
+  an assistant message whose `tool_call` arguments were not valid JSON. It stayed
+  there because `_sanitize_messages` only checked that each tool call had its
+  matching `tool` reply -- and that one did. So the message went out with EVERY
+  request and llama-server answered 500 every time, always failing at the same
+  column: it was the same stored message. The agent looked dead and the session
+  file had to be cleaned by hand.
+  Reproduced by replaying the stored history against the server:
+  ```
+  as stored  -> HTTP 500
+  sanitised  -> HTTP 200
+  ```
+  `_sanitize_messages` now also requires, for every tool call, a function name and
+  arguments that parse as a JSON object; an unusable call is dropped together with
+  its tool replies, so the agent heals itself on the next start.
+  Verified: 8/8 edge cases (truncated JSON, empty, no name, dict arguments, scalar,
+  None, missing function); the corrupted session now sanitises to a usable history;
+  a healthy 9-message history passes through untouched.
+
 - **A wrong answer can no longer kick you out of the installer.** Asked for explicitly: every read and every exit in `setup.py` and `aios-install` was audited, and ten places were fixed. The worst three:
   - **`setup.py` had lost its entry point.** The menu rewrite consumed `main()` up to end-of-file and took the `if __name__ == "__main__"` block with it, so running `setup.py` did nothing at all. Restored.
   - **`_read_line` spun forever on EOF** (reading past the end returned an empty string that the loop treated as a keypress). Both files fixed.
   - **An empty password was accepted** and `chpasswd` then skipped it in silence, so the installed disk kept the factory password. Passwords are now length-checked, and `set_passwords` retries and verifies `/etc/shadow` actually changed.
 - **`select_disk` and the wipe confirmation re-ask instead of counting down.** Three bad answers used to cancel the installation outright; now they re-ask, and cancelling is an explicit `0` (the wipe prompt only offers it after three attempts). Nothing destructive moves earlier: the disk is untouched until you type the confirmation.
 - **Ctrl+C is not an exit inside the menus.** It returns to the menu (or re-asks the current question). `aios-install` exits with 2 = "cancelled", which puts you back in `setup.py`'s menu with a clean message instead of a traceback.
-
-### fixes
 
 - **The local model (9B) degenerated into a loop and never answered.** The installer launched `llama-server` with no sampling options at all, and llama-server's defaults have the repetition penalties **disabled** (`--repeat-penalty 1.00`, `--dry-multiplier 0.00`). Verified with the exact command `chat.py` uses and the exact request the agent sends:
   ```
