@@ -1436,10 +1436,10 @@ def get_installed_info(pkg: str = "") -> str:
 
 
 def describe_screen(prompt: str = "Describe this screen. What application is open? What text is visible?") -> str:
-    """Capture the screen and describe it with the vision model (Gemma-3-4B).
+    """Capture the screen and describe it with the vision model (Qwen3.6-35B-A3B).
 
     Returns JSON with the model's description. Requires vision.enabled=true in
-    config.yaml and the /vision endpoint reachable. Falls back to an error the
+    config.yaml and the vision endpoint reachable. Falls back to an error the
     agent can handle (use browser_eval/OCR instead).
     """
     import base64 as _b64
@@ -1479,6 +1479,11 @@ def describe_screen(prompt: str = "Describe this screen. What application is ope
             }],
             "max_tokens": 400,
             "temperature": 0.2,
+            # AIOS PATCH (12 Sep 2026): Qwen3.6 reasons by default (thinking ON) and
+            # with 400 tokens returned EMPTY content (all of it in reasoning_content).
+            # Every other LLM call in the agent already sends enable_thinking; this one
+            # was the only one missing it.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         headers = {"Content-Type": "application/json", "User-Agent": "AIOS-Vision/1.0"}
         if api_key:
