@@ -144,7 +144,16 @@ def _read_line():
     import tty
     import select
     fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
+    try:
+        old = termios.tcgetattr(fd)
+    except Exception:
+        # stdin is not a terminal (piped input, no tty). Do a plain readline
+        # instead of crashing with termios.error, so the installer still works
+        # when driven non-interactively, and EOF comes back as an empty line.
+        try:
+            return sys.stdin.readline().rstrip("\n")
+        except Exception:
+            return ""
     buf = []
     pasting = False
     try:
@@ -155,6 +164,10 @@ def _read_line():
         sys.stdout.flush()
         while True:
             ch = sys.stdin.read(1)
+            if not ch:
+                # EOF: stdin closed (no tty, or the terminal went away).
+                # Without this the loop spins forever and the installer hangs.
+                break
             if ch == "\x1b":             # escape sequence (paste markers, Delete, arrows)
                 seq = ch
                 try:
@@ -254,6 +267,10 @@ def wg_input(prompt, delay=_TICK_MS):
             pass
         return _read_line()
     except EOFError:
+        return ""
+    except OSError:
+        # no tty available (stdin is not a terminal): return empty instead of
+        # crashing the installer
         return ""
 
 
@@ -1700,8 +1717,11 @@ def main():
     _KB_LAYOUT = _select_layout()
     wg("")
 
-    # Main menu (only 0 exits)
+    # Main menu (only 0 exits). Every pass is guarded: a bad answer, a stray
+    # Ctrl+C or any error inside live/install must return to THIS menu, never
+    # drop the user to a shell.
     while True:
+      try:
         wg("What would you like to do?")
         wg("")
         wg("  1) Test AIOS in live mode, without installing")
@@ -1743,3 +1763,25 @@ def main():
         else:
             if _live_flow(online):
                 break  # setup completed -> exit setup.py (autolaunch starts the agent)
+
+      except KeyboardInterrupt:
+        wg("")
+        wg("(Cancelled. Back to the menu.)")
+        continue
+      except Exception as e:
+        wg("")
+        wg(f"(Something went wrong: {e})")
+        wg("(Back to the menu.)")
+        continue
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n  Exiting.")
+    except Exception as e:
+        print(f"\n  Error: {e}")
+    finally:
+        _close_audio()
+    os._exit(0)

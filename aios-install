@@ -40,12 +40,30 @@ def run_capture(cmd):
     return run(cmd).stdout.strip()
 
 def ask(question, default=""):
+    """Ask a question. A bad answer, EOF or Ctrl+C must NOT kick the user out of
+    the installer: the default (or an empty string) is returned and the caller
+    decides what to do (usually re-ask)."""
     suffix = f" [{default}]" if default else ""
-    try:
-        return _read_line(f"  {question}{suffix}: ").strip() or default
-    except (EOFError, KeyboardInterrupt):
-        print()
-        sys.exit(1)
+    while True:
+        try:
+            return _read_line(f"  {question}{suffix}: ").strip() or default
+        except EOFError:
+            print()
+            print("  (No input available; using the default.)")
+            return default
+        except OSError:
+            # termios.error when stdin is not a tty; treat it like EOF
+            print()
+            print("  (Cannot read input here; using the default.)")
+            return default
+        except KeyboardInterrupt:
+            # Do not exit: report it and ask again. The caller still has the
+            # explicit cancel options, and the target disk is never touched
+            # before the wipe confirmation.
+            print()
+            print("  (Ctrl+C ignored here. Answer the question, or use the")
+            print("   cancel option the menu offers.)")
+            continue
 
 def _read_line(prompt=""):
     """Read a line with correct backspace and protected prompt (fix 25 Aug).
@@ -56,12 +74,24 @@ def _read_line(prompt=""):
         sys.stdout.write(prompt)
         sys.stdout.flush()
     fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
+    try:
+        old = termios.tcgetattr(fd)
+    except Exception:
+        # stdin is not a terminal (piped input, no tty). Do a plain readline
+        # instead of crashing with termios.error, so the installer still works
+        # when driven non-interactively, and EOF comes back as an empty line.
+        try:
+            return sys.stdin.readline().rstrip("\n")
+        except Exception:
+            return ""
     buf = []
     try:
         tty.setraw(fd)
         while True:
             ch = sys.stdin.read(1)
+            if not ch:
+                # EOF: never spin forever (it would hang the installer)
+                break
             if ch in ("\r", "\n"):
                 break
             if ch in ("\x7f", "\x08"):   # backspace / DEL
@@ -105,6 +135,13 @@ def _read_password(prompt, min_len=8):
     _read_line() / tty.setraw() and produced the 'password does not work' bug
     after disk installation (Sep 2026)."""
     import termios, tty
+    if not sys.stdin.isatty():
+        # No terminal: do a plain readline so password setup cannot crash the
+        # installer when driven non-interactively.
+        try:
+            return sys.stdin.readline().rstrip("\n")
+        except Exception:
+            return ""
     while True:
         if prompt:
             sys.stdout.write(prompt)
@@ -112,11 +149,14 @@ def _read_password(prompt, min_len=8):
         fd = sys.stdin.fileno()
         old = termios.tcgetattr(fd)
         buf = []
+        cancelado = False
         try:
             # raw mode so we can control every keystroke, including backspace
             tty.setraw(fd)
             while True:
                 ch = sys.stdin.read(1)
+                if not ch:                   # EOF: never spin forever
+                    break
                 if ch in (chr(13), "\n"):        # Enter
                     break
                 if ch in ("\x7f", "\x08"):   # Backspace / DEL
@@ -126,7 +166,10 @@ def _read_password(prompt, min_len=8):
                         sys.stdout.flush()
                     continue
                 if ch == "\x03":             # Ctrl+C
-                    raise KeyboardInterrupt
+                    # Do NOT raise: that would kick the user out of the
+                    # installer. Treat it as "clear and start this entry again".
+                    cancelado = True
+                    break
                 if ch == "\x04":             # Ctrl+D
                     break
                 if ch.isprintable():
@@ -137,6 +180,21 @@ def _read_password(prompt, min_len=8):
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
         sys.stdout.write("\n")
         sys.stdout.flush()
+        if cancelado:
+            print("  (Ctrl+C ignored. Type the password, or leave it empty to")
+            print("   keep the factory one; you can change it later with passwd.)")
+            continue
+        nuevo = "".join(buf)
+        # min_len is enforced HERE: an empty or short password is the bug that
+        # left the installed disk with the factory password.
+        if not nuevo:
+            print(f"  No password entered. Minimum {min_len} characters.")
+            print("  (Leaving it empty here would keep the factory password.)")
+            continue
+        if len(nuevo) < min_len:
+            print(f"  Too short ({len(nuevo)} characters). Minimum {min_len}.")
+            continue
+        return nuevo
         password = "".join(buf)
         if len(password) < min_len:
             print(f"  Too short (min {min_len} characters).")
@@ -200,27 +258,30 @@ def list_disks():
 
 def select_disk(disks):
     """Select a disk by NUMBER (1..N) — no typing needed, layout-independent. Fallback: disk name."""
-    _attempts = 0
     while True:
         clear()
         print("\n  SELECT TARGET DISK")
         for i, d in enumerate(disks, 1):
             print(f"  {i}) {d['name']:<10} {d['size']:<8} {d.get('model','')}")
-        print("\n  WARNING: All data on the selected disk will be destroyed.\n")
-        choice = ask(f"Select disk [1-{len(disks)}]", "").strip()
-        if not choice:
+        print("\n  0) Cancel" if False else "")
+        print("\n  WARNING: All data on the selected disk will be destroyed.")
+        print("  Type 0 to cancel and go back to the menu.\n")
+        choice = ask(f"Select disk [1-{len(disks)}, 0=cancel]", "").strip()
+        if choice == "0":
+            # An explicit cancel: back to setup.py's menu (the user sees a menu)
             print("\n  No disk selected. Installation cancelled.")
-            sys.exit(2)   # cancellation → setup.py returns to menu
+            sys.exit(2)
         if choice.isdigit() and 1 <= int(choice) <= len(disks):
             return disks[int(choice) - 1]
         for d in disks:
             if d["name"] == choice:
                 return d
-        _attempts += 1
-        print(f"\n  Invalid choice '{choice}'. Pick a number 1-{len(disks)} or a disk name (e.g. sda).")
-        if _attempts >= 3:
-            print("\n  Too many invalid attempts. Installation cancelled.")
-            sys.exit(2)
+        if not choice:
+            print("\n  Nothing entered. Pick a number, or 0 to cancel.")
+            continue
+        # A bad answer must NOT end the installation: just ask again.
+        print(f"\n  Invalid choice '{choice}'. Pick a number 1-{len(disks)}, "
+              f"a disk name (e.g. sda), or 0 to cancel.")
 
 def partition_and_format(disk):
     dev = f"/dev/{disk}"
@@ -639,25 +700,67 @@ def set_passwords(target):
             p1 = _read_password(f"  New password for {user}: ")
             p2 = _read_password(f"  Repeat for {user}: ")
             if p1 != p2:
-                print("  Passwords do not match.")
+                print("  Passwords do not match. Try again.")
+                continue
+            if not p1:
+                # Cannot happen through _read_password, but never let an empty
+                # password through: chpasswd would silently skip it and the
+                # installed system would keep the factory password.
+                print("  Empty password refused. Minimum 8 characters.")
                 continue
             return p1
 
-    root_pass = read_new_password("root")
-    if confirm("  Use the same password for aios"):
-        aios_pass = root_pass
-    else:
-        aios_pass = read_new_password("aios")
+    # Retry the whole thing until chpasswd actually succeeds: setting the
+    # passwords is what closes the factory-credentials hole, so it must not be
+    # possible to walk away believing it worked.
+    while True:
+        root_pass = read_new_password("root")
+        if confirm("  Use the same password for aios"):
+            aios_pass = root_pass
+        else:
+            aios_pass = read_new_password("aios")
 
-    data = f"root:{root_pass}\naios:{aios_pass}\n".encode()
-    try:
-        subprocess.run(["/usr/sbin/chroot", target, "/usr/sbin/chpasswd"],
-                       input=data, check=True, capture_output=True)
-    except subprocess.CalledProcessError as e:
-        print(f"  ERROR setting passwords: {e.stderr.strip()}")
-        return False
-    print("  Passwords updated.")
-    return True
+        data = f"root:{root_pass}\naios:{aios_pass}\n".encode()
+        try:
+            r = subprocess.run(["/usr/sbin/chroot", target, "/usr/sbin/chpasswd"],
+                               input=data, capture_output=True, text=True)
+        except Exception as e:
+            print(f"  ERROR running chpasswd: {e}")
+            r = None
+
+        if r is not None and r.returncode == 0:
+            # Verify: the hashes must have changed (the 4 Sep bug was chpasswd
+            # reporting success while writing nothing, because of a truncated
+            # /etc/pam.d/system-auth).
+            ok = True
+            try:
+                shadow = Path(target) / "etc" / "shadow"
+                txt = shadow.read_text(errors="replace")
+                for user in ("root", "aios"):
+                    for line in txt.splitlines():
+                        if line.startswith(user + ":"):
+                            campo = line.split(":")[1]
+                            if not campo or campo in ("*", "!", "!!", ""):
+                                ok = False
+                            break
+            except Exception as e:
+                print(f"  (could not verify /etc/shadow: {e})")
+            if ok:
+                print("  Passwords updated.")
+                return True
+            print("  chpasswd reported success but the password was not applied.")
+            print("  (This is the truncated /etc/pam.d/system-auth bug.) Retrying.")
+            continue
+
+        err = (r.stderr.strip() if r is not None and r.stderr else "no output")
+        print(f"  ERROR setting passwords: {err}")
+        print()
+        if not confirm("  Try again"):
+            print("  WARNING: the installed system keeps the factory passwords")
+            print("           (root/root, aios/aios). Change them after the first")
+            print("           login with 'passwd'.")
+            return False
+        print()
 
 
 def harden_ssh(target):
@@ -863,10 +966,20 @@ def main():
     print(f"\n  Selected: /dev/{disk['name']} ({disk['size']})")
     # ONE confirmation, and it names the disk: the disclaimer text above is
     # informational, this is the keystroke that matters.
-    if not ask_typed(f"WARNING: this will DESTROY all data on /dev/{disk['name']}",
-                     "format disk"):
-        print("\n  Installation cancelled.\n")
-        sys.exit(2)
+    # Typing "format disk" is the one keystroke that authorises the wipe. A
+    # wrong answer is a typo, not a cancellation: re-ask twice, and only then
+    # ask explicitly whether to cancel.
+    intentos = 0
+    while not ask_typed(f"WARNING: this will DESTROY all data on /dev/{disk['name']}",
+                        "format disk"):
+        intentos += 1
+        if intentos >= 3:
+            if confirm("  Not confirmed. Cancel the installation"):
+                print("\n  Installation cancelled.\n")
+                sys.exit(2)
+            intentos = 0
+        else:
+            print("  Not confirmed. Type the exact words, or keep going to cancel.")
     print("\n  [3/7] Partitioning and formatting...")
     root_part = partition_and_format(disk["name"])
     target = "/mnt/target"
@@ -917,4 +1030,15 @@ def main():
     print("")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Never leave a traceback (or a half-done install) in front of the user:
+        # exit 2 tells setup.py "cancelled", and its menu comes back.
+        print("\n  Installation cancelled.")
+        sys.exit(2)
+    except Exception as e:
+        print(f"\n  Installation failed: {e}")
+        print("  Nothing was left half-configured; the disk is untouched")
+        print("  unless the installer had already reached the copy step.")
+        sys.exit(1)
