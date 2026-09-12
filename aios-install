@@ -239,6 +239,57 @@ def partition_and_format(disk):
     run(["/usr/sbin/mke2fs", "-t", "ext4", "-F", "-L", "AIOS", part2])
     return part2
 
+def download_model_to_target(target):
+    """Download the AIOS local model straight into the installed system.
+
+    Called after the target disk is mounted and BEFORE copy_system, so the
+    model lands on the real disk: in the live root, writes go to an overlay
+    backed by RAM, and a 22 GB file has nowhere to go there.
+
+    Returns True if the model is in place (or was already).
+    """
+    dest = Path(target + str(MODEL_SRC))
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"  ERROR: cannot create {dest}: {e}")
+        return False
+
+    # aio_download.py lives next to the agent in the live tree
+    for cand in ("/usr/local/bin/aios-agent", str(AGENT_SRC)):
+        if Path(cand, "aio_download.py").exists():
+            sys.path.insert(0, cand)
+            break
+    try:
+        from aio_download import (describe_model, check_can_run_local,
+                                  download_model, MODEL)
+    except Exception as e:
+        print(f"  ERROR: could not load the downloader: {e}")
+        return False
+
+    print()
+    for line in describe_model():
+        print(line)
+    print()
+    verdict, msg = check_can_run_local(str(dest))
+    print(f"  {msg}")
+    print()
+    if verdict == "no":
+        print("  This computer cannot run the local model.")
+        return False
+
+    print(f"  Downloading {MODEL['name']} ({MODEL['size_label']}) to the disk...")
+    print("  This can take a while. The download resumes if it is interrupted.")
+    print()
+    ok, res = download_model(dest_dir=str(dest))
+    print()
+    if not ok:
+        print(f"  Download failed: {res}")
+        return False
+    print(f"  Model ready: {res}")
+    return True
+
+
 def copy_system(target):
     print("\n  [4/7] Copying system files (this may take a while)...")
     excludes = [
@@ -246,6 +297,11 @@ def copy_system(target):
         "--exclude=/run/*", "--exclude=/tmp/*", "--exclude=/mnt/*",
         "--exclude=/media/*", "--exclude=/lost+found",
         "--exclude=/swapfile",
+        # The model is NOT copied: when installing with local mode it is
+        # downloaded straight into the target (see download_model_to_target),
+        # so copying it here would duplicate 22 GB. Excluding the directory is
+        # safe: it is created before this runs.
+        "--exclude=/usr/local/share/aios/models/",
     ]
     # Show the file currently being copied, one after another, on the same line
     # (rsync --out-format=%f emits one line per file with its path)
@@ -446,7 +502,18 @@ def setup_aios_config(target, mode="local", theme="wargames", layout=None, think
             print("  ~/.aios/config.yaml copied from live (cloud mode)")
         return
     models = list(Path(target + str(MODEL_SRC)).glob("*.gguf"))
-    model_name = models[0].name if models else "Qwen_Qwen3.5-9B-Q4_K_M.gguf"
+    if not models:
+        # No model on the target (cloud mode, or the user skipped the download):
+        # record the name AIOS downloads, so the config is at least coherent.
+        try:
+            sys.path.insert(0, "/usr/local/bin/aios-agent")
+            from aio_download import MODEL as _M
+            _fallback = _M["file"]
+        except Exception:
+            _fallback = "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+        model_name = _fallback
+    else:
+        model_name = models[0].name
     config = {
         "mode": "local",
         "theme": theme,
@@ -730,11 +797,13 @@ exec /bin/busybox switch_root /root /sbin/init
 
 def main():
     import sys
-    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] [--think 0|1] - agent mode on the installed system
+    # aios-install [--mode local|cloud] [--theme <name>] [--layout <code>] [--think 0|1]
+    #              [--download 0|1] - agent mode on the installed system
     mode = "local"
     theme = "wargames"
     layout = None
     think = False
+    download = 0        # 1 = download the model during installation (local mode)
     tts = "off"
     stt = "off"
     args = sys.argv[1:]
@@ -752,6 +821,9 @@ def main():
         elif args[i] == "--think" and i + 1 < len(args):
             think = args[i + 1] in ("1", "true", "yes", "on")
             i += 2
+        elif args[i] == "--download" and i + 1 < len(args):
+            download = 1 if args[i + 1] in ("1", "true", "yes", "on") else 0
+            i += 2
         elif args[i] == "--tts" and i + 1 < len(args):
             tts = args[i + 1]
             i += 2
@@ -762,7 +834,7 @@ def main():
             i += 1
     clear()
     _fix_erase()
-    print("\n  AIOS LFS INSTALLER v" + VERSION)
+    print("\n  AIOS LFS INSTALLER " + VERSION)
     print("")
     print("  This will install the AIOS LFS live system to a disk.")
     print("  All data on the target disk will be destroyed.")
@@ -780,10 +852,8 @@ def main():
     print("  - Issues are reported at the project repository; there is no")
     print("    official support.")
     print("")
-    print("\n  [1/7] Reviewing installer disclaimer...")
-    if not confirm("I understand the risks. Continue"):
-        print("\n  Installation cancelled.\n")
-        sys.exit(2)
+    print("\n  [1/7] Reading the installer disclaimer...")
+    print("  (The text above is the whole disclaimer; read it before continuing.)")
     print("\n  [2/7] Selecting target disk...")
     disks = list_disks()
     if not disks:
@@ -791,7 +861,10 @@ def main():
         sys.exit(1)
     disk = select_disk(disks)
     print(f"\n  Selected: /dev/{disk['name']} ({disk['size']})")
-    if not ask_typed("WARNING: This will DESTROY all data on this disk", "format disk"):
+    # ONE confirmation, and it names the disk: the disclaimer text above is
+    # informational, this is the keystroke that matters.
+    if not ask_typed(f"WARNING: this will DESTROY all data on /dev/{disk['name']}",
+                     "format disk"):
         print("\n  Installation cancelled.\n")
         sys.exit(2)
     print("\n  [3/7] Partitioning and formatting...")
@@ -799,6 +872,14 @@ def main():
     target = "/mnt/target"
     Path(target).mkdir(parents=True, exist_ok=True)
     run(["/usr/bin/mount", root_part, target])
+    if mode == "local" and download:
+        if not download_model_to_target(target):
+            print()
+            if not confirm("Continue the installation WITHOUT the model"):
+                print("\n  Installation cancelled.\n")
+                run(["/usr/bin/umount", target])
+                sys.exit(2)
+            print("  Continuing without the model. You can download it later.")
     copy_system(target)
     setup_chroot(target)
     print("\n  [5/7] Installing bootloader (GRUB)...")
