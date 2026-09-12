@@ -526,12 +526,49 @@ class Agent:
             json.dump(self.messages, f, ensure_ascii=False)
 
     @staticmethod
+    @staticmethod
+    def _tool_calls_are_valid(m):
+        """A tool_call is only usable if it has a name and its arguments are
+        parseable JSON.
+
+        Why this exists (12 Sep 2026): a session was saved with a degenerated
+        tool call -- the model had looped and produced a huge, unterminated
+        JSON string. The pairing check below was satisfied (the tool reply was
+        there) so the message survived sanitising, went out with every request,
+        and llama-server answered HTTP 500 on it every single time (always at
+        the same column: it was the same stored message). The agent looked
+        broken until the session file was cleaned by hand.
+        """
+        for tc in m.get("tool_calls") or []:
+            fn = (tc.get("function") or {})
+            if not (fn.get("name") or "").strip():
+                return False
+            args = fn.get("arguments")
+            if args is None:
+                return False
+            if isinstance(args, str):
+                if not args.strip():
+                    return False
+                try:
+                    parsed = json.loads(args)
+                except Exception:
+                    return False
+                # A tool call must carry an object, not a bare scalar
+                if parsed is not None and not isinstance(parsed, dict):
+                    return False
+            elif not isinstance(args, dict):
+                return False
+        return True
+
     def _sanitize_messages(msgs):
         """Clean the history so the API accepts it (400 Bad Request if not):
         1. Assistant with tool_calls MUST be followed by tool messages for each tool_call_id.
            If any are missing, the orphan assistant is removed (wherever it is).
         2. Tool messages without their preceding assistant are removed.
         3. Consecutive user messages are collapsed (last one kept).
+        4. Assistant tool_calls whose arguments are not parseable JSON are removed
+           WITH their tool replies: otherwise the server answers 500 on every
+           request and the agent cannot recover on its own.
         """
         out = []
         pending_ids = set()
@@ -539,6 +576,12 @@ class Agent:
         for m in msgs:
             role = m.get("role")
             if role == "assistant" and m.get("tool_calls"):
+                # Drop the whole exchange when the call itself is unusable: the
+                # tool replies will then be discarded as orphans below.
+                if not Agent._tool_calls_are_valid(m):
+                    pending_ids = set()
+                    orphan_idx = None
+                    continue
                 pending_ids = {tc.get("id") for tc in m["tool_calls"]}
                 orphan_idx = len(out)
                 out.append(m)
