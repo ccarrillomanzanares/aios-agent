@@ -20,6 +20,31 @@
 
 ### fixes
 
+- **The agent did not know it HAS a voice.** `_AIOS_GROUNDING` documented sven, the
+  desktop, the torrent tools... and never mentioned voice, even though `voice.py`
+  (TTS + STT) has shipped for weeks and `chat.py` exposes `/voice` and the Ctrl+R
+  voice barge-in. Faced with "quiero usar la voz", the agent improvised: it ran
+  `pip3 install vosk` (already installed), then went hunting for models with ten
+  `wget` attempts to invented paths (`/models`, `/tmp/vosk-en.zip`, ...), all of
+  them 0 bytes.
+  - `_AIOS_GROUNDING` now carries a **Voice (TTS/STT)** block, written like the
+    torrent one that already works: what exists (`voice.py`, engines espeak/gemini/
+    openai, `/voice`, Ctrl+R, `voice:` config section), where the STT model must
+    live (`/usr/local/share/aios/vosk-model-es`), and an explicit ban: do NOT
+    pip-install vosk, do NOT download models from the internet, do NOT create those
+    directories somewhere else.
+  - Measured A/B against the live model, same question, same model:
+    * **before** -> "Voy a revisar que hay disponible" + `sven search tts` / `stt` /
+      `speech` / `piper` / `festival` / `coqui` / `whisper` (searching for what it
+      already has).
+    * **after** -> "La voz **ya viene preparada** en AIOS. No necesitas instalar
+      nada." + `/voice` + the real model path.
+  - Root cause of the class: the model cannot know the system, so anything not
+    written down in the identity gets invented. Documenting a capability is what
+    makes it usable — same reason the torrent block works.
+
+### fixes
+
 - **A session could brick the agent: HTTP 500 on every message.** If the model
   ever degenerated *inside a tool call* and that was saved, the session file kept
   an assistant message whose `tool_call` arguments were not valid JSON. It stayed

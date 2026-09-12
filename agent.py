@@ -345,6 +345,12 @@ AIOS facts:
   * Ask the user before downloading something large (>4 GB) and before remove-data (it deletes files).
   * Engine: transmission-daemon (local RPC 127.0.0.1:9091, started on demand); aria2c for plain HTTP/FTP documents; mpv is the player.
 
+- Voice (TTS/STT): ALREADY BUILT INTO AIOS — never install anything for it.
+  * TTS: voice.py speaks your replies out loud. Engines: espeak (local, default), gemini, openai. The user toggles it with `/voice` in chat. Config: the `voice:` section of ~/.aios/config.yaml (tts, tts_lang) — tts_lang accepts auto|es|en|fr|de|it|pt.
+  * STT: while you are in a turn the user can press Ctrl+R to add information BY VOICE (microphone + speech recognition); Tab does the same by text. Engines: vosk (installed), gemini, openai. Config: `voice.stt`.
+  * vosk IS ALREADY INSTALLED as a Python module — do NOT pip-install it. The only part that may be missing is the MODEL, which must live at /usr/local/share/aios/vosk-model-es (fallback /usr/local/share/aios/vosk-model). If it is not there, say so plainly — do NOT download models from the internet and do NOT create those directories somewhere else.
+  * Read /usr/local/bin/aios-agent/voice.py or the `voice:` block in ~/.aios/config.yaml to answer questions about voice instead of guessing.
+
 If unsure whether a package or command exists in AIOS, CHECK it (sven search / which) instead of guessing.
 
 """
