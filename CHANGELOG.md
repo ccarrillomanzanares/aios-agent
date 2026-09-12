@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.25.0 - 2026-09-12 23:40
+
+### features
+
+- **The voice finally works, and it is configurable: `/voice` is now a menu.** The agent had
+  TTS/STT all along, but nothing in the system made it usable. Four separate holes, all found by
+  measuring on the laptop:
+
+  1. **`/voice` only toggled TTS on/off** -- it could not choose the engine, the STT engine or the
+     language. It is now a menu in the same style as `/theme`: **output (TTS)**, **input (STT)** and
+     **language**, with Enter to keep the current value. `/voice on` / `/voice off` still work as a
+     shortcut. `_voice_flow` was DELETED from `setup.py` (nothing called it) -- one single path, no
+     duplicates. The installer does NOT ask about voice: `/voice` works the same in live and
+     installed, exactly like `/theme`.
+  2. **The STT model path was hardcoded to Spanish**, so picking another language did nothing.
+     `voice.py` now resolves `/usr/local/share/aios/vosk-model-<lang>` from the new `voice.stt_lang`
+     key, and it **never falls back to another language** -- transcribing French with a Spanish model
+     would silently return nonsense. `"ca"` was also added to `_LANGS`: espeak-ng *does* ship Catalan
+     voices, but without it the Catalan TTS quietly spoke **English**.
+  3. **The voice barge-in key did nothing.** It was `Ctrl+R` (`0x12`), which GNU readline binds to
+     *reverse-search-history* and swallows before it ever reaches the agent loop -- so the shortcut
+     documented in F1 was inert. Changed to **`Ctrl+G`** (free in readline, unused by i3), in all
+     three places (the docstring and the two detection points: typewriter and tool phase).
+  4. **The microphone captured SATURATED.** The capture gain sat at 100% (+30 dB), which on a laptop's
+     internal mic put the noise floor at **14409 RMS** (clipping at 32768) in *complete silence*:
+     Vosk received white noise and returned `""`, so `voice.listen()` gave `None` and `/mic` appeared
+     to do nothing. `audio-detect.py` now lowers the gain at boot and persists it with `alsactl store`
+     (`alsa-restore.service` reapplies it). Measured noise floor against gain:
+
+     | Capture | noise RMS (silence) | |
+     |---|---|---|
+     | 63 (100%, default) | 14409 | saturated |
+     | 30 | 6452 | noisy |
+     | 20 | 1222 | acceptable |
+     | **15 (24%, -6 dB)** | **269** | **clean -- chosen** |
+
+     With 24% real speech gave RMS 1628 with no clipping and transcribed correctly.
+
+- **The STT models for the 7 AIOS languages ship INSIDE the ISO** (~413 MB): Spanish, English,
+  French, German, Italian, Portuguese and **Catalan**. Vosk is monolingual (one model per language),
+  unlike espeak which detects the language automatically. They are small enough to carry, so nothing
+  is downloaded at install time.
+
+### fixes
+
+- **The agent did not know it HAS a voice.** `_AIOS_GROUNDING` documented sven, the desktop and the
+  torrent tools, and never mentioned voice -- even though `voice.py`, `/voice` and the barge-in had
+  been there for weeks. Asked about voice, the agent improvised: `pip3 install vosk` (already
+  installed) and ten `wget` attempts to invented model paths, all of them 0 bytes. It now carries a
+  Voice (TTS/STT) block written like the torrent one, with an explicit ban on installing anything.
+  Measured A/B against the live model, same question:
+
+  * **before** -> *"Voy a revisar que hay disponible"* + `sven search tts` / `stt` / `speech` /
+    `piper` / `festival` / `coqui` / `whisper` (searching for what it already had).
+  * **after** -> *"La voz ya viene preparada en AIOS. No necesitas instalar nada."*
+
 ## v0.24.0 - 2026-09-12 20:29
 
 ### features
@@ -96,7 +152,7 @@
 
 ### notes
 
-- `_select_theme`, `_voice_flow` and `setup_ntp` are still in the file but no flow calls them: they remain as the implementation behind `/theme`, `/voice` and `aios-time`.
+- `_select_theme` and `setup_ntp` are still in the file but no flow calls them: they remain as the implementation behind `/theme` and `aios-time`. **Correction (12 Sep):** this line used to claim `_voice_flow` was "the implementation behind `/voice`" -- it was not. Nothing called it (0 references), and `/voice` only toggled TTS on/off. The function has been DELETED; `/voice` now owns its own menu in `chat.py` (see v0.25.0).
 - The new menu was verified with a simulator that runs `main()` against scripted answers over 8 scenarios: live/install × local/cloud, no internet, a machine that cannot run the model, invalid options, and backing out of the download.
 
 ## v0.23.0 - 2026-09-12 19:12
