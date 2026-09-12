@@ -1103,6 +1103,15 @@ def _voice_flow():
 # Flows
 # ---------------------------------------------------------------------------
 
+def _chmod_config():
+    """Restrict config.yaml to the owner: it may hold provider details and is
+    read by the agent as the user, so nobody else needs to see it."""
+    try:
+        os.chmod(CONFIG_FILE, 0o600)
+    except OSError:
+        pass
+
+
 def _write_local_config(theme="wargames", voice=None):
     """Write config.yaml in local mode and start the llama service."""
     import yaml
@@ -1133,6 +1142,7 @@ def _write_local_config(theme="wargames", voice=None):
     }
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+    _chmod_config()
 
     _sp.run(["systemctl", "enable", "aios-llama.service"], capture_output=True)
     _sp.run(["systemctl", "start", "aios-llama.service"], capture_output=True)
@@ -1164,6 +1174,7 @@ def _write_cloud_config(prov_data, model, key, theme="wargames", voice=None):
     }
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+        _chmod_config()
 
     _upsert_env(prov_data["env"], key)
     # Vision (optional): only for the VPS provider (llama-hardened). The Qwen3.6
@@ -1181,7 +1192,10 @@ def _write_cloud_config(prov_data, model, key, theme="wargames", voice=None):
             vision = {
                 "enabled": True,
                 "endpoint": "https://webuillama.ccmai.org/ollama/v1/chat/completions",
-                "api_key": key,
+                # The key is NOT stored here: it lives in ~/.aios/.env (mode 600),
+                # which chat.py loads into the environment before reading this file.
+                # config.yaml is world-readable, so a key in here would be exposed.
+                "api_key": "",
             }
             wg("  Vision enabled.")
         else:
@@ -1190,6 +1204,7 @@ def _write_cloud_config(prov_data, model, key, theme="wargames", voice=None):
     config["vision"] = vision
     with open(CONFIG_FILE, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
+    _chmod_config()
     return True
 
 

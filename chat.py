@@ -960,7 +960,10 @@ def main():
         vision = config.get("vision", {})
         if vision.get("enabled"):
             os.environ["AIOS_VISION_ENDPOINT"] = vision.get("endpoint", "")
-            os.environ["AIOS_VISION_API_KEY"] = vision.get("api_key", "")
+            # Prefer the key from .env (loaded above); fall back to the config
+            # for older installs that still have it embedded there.
+            os.environ["AIOS_VISION_API_KEY"] = (
+                vision.get("api_key") or os.environ.get(provider_env, ""))
 
     elif mode == "hybrid":
 
