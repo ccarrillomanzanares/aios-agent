@@ -167,7 +167,7 @@ def _gemini_tts(text, lang):
     if not key:
         return
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.5-flash-tts:generateContent?key=" + key)
+           "gemini-2.5-flash-preview-tts:generateContent?key=" + key)
     body = json.dumps({
         "contents": [{"parts": [{"text": text}]}],
         "generationConfig": {"responseModalities": ["AUDIO"]},
