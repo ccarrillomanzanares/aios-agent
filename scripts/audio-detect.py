@@ -34,6 +34,29 @@ def detect_analog_card():
     return min(cards) if cards else 0
 
 
+def _count_cards():
+    """How many cards are currently in /proc/asound/cards."""
+    try:
+        t = pathlib.Path("/proc/asound/cards").read_text()
+    except OSError:
+        return 0
+    return len(re.findall(r"^\s*\d+\s*\[", t, re.M))
+
+
+def _card_exists(card):
+    """Is that card really in /proc/asound/cards right now?
+
+    An EMPTY /proc/asound/cards at boot made the old code write the fallback card
+    0 (HDMI): there is no line for card 0 to inspect, so _is_hdmi(0) said False
+    and nothing stopped it. Never write a card we cannot see.
+    """
+    try:
+        text = pathlib.Path("/proc/asound/cards").read_text()
+    except OSError:
+        return False
+    return bool(re.search(rf"^\s*{card}\s*\[", text, re.M))
+
+
 def _is_hdmi(card):
     try:
         text = pathlib.Path("/proc/asound/cards").read_text()
@@ -113,15 +136,29 @@ def fix_capture_gain(card):
 
 
 def main():
-    card = detect_analog_card()
-    # At boot the HDMI card may appear before the analog one; if the only
-    # detected card is HDMI, wait and retry (up to 15s) so laptops with
-    # HDMI+analog get the right card.
-    for _ in range(15):
-        if not _is_hdmi(card):
+    # Pick the analog card EXPLICITLY, and only when it is really there.
+    #
+    # Measured failure (13 Sep 2026, laptop, after a reboot): this unit ran ~1 s
+    # in, when /proc/asound/cards was still EMPTY. detect_analog_card() returned
+    # the fallback 0 and _is_hdmi(0) returned False -- there was no line for card
+    # 0 to inspect -- so the wait loop broke immediately and the guard was
+    # skipped, writing plughw:0,0 (HDMI). That is why there was no sound, the
+    # volume keys did nothing (card 0 has no such mixer) and no capture controls
+    # were found (so the mic gain was never fixed either).
+    #
+    # An empty or partial /proc/asound/cards means NOT READY, not "card 0". Require
+    # a card that exists AND is not HDMI before writing anything.
+    card = None
+    for _ in range(40):
+        c = detect_analog_card()
+        if _card_exists(c) and not _is_hdmi(c):
+            card = c
             break
         time.sleep(1)
-        card = detect_analog_card()
+    if card is None:
+        # Never overwrite a working asound.conf with a guess.
+        print("audio-detect: no analog card available yet; keeping the existing asound.conf")
+        return
     conf = (
         "pcm.!default {\n"
         "    type plug\n"
