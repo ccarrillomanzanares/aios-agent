@@ -1,5 +1,60 @@
 # Changelog
 
+## v0.26.0 - 2026-09-13 09:30
+
+### fixes
+
+- **The laptop audio died at every boot, and the cause was a race.** `aios-audio.service` started ~2 s
+  after boot, when `/proc/asound/cards` still listed **only the HDMI card (card 0)**. With no
+  alternative, `detect_analog_card()` fell back to "the first card" and wrote `plughw:0,0` into
+  `/etc/asound.conf` -- the HDMI output, which has no speaker. Three symptoms, one cause: **no sound**,
+  **the volume keys doing nothing** (they move a mixer that does not exist on that card) and
+  **"no capture controls found"**, which also left the microphone gain unfixed, so `/mic` failed. The
+  script now waits up to ~40 s for the analog card, treats "the only card is HDMI" as *not ready*, and
+  **refuses to overwrite a working `asound.conf`** if the card never shows up. The unit gained
+  `After/Wants=sound.target` and `TimeoutStartSec=90`.
+- **`scripts/setup-audio-voice.sh` was a hidden trap with three separate faults**, all contradicting
+  decisions already made for AIOS:
+  1. `CARD=$(awk '{print $1; exit}' /proc/asound/cards)` always returned card 0 -- the HDMI card on any
+     machine with an HDMI output. The same root cause as above, duplicated in a second place. It now
+     prefers a card that is not HDMI/DisplayPort, the same rule as `audio-detect.py`.
+  2. `cset numid=3` / `numid=4` were copied from AC-97 hardware, where they are "Master Mono". On the
+     ALC3227 `numid=4` is `Speaker Playback Switch`, a BOOLEAN, so `cset numid=4 60,60` failed silently
+     -- hidden behind a `|| true`. It now uses control **names**, and only ones that exist.
+  3. It ran `pip3 install --break-system-packages vosk` and downloaded the Spanish model from
+     alphacephei.com. **vosk ships with AIOS and the 7 monolingual models ship inside the ISO**, so
+     installing and downloading is what made the agent believe they were missing -- the same blind
+     "install vosk" it later tried on its own. It now only **checks** and says so.
+- **The identity told the user to press `Ctrl+R`.** The voice block in `_AIOS_GROUNDING` was written
+  before the barge-in key moved to **`Ctrl+G`** (readline swallows `Ctrl+R`), so the documentation
+  contradicted the code -- the exact bug it was meant to fix. The block now also describes what the
+  voice actually is today: `/voice` is a **menu** (TTS / STT / language, `on`/`off` still work), vosk is
+  **monolingual** with the models per language as `vosk-model-<lang>`, and `/mic` is documented.
+
+### features
+
+- **The agent can now update its own identity.** Asked "you know you have i3 now, update your identity",
+  it answered *"I cannot modify my own identity"* -- correct: the identity is hardcoded in `agent.py`
+  and versioned in git, so it is not the agent's own to write, and `aios-update` overwrites it from
+  GitHub. That is also why it **invented** things about itself (engine names that do not exist,
+  `/voice list`, "vosk not installed", "pico2wave per your config"): an agent that cannot record what it
+  learns falls back to guessing. It now keeps what it learns in a file of its own:
+  - `update_identity(section, text)` / `read_identity()` in `tools.py` (29 tools now): whitelisted
+    sections, 4000 chars each, 20 000 total, daily backup, and it **never deletes the file** -- it only
+    replaces sections.
+  - `agent.py` injects those notes into `SYSTEM_PROMPT`, in **both** places it is built (startup and
+    `/think`), so the knowledge survives a thinking toggle.
+
+  Verified end to end on the laptop: asked in a **fresh process with no hints** ("which sound card does
+  this laptop use and what was the problem?"), it answered card 0 HDMI / card 1 analog and the
+  `aios-audio` bug, from its own notes.
+
+### documentation
+
+- One root cause, one fix: `audio-detect.py` and `setup-audio-voice.sh` now share the same card-selection
+  rule instead of two divergent paths.
+
+
 ## v0.25.0 - 2026-09-12 23:40
 
 ### features
