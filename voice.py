@@ -130,7 +130,11 @@ def _speak_sync(tts, text, lang):
         except Exception as e:
             _log(f"close_audio error: {e}")
         try:
-            if tts == "espeak":
+            if tts == "live":
+                # Live API (native audio). Fall back if it cannot run.
+                if not _live_tts(text, lang):
+                    _espeak(text, lang)
+            elif tts == "espeak":
                 _espeak(text, lang)
             elif tts == "gemini":
                 _gemini_tts(text, lang)
@@ -145,6 +149,96 @@ def _speak_sync(tts, text, lang):
     except Exception as e:
         _log(f"speak_sync error: {e}")
         pass  # voice must never break the chat
+
+
+# ---------------------------------------------------------------------------
+# Gemini Live API: audio-a-audio por WebSocket.
+#
+# Distinto de _gemini_tts: aquel es generateContent (texto -> audio) y sufre un
+# limite de ~10 peticiones/minuto. Este abre una sesion Live (wss://.../
+# BidiGenerateContent) y devuelve AUDIO NATIVO. Medido: conecta, responde con
+# PCM a 24 kHz, y el tier gratuito lo da "Free of charge".
+#
+# Se usa como motor de SALIDA: se le manda el texto que el agente ya ha escrito
+# y se reproduce el audio que devuelve. (El Live puede conversar por su cuenta,
+# pero como motor de voz del chat lo que queremos es que HABLE lo que se escribio.)
+#
+# Requiere el modulo `websockets` (no esta en el arbol de la ISO por defecto:
+# sven install python-websockets).
+# ---------------------------------------------------------------------------
+LIVE_MODEL = "gemini-3.1-flash-live-preview"
+LIVE_URL = ("wss://generativelanguage.googleapis.com/ws/"
+            "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
+
+
+def _live_tts(text, lang):
+    """Synthesise with the Gemini Live API (WebSocket, native audio).
+
+    Returns True if it spoke, False to let another engine do it.
+    """
+    key = os.environ.get("GOOGLE_API_KEY", "")
+    if not key:
+        _log("live: no GOOGLE_API_KEY; falling back")
+        return False
+    try:
+        import asyncio
+        import base64
+        import json as _json
+        import websockets
+    except ImportError as e:
+        _log(f"live: missing dependency ({e}); falling back")
+        return False
+
+    async def _run():
+        pcm = bytearray()
+        async with websockets.connect(LIVE_URL + "?key=" + key,
+                                      open_timeout=30, close_timeout=5) as ws:
+            await ws.send(_json.dumps({
+                "setup": {
+                    "model": "models/" + LIVE_MODEL,
+                    "generationConfig": {"responseModalities": ["AUDIO"]},
+                }
+            }))
+            # esperar setupComplete antes de mandar nada
+            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", "replace")
+            if "setupComplete" not in raw:
+                _log(f"live: unexpected setup reply: {raw[:200]}")
+                return b""
+            await ws.send(_json.dumps({
+                "clientContent": {
+                    "turns": [{"role": "user", "parts": [{"text": text}]}],
+                    "turnComplete": True,
+                }
+            }))
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=20)
+                except asyncio.TimeoutError:
+                    break
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", "replace")
+                msg = _json.loads(raw)
+                sc = msg.get("serverContent", {})
+                for part in sc.get("modelTurn", {}).get("parts", []):
+                    data = part.get("inlineData", {}).get("data")
+                    if data:
+                        pcm.extend(base64.b64decode(data))
+                if sc.get("turnComplete"):
+                    break
+        return bytes(pcm)
+
+    try:
+        audio = asyncio.run(_run())
+    except Exception as e:
+        _log(f"live: error: {e}")
+        return False
+    if not audio:
+        _log("live: no audio returned; falling back")
+        return False
+    _play_pcm(audio, rate=24000)   # el Live devuelve PCM 16-bit a 24 kHz
+    return True
 
 
 def _espeak(text, lang):

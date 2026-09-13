@@ -1161,7 +1161,7 @@ def main():
 
 
 
-            tts_opts = {"1": "off", "2": "espeak", "3": "gemini", "4": "openai"}
+            tts_opts = {"1": "off", "2": "espeak", "3": "live", "4": "gemini", "5": "openai"}
 
             stt_opts = {"1": "off", "2": "vosk", "3": "gemini", "4": "openai"}
 
@@ -1181,7 +1181,7 @@ def main():
 
             print(f"    1) Voice output (TTS): {tts_now}")
 
-            print("       off | espeak (local, offline) | gemini | openai")
+            print("       off | espeak (local) | live (Gemini, audio nativo) | gemini | openai")
 
             print(f"    2) Voice input (STT):  {stt_now}")
 
@@ -1225,7 +1225,8 @@ def main():
 
             if sel == "1":
 
-                r = _ask("    TTS (1 off, 2 espeak, 3 gemini, 4 openai) [keep]: ", tts_opts)
+                r = _ask("    TTS (1 off, 2 espeak, 3 live, 4 gemini, 5 openai) [keep]: ",
+                     tts_opts)
 
                 if r is not None:
 
