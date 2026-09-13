@@ -94,6 +94,9 @@ MANIFEST=(
   "lfs/configs/home/aios/.config/i3/shortcuts.txt       /home/aios/.config/i3/shortcuts.txt"
   "lfs/configs/home/aios/.config/i3/status.py           /home/aios/.config/i3/status.py"
   "lfs/configs/home/aios/.config/i3/volume_bindings.conf /home/aios/.config/i3/volume_bindings.conf"
+  # --- Session (X start + PipeWire owner; aios-lfs configs/home) ---
+  "lfs/configs/home/aios/.xinitrc                        /home/aios/.xinitrc"
+  "lfs/configs/home/aios/.config/aios-session.sh         /home/aios/.config/aios-session.sh"
   # --- System config (aios-lfs, configs/etc → /etc) ---
   "lfs/configs/etc/aios-torrent.conf                                  /etc/aios-torrent.conf"
   "lfs/configs/etc/systemd/system/transmission-daemon.service.d/user.conf /etc/systemd/system/transmission-daemon.service.d/user.conf"
