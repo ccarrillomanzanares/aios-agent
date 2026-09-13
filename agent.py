@@ -391,7 +391,45 @@ Update AIOS itself: run 'aios-update' (updates agent, scripts and configs; requi
 
 """
 
-SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common()
+def _self_identity() -> str:
+    """What the agent has LEARNED about this machine, from ~/.aios/identity.md.
+
+    It is a separate file on purpose: agent.py is versioned and aios-update
+    overwrites it from GitHub, so the agent cannot own its own source. This file
+    is its own, survives updates, and the agent writes it with update_identity().
+    """
+    try:
+        from pathlib import Path as _P
+        home = _P(os.path.expanduser("~"))
+        for p in (home / ".aios" / "identity.md", _P("/home/aios/.aios/identity.md")):
+            if p.is_file():
+                txt = p.read_text(encoding="utf-8").strip()
+                if txt:
+                    return txt
+    except Exception:
+        pass
+    return ""
+
+
+_IDENTITY_RULES = """
+What you have LEARNED about this machine (your own notes, accumulated over time):
+- You keep them with the `update_identity(section, text)` tool and read them with
+  `read_identity`. Use update_identity when you discover something STABLE about this
+  system worth keeping beyond this conversation (a service, a path, a device, how the
+  desktop is set up, a hardware quirk, a habit of this user). Re-sending a section
+  replaces it, so keep each one concise and current. Do NOT store one-off results.
+- Prefer these notes over guessing, and say plainly when something is NOT in them.
+"""
+
+
+def _identity_block() -> str:
+    notes = _self_identity()
+    return ("\n" + _IDENTITY_RULES +
+            (("\n" + notes + "\n") if notes else
+             "\n(You have no notes yet. When you learn something stable, save it with update_identity.)\n"))
+
+
+SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common() + _identity_block()
 
 def _sampling_params():
     """Sampling: Qwen3 local follows official docs (thinking 0.6/0.95; no-thinking 0.7/0.8).
@@ -1035,7 +1073,7 @@ class Agent:
             MAX_TOKENS = max(512, _LOCAL_CONTEXT // 8)
             if THINK_LOCAL:
                 MAX_TOKENS = max(2048, _LOCAL_CONTEXT // 8)
-        SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common()
+        SYSTEM_PROMPT = (_CLOUD_IDENTITY if os.environ.get("AIOS_MODE") in ("cloud", "hybrid") else _LOCAL_IDENTITY) + _AIOS_GROUNDING + _rules_common() + _identity_block()
         if self.messages and self.messages[0].get("role") == "system":
             self.messages[0] = {"role": "system", "content": SYSTEM_PROMPT}
         return on

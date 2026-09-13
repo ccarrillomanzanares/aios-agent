@@ -1257,6 +1257,29 @@ TOOLS = [
             }
         }
     },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_identity",
+                "description": "Save something STABLE you learned about this machine into your own long-term self-identity (a service, a path, a device, how the desktop works, a hardware quirk). It becomes part of your system prompt from the next turn, so you will know it in future conversations instead of rediscovering it. Do NOT use it for one-off results. Re-sending a section replaces it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "section": {"type": "string", "description": "One of: system, desktop, services, paths, network, packages, environment, user, custom"},
+                        "text": {"type": "string", "description": "Concise notes (plain text or short markdown). Max 4000 chars."},
+                    },
+                    "required": ["section", "text"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "read_identity",
+                "description": "Read back your own self-identity notes (what you have learned about this machine so far).",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
     {
         "type": "function",
         "function": {
@@ -1526,6 +1549,118 @@ def describe_screen(prompt: str = "Describe this screen. What application is ope
         return _json.dumps({"error": f"Vision failed: {e}"}, ensure_ascii=False)
 
 
+# ---------------------------------------------------------------------------
+# Self-identity: what the agent has LEARNED about this machine.
+#
+# Why (13 Sep 2026): asked to "update your identity", the agent answered "I
+# cannot modify my own identity" -- true, and the reason it invented things
+# (a pip3 install of an already-installed package, ten wget attempts to made-up
+# paths). The identity is hardcoded in agent.py and versioned in git, so it is
+# not the agent's own to write: aios-update overwrites agent.py from GitHub.
+# Instead the agent ACCUMULATES what it learns in a file of its own,
+# ~/.aios/identity.md, which agent.py injects into the system prompt.
+# ---------------------------------------------------------------------------
+IDENTITY_FILE = Path("/home/aios/.aios/identity.md")
+IDENTITY_SECTIONS = ("system", "desktop", "services", "paths", "network",
+                     "packages", "environment", "user", "custom")
+IDENTITY_MAX_SECTION = 4000
+IDENTITY_MAX_TOTAL = 20000
+
+
+def _identity_path() -> Path:
+    """The identity file of the user actually running the agent."""
+    home = Path(os.path.expanduser("~"))
+    if str(home) in ("/root", "/"):
+        return IDENTITY_FILE
+    return home / ".aios" / "identity.md"
+
+
+def _identity_parse(txt: str):
+    secs, order, cur = {}, [], None
+    for line in txt.splitlines():
+        if line.startswith("## "):
+            cur = line[3:].strip()
+            secs[cur] = []
+            order.append(cur)
+        elif cur:
+            secs[cur].append(line)
+    return secs, order
+
+
+def read_identity() -> str:
+    """Read back your own self-identity notes (what you have learned so far)."""
+    p = _identity_path()
+    if not p.exists():
+        return json.dumps({"ok": True, "sections": {}, "note": "nothing learned yet"},
+                          ensure_ascii=False)
+    try:
+        txt = p.read_text(encoding="utf-8")
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+    secs, _ = _identity_parse(txt)
+    return json.dumps({"ok": True, "path": str(p), "chars": len(txt),
+                       "sections": {k: "\n".join(v).strip() for k, v in secs.items()}},
+                      ensure_ascii=False)
+
+
+def update_identity(section: str = "", text: str = "") -> str:
+    """Add or update a section of the agent's SELF-IDENTITY.
+
+    Use it when you learn something STABLE about this machine that is worth
+    remembering beyond this conversation: a service, a path, a device, how the
+    desktop is set up, a quirk of the hardware, a habit of this user. Do NOT
+    use it for one-off results (those belong in the answer, not in the identity).
+
+    The section is replaced if it already exists, so re-sending it is safe.
+    """
+    import shutil
+    from datetime import datetime
+
+    if not section or not text:
+        return json.dumps({"ok": False, "error": "section and text are required"}, ensure_ascii=False)
+    sec = section.strip().lower()
+    if sec not in IDENTITY_SECTIONS:
+        return json.dumps({"ok": False, "error": f"unknown section {sec!r}; use one of: "
+                           + ", ".join(IDENTITY_SECTIONS)}, ensure_ascii=False)
+    if len(text) > IDENTITY_MAX_SECTION:
+        return json.dumps({"ok": False, "error": f"too long ({len(text)} > "
+                           f"{IDENTITY_MAX_SECTION}); summarise"}, ensure_ascii=False)
+
+    p = _identity_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        old = p.read_text(encoding="utf-8") if p.exists() else ""
+    except Exception:
+        old = ""
+
+    secs, order = _identity_parse(old)
+    if sec not in secs:
+        order.append(sec)
+    secs[sec] = text.strip().splitlines()
+
+    nuevo = "\n".join(f"## {s}\n" + "\n".join(secs[s]).strip() + "\n"
+                       for s in order if secs.get(s))
+    if len(nuevo) > IDENTITY_MAX_TOTAL:
+        return json.dumps({"ok": False, "error": f"identity too large ({len(nuevo)} > "
+                           f"{IDENTITY_MAX_TOTAL}); be more concise or drop a stale section"},
+                          ensure_ascii=False)
+
+    try:
+        if p.exists():
+            bak = p.with_name(f"identity.md.bak-{datetime.now():%Y%m%d}")
+            if not bak.exists():
+                shutil.copy2(p, bak)
+    except Exception:
+        pass
+    try:
+        p.write_text(nuevo if nuevo.endswith("\n") else nuevo + "\n", encoding="utf-8")
+    except Exception as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+    return json.dumps({"ok": True, "section": sec, "chars": len(nuevo), "path": str(p),
+                       "note": "It becomes part of your system prompt from the next turn."},
+                      ensure_ascii=False)
+
+
 def execute_tool(name: str, args: dict, context=None) -> str:
     handlers = {
         "run_command": run_command,
@@ -1550,6 +1685,8 @@ def execute_tool(name: str, args: dict, context=None) -> str:
         "browser_type": browser_type,
         "browser_elements": browser_elements,
         "get_installed_info": get_installed_info,
+        "update_identity": update_identity,
+        "read_identity": read_identity,
         "describe_screen": describe_screen,
         "torrent_search": torrent_search,
         "torrent_download": torrent_download,
