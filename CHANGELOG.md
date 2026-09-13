@@ -4,15 +4,30 @@
 
 ### fixes
 
-- **The laptop audio died at every boot, and the cause was a race.** `aios-audio.service` started ~2 s
-  after boot, when `/proc/asound/cards` still listed **only the HDMI card (card 0)**. With no
-  alternative, `detect_analog_card()` fell back to "the first card" and wrote `plughw:0,0` into
-  `/etc/asound.conf` -- the HDMI output, which has no speaker. Three symptoms, one cause: **no sound**,
-  **the volume keys doing nothing** (they move a mixer that does not exist on that card) and
-  **"no capture controls found"**, which also left the microphone gain unfixed, so `/mic` failed. The
-  script now waits up to ~40 s for the analog card, treats "the only card is HDMI" as *not ready*, and
-  **refuses to overwrite a working `asound.conf`** if the card never shows up. The unit gained
-  `After/Wants=sound.target` and `TimeoutStartSec=90`.
+- **The laptop audio died at every boot, and the cause was a race -- but the first fix was wrong.**
+  `aios-audio.service` ran ~1 s after boot and wrote `plughw:0,0` into `/etc/asound.conf`: the HDMI
+  output, which has no speaker. Three symptoms, one cause: **no sound**, **the volume keys doing
+  nothing** (they move a mixer that does not exist on card 0) and **"no capture controls found"**,
+  which left the microphone gain unfixed so `/mic` failed too.
+
+  The first attempt assumed the HDMI card was already there and made the wait loop exit on
+  `_is_hdmi(card)`. It was wrong, and a real reboot proved it: the journal showed
+  `analog card 0` again, with **no waiting at all**. At that moment `/proc/asound/cards` is not
+  "HDMI only", it is **EMPTY** -- and with an empty file `detect_analog_card()` returns the fallback
+  0 while `_is_hdmi(0)` returns **False** (there is no line for card 0 to inspect), so the loop broke
+  on its first pass and the guard was skipped.
+
+  The real root cause: an **empty `/proc/asound/cards` was read as "card 0"**. The script now requires
+  a card that **exists** and is **not HDMI** (`_card_exists() and not _is_hdmi()`) before writing
+  anything, waits up to 40 s for it, and otherwise **keeps the existing `asound.conf`** instead of
+  guessing. Because at boot there may be no card at all when the unit runs:
+  - the unit no longer sets `RemainAfterExit`, so it can be re-triggered, and
+  - `/etc/udev/rules.d/89-aios-audio.rules` re-runs it when a sound card appears.
+
+  Verified against a real reboot: the journal now reads `analog card 1`, `/etc/asound.conf` is
+  `plughw:1,0`, the volume keys report the card-1 mixer, and the capture gain is applied. Also
+  verified by running the real `main()` with a simulated `/proc/asound/cards`: empty -> writes
+  nothing, HDMI only -> writes nothing, both cards -> `plughw:1,0`.
 - **`scripts/setup-audio-voice.sh` was a hidden trap with three separate faults**, all contradicting
   decisions already made for AIOS:
   1. `CARD=$(awk '{print $1; exit}' /proc/asound/cards)` always returned card 0 -- the HDMI card on any
