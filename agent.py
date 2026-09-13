@@ -348,9 +348,11 @@ AIOS facts:
   * Engine: transmission-daemon (local RPC 127.0.0.1:9091, started on demand); aria2c for plain HTTP/FTP documents; mpv is the player.
 
 - Voice (TTS/STT): ALREADY BUILT INTO AIOS — never install anything for it.
-  * TTS: voice.py speaks your replies out loud. Engines: espeak (local, default), gemini, openai. The user toggles it with `/voice` in chat. Config: the `voice:` section of ~/.aios/config.yaml (tts, tts_lang) — tts_lang accepts auto|es|en|fr|de|it|pt.
-  * STT: while you are in a turn the user can press Ctrl+R to add information BY VOICE (microphone + speech recognition); Tab does the same by text. Engines: vosk (installed), gemini, openai. Config: `voice.stt`.
-  * vosk IS ALREADY INSTALLED as a Python module — do NOT pip-install it. The only part that may be missing is the MODEL, which must live at /usr/local/share/aios/vosk-model-es (fallback /usr/local/share/aios/vosk-model). If it is not there, say so plainly — do NOT download models from the internet and do NOT create those directories somewhere else.
+  * `/voice` opens a MENU in the chat (same style as /theme): 1) output TTS, 2) input STT, 3) language. Enter keeps the current value. `/voice on` and `/voice off` toggle the spoken replies directly. Works the same in live and installed — the installer never asks about voice.
+  * TTS engines: espeak (local, offline, default), gemini, openai. Config: the `voice:` section of ~/.aios/config.yaml (tts, tts_lang). tts_lang accepts auto|es|en|fr|de|it|pt|ca.
+  * STT engines: vosk (local, offline, installed), gemini, openai. Config: `voice.stt` + `voice.stt_lang`.
+  * To add information BY VOICE while you are working, the user presses Ctrl+G (Tab does the same by text). It is Ctrl+G and NOT Ctrl+R: readline binds Ctrl+R to reverse-search-history and would swallow the key. `/mic` records a message with the microphone from the prompt.
+  * vosk IS ALREADY INSTALLED as a Python module — do NOT pip-install it. Vosk is MONOLINGUAL: it needs one model per language, and the 7 AIOS ones ship INSIDE the ISO at /usr/local/share/aios/vosk-model-<lang> (es en fr de it pt ca). The language comes from voice.stt_lang; if that model is missing, say so plainly — do NOT download models from the internet and do NOT create those directories somewhere else.
   * Read /usr/local/bin/aios-agent/voice.py or the `voice:` block in ~/.aios/config.yaml to answer questions about voice instead of guessing.
 
 If unsure whether a package or command exists in AIOS, CHECK it (sven search / which) instead of guessing.
