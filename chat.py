@@ -76,6 +76,22 @@ CLOUD_ENV_VARS = {
 
 
 
+def _sync_voice_on(config):
+    """Tell the agent whether the voice is on (it then prints at once).
+
+    Same ownership pattern as SOUND_ON (/sound): a flag on the Agent class that
+    chat.py sets, so the typewriter can be skipped when the voice already conveys
+    "the agent is talking". Never raises -- a missing agent module must not break
+    the chat.
+    """
+    try:
+        import agent as _a
+        tts = (config.get("voice", {}) or {}).get("tts", "off")
+        _a.Agent.VOICE_ON = tts not in (None, "off")
+    except Exception:
+        pass
+
+
 def load_or_setup():
 
     """Load config or run first-run setup."""
@@ -929,6 +945,7 @@ def main():
     config = load_or_setup()
 
     _voice_engine = config.get("voice", {}).get("tts", "off") or "espeak"
+    _sync_voice_on(config)   # print at once when the voice is on
 
     _write_voice_state(config)
 
@@ -1130,6 +1147,7 @@ def main():
                 else:
 
                     _voice_engine = vc.get("tts") or _voice_engine
+                    _sync_voice_on(config)
 
                     vc["tts"] = "off"
 
@@ -1247,6 +1265,7 @@ def main():
                     else:
 
                         _voice_engine = r
+                        _sync_voice_on(config)
 
             elif sel == "2":
 

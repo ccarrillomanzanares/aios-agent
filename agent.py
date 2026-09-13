@@ -460,6 +460,14 @@ from memory import ProceduralMemory
 
 
 class Agent:
+    # When the voice is on the typewriter is redundant: it exists to suggest
+    # the agent is "writing", and the voice already conveys that. chat.py sets
+    # this from the config (same ownership pattern as the module-level
+    # SOUND_ON that /sound toggles). With it on the reply is printed at once
+    # instead of 0.02 s per character, so the voice can start ~8 s earlier on
+    # a 400-char reply. The text IS still printed: AIOS is a terminal, the text
+    # is the interface, and tool output must be readable.
+    VOICE_ON = False
     SOUND_ON = True  # typewriter sound toggle (chat.py: /sound)
 
     def __init__(self):
@@ -763,7 +771,9 @@ class Agent:
                 except Exception:
                     stream_log = None
 
-                skip_rest = False  # space during typewriter -> print the rest at once
+                # Print at once when the voice is on (Agent.VOICE_ON); with no
+                # voice, SPACE still toggles it mid-reply.
+                skip_rest = self.VOICE_ON
                 fd_cb, old_cb = _cbreak_on()
 
                 for raw_line in resp.iter_lines():
