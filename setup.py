@@ -1,8 +1,8 @@
 """AIOS Agent - Boot menu (Wargames style) and first-run setup.
 
-Rewritten 8 Aug 2026 (Carlos): Wargames-style menu, no boxes, computer-
-generated "tic" sound (synthesized tone via aplay, no files), greeting only on
-first boot, live/install + local/cloud flow, internet check with WiFi proposal
+Rewritten 8 Aug 2026 (Carlos): Wargames-style menu, no boxes, typewriter
+greeting only on first boot, live/install + local/cloud flow, internet check
+with WiFi proposal
 (setup_wifi is kept unchanged - do not change).
 """
 import readline
@@ -164,7 +164,7 @@ def _read_line():
 
 
 def wg(text, delay=_TICK_MS):
-    """Print text character by character (Wargames style) + tic per char.
+    """Print text character by character (Wargames style).
     If the user presses SPACE, write the rest of the text at once."""
     s = str(text)
     fd_cb, old_cb = _cbreak_on()

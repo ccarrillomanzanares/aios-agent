@@ -972,7 +972,7 @@ def _voice_feed(data):
 
 
 def _voice_close():
-    """Close the aplay and give the device back to the tick."""
+    """Close the aplay and release the audio device."""
     p = _GL_AUDIO.get("p")
     _GL_AUDIO["p"] = None
     if p is not None:

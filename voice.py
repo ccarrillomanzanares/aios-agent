@@ -163,7 +163,7 @@ def speak(text, config):
 
 def _render(tts, text, lang):
     """Speak ONE sentence with the given engine. Does not stop() nor touch the
-    tic aplay: the caller owns those (so a whole turn closes/reopens it once)."""
+    the audio device: the caller owns it (so a whole turn opens/closes it once)."""
     if tts == "live":
         # Live API (native audio). Fall back if it cannot run.
         if not _live_tts(text, lang):
@@ -197,8 +197,8 @@ def _speak_sync(tts, text, lang):
 # spent waiting for the first character. Feeding whole sentences as they arrive
 # makes the first words audible in a second or two.
 #
-# One worker thread drains a queue, so sentences never overlap, and the tic
-# aplay is closed/reopened ONCE per turn (not once per sentence). A generation
+# One worker thread drains a queue, so sentences never overlap, and the audio
+# device is opened/closed ONCE per turn (not once per sentence). A generation
 # counter lets a new turn abandon the previous one (barge-in).
 # ---------------------------------------------------------------------------
 

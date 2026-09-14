@@ -36,7 +36,7 @@ def _read_key():
 
 
 def _barge_input(prompt="  » "):
-    """Raw line input for barge-in text (no tic, no history).
+    """Raw line input for barge-in text (no echo, no history).
     Called AFTER the typewriter stops, with the terminal restored."""
     import termios, tty
     fd = sys.stdin.fileno()
@@ -94,7 +94,7 @@ def _cbreak_off(fd, old):
 
 def _out(s=""):
     """Write to stdout converting LF to explicit CRLF (does not depend on ONLCR
-    of the tty). The input (_input_tic) already writes explicit CRLF; LLM output
+    of the tty). The input (_input_line) already writes explicit CRLF; LLM output
     must do the same or the cursor will not return to column 0 -> staircase effect."""
     sys.stdout.write(s.replace("\n", chr(13) + "\n"))
     sys.stdout.flush()
