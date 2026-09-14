@@ -948,6 +948,7 @@ _GL_AUDIO = {"p": None}
 
 def _voice_open():
     """Open an aplay for the live audio. Returns True on success."""
+    import subprocess   # local import: same style as the rest of this file
     try:
         p = subprocess.Popen(["aplay", "-q", "-f", "S16_LE", "-r", "24000", "-c", "1"],
                              stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -1667,6 +1668,12 @@ def main():
 
                 agent.on_chunk = None
                 agent.on_end = None
+
+                # gemini-live already answered and printed its transcript: there is
+                # no `response` string for it, and the barge-in check below would
+                # raise UnboundLocalError (the chat crashed right after replying).
+                if _live_handled:
+                    response = ""
 
                 # Barge-in: the user interrupted mid-turn to add info (text or voice).
 
