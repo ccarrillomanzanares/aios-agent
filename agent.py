@@ -17,12 +17,22 @@ SOUND_ON = True
 _AUDIO = None
 
 
+# Audio ownership: voice.py sets this while it holds the PCM device for the
+# narrated audio of a turn. Without it, _run()'s `if _AUDIO is None` reopened the
+# tic aplay right after the narrator closed it, the device ended up busy and the
+# streaming player died with "Broken pipe" (no sound at all). Measured 14 Sep 2026.
+_AUDIO_HOLD = False
+_AUDIO_REOPEN_PENDING = False
+
+
 def _open_audio():
     """Open a persistent aplay process (no files: synthesized PCM).
     Minimal ALSA buffer/period so each tic sounds immediately.
     Warm-up: 0.2 s of silence so ALSA opens the device BEFORE the first
     real tic (otherwise the first tics pile up in the pipe and sound late)."""
     global _AUDIO
+    if _AUDIO_HOLD:
+        return          # the narrator owns the device right now: do not fight it
     try:
         import subprocess as _sp
         _AUDIO = _sp.Popen(
@@ -57,7 +67,28 @@ def _close_audio():
 
 def _reopen_audio():
     """Reopen the persistent aplay after TTS (device was busy)."""
+    global _AUDIO_REOPEN_PENDING
+    if _AUDIO_HOLD:
+        _AUDIO_REOPEN_PENDING = True   # honoured when the narrator releases it
+        return
     _open_audio()
+
+
+def _audio_hold(on):
+    """Take/release exclusive ownership of the PCM device (used by the narrator).
+
+    Taking it frees the device for the voice; releasing it brings the tick back.
+    """
+    global _AUDIO_HOLD, _AUDIO_REOPEN_PENDING
+    if on:
+        _AUDIO_HOLD = True
+        _AUDIO_REOPEN_PENDING = False
+        _close_audio()               # free the device for the narrator
+    else:
+        _AUDIO_HOLD = False
+        if _AUDIO is None:
+            _open_audio()            # restore the tick
+        _AUDIO_REOPEN_PENDING = False
 
 
 def _tic():
