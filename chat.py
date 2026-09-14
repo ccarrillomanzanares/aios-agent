@@ -79,7 +79,7 @@ CLOUD_ENV_VARS = {
 def _sync_voice_on(config):
     """Tell the agent whether the voice is on (it then prints at once).
 
-    Same ownership pattern as SOUND_ON (/sound): a flag on the Agent class that
+    A flag on the Agent class that
     chat.py sets, so the typewriter can be skipped when the voice already conveys
     "the agent is talking". Never raises -- a missing agent module must not break
     the chat.
@@ -584,9 +584,7 @@ def _greet():
 
     import random
 
-    from agent import _tic, _open_audio, _skip_pressed, _cbreak_on, _cbreak_off
-
-    _open_audio()
+    from agent import _skip_pressed, _cbreak_on, _cbreak_off
 
     print(f"AIOS/{_aios_version()} — {time.strftime('%a %b %d %Y').upper()}")
 
@@ -605,8 +603,6 @@ def _greet():
                 print(quote[i + 1:], end="", flush=True)
 
                 break
-
-            _tic()
 
             time.sleep(0.05)
 
@@ -630,11 +626,9 @@ _input_hist_idx = 0
 
 
 
-def _input_tic(prompt="> "):
+def _input_line(prompt="> "):
 
-    """Line input with tic per key (typewriter) and history (arrow keys).
-
-    Sound is controlled by /sound (agent.SOUND_ON)."""
+    """Line input with history (arrow keys) and editing (backspace, Ctrl+C/D)."""
 
     import termios, tty, agent
 
@@ -955,12 +949,6 @@ _GL_AUDIO = {"p": None}
 def _voice_open():
     """Open an aplay for the live audio. Returns True on success."""
     try:
-        import agent as _ag
-        # Take the device from the tick, same single-owner rule as the narrator.
-        _ag._audio_hold(True)
-    except Exception:
-        pass
-    try:
         p = subprocess.Popen(["aplay", "-q", "-f", "S16_LE", "-r", "24000", "-c", "1"],
                              stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
         _GL_AUDIO["p"] = p
@@ -996,11 +984,6 @@ def _voice_close():
                 p.kill()
             except Exception:
                 pass
-    try:
-        import agent as _ag
-        _ag._audio_hold(False)
-    except Exception:
-        pass
 
 
 def _handle_gemini_live(agent, config, query, open_audio, feed_audio, close_audio):
@@ -1217,7 +1200,7 @@ def main():
 
         try:
 
-            query = _input_tic("> ").strip()
+            query = _input_line("> ").strip()
 
         except (EOFError, KeyboardInterrupt):
 
@@ -1241,15 +1224,6 @@ def main():
 
             break
 
-
-
-        if query.lower() == "/sound":
-
-            agent.SOUND_ON = not agent.SOUND_ON
-
-            print(f"  Typewriter sound: {'ON' if agent.SOUND_ON else 'OFF'}")
-
-            continue
 
 
 

@@ -179,20 +179,10 @@ def _render(tts, text, lang):
 def _speak_sync(tts, text, lang):
     try:
         stop()
-        # Free the PCM device held by the tic aplay, then restore it after.
-        try:
-            import agent
-            agent._audio_hold(True)
-        except Exception as e:
-            _log(f"hold on error: {e}")
         try:
             _render(tts, text, lang)
-        finally:
-            try:
-                import agent
-                agent._audio_hold(False)
-            except Exception as e:
-                _log(f"hold off error: {e}")
+        except Exception as e:
+            _log(f"render error: {e}")
     except Exception as e:
         _log(f"speak_sync error: {e}")
         pass  # voice must never break the chat
@@ -265,11 +255,6 @@ def _narrator(gen, tts, lang):
     """Drain the sentence queue, one at a time, holding the PCM device."""
     q = _NARR.get("q")
     try:
-        import agent
-        agent._audio_hold(True)  # once per turn: keeps _run() from reopening the tic
-    except Exception as e:
-        _log(f"narrator hold on: {e}")
-    try:
         while True:
             frase = q.get()
             if frase is None:
@@ -285,13 +270,6 @@ def _narrator(gen, tts, lang):
                 _log(f"narrator render: {e}")
     except Exception as e:
         _log(f"narrator error: {e}")
-    finally:
-        if _NARR.get("gen") == gen:
-            try:
-                import agent
-                agent._audio_hold(False)
-            except Exception as e:
-                _log(f"narrator hold off: {e}")
 
 
 def stream_feed(chunk):

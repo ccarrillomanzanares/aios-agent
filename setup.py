@@ -28,62 +28,6 @@ from pathlib import Path
 # Wargames effect
 # ---------------------------------------------------------------------------
 
-_AUDIO = None          # persistent aplay process (generates the "tic")
-_TICK_MS = 0.05        # 20 chars/s ~= 3x human typing speed
-
-
-def _open_audio():
-    """Open persistent aplay through stdin (no files: synthesized PCM).
-    Minimal buffer/period (512 frames ~= 11.6 ms) so the tic sounds
-    immediately. Warm-up: 0.2 s of silence so ALSA opens the device BEFORE the
-    first real tic (otherwise the first tics pile up in the pipe and sound late)."""
-    global _AUDIO
-    try:
-        import subprocess as _sp
-        _AUDIO = _sp.Popen(
-            ["aplay", "-q", "--period-size=512", "--buffer-size=1024", "-f", "S16_LE", "-r", "44100", "-c", "1", "-"],
-            stdin=_sp.PIPE, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-        )
-        # Warm-up: force the device open (0.2 s of silence) before first real tic
-        try:
-            _AUDIO.stdin.write(b"\x00" * 17640)
-            _AUDIO.stdin.flush()
-            time.sleep(0.1)
-        except Exception:
-            pass
-    except Exception:
-        _AUDIO = None
-
-
-def _close_audio():
-    global _AUDIO
-    if _AUDIO is not None:
-        try:
-            _AUDIO.stdin.close()
-        except Exception:
-            pass
-        _AUDIO = None
-
-
-def _tic():
-    """Play a 'tic' per character: 850 Hz, 35 ms (>= ALSA period),
-    smooth decay -> sounds individual and continuous, not bunched."""
-    if _AUDIO is None or _AUDIO.poll() is not None:
-        return
-    sr, dur, freq = 44100, 0.035, 850.0
-    n = int(sr * dur)
-    pcm = bytearray()
-    for i in range(n):
-        t = i / s
-        env = math.exp(-t / 0.012)
-        pcm += struct.pack("<h", int(12000 * env * math.sin(2 * math.pi * freq * t)))
-    try:
-        _AUDIO.stdin.write(bytes(pcm))
-        _AUDIO.stdin.flush()
-    except Exception:
-        pass
-
-
 def _skip_pressed():
     """True if the user pressed SPACE during the typewriter (consumes it). Non-blocking."""
     try:
@@ -232,7 +176,6 @@ def wg(text, delay=_TICK_MS):
                 sys.stdout.write(s[i + 1:])
                 sys.stdout.flush()
                 break
-            _tic()
             time.sleep(delay)
     finally:
         _cbreak_off(fd_cb, old_cb)
@@ -252,7 +195,6 @@ def wg_input(prompt, delay=_TICK_MS):
                 sys.stdout.write(s[i + 1:])
                 sys.stdout.flush()
                 break
-            _tic()
             time.sleep(delay)
     finally:
         _cbreak_off(fd_cb, old_cb)
@@ -1057,7 +999,7 @@ def _upsert_env(key_name, value):
 
 # NOTE: there is no voice flow in the installer on purpose. Voice (TTS/STT)
 # and its language are chosen from the CHAT, with the /voice menu -- exactly
-# like /theme, /think and /sound. That way one single code path serves both
+# like /theme and /think. That way one single code path serves both
 # live and installed, and the installer does not ask about voice at all.
 # The VOICE_ENV / CLOUD_KEY_URLS / CLOUD_ENDPOINTS tables below are still
 # used by the cloud flow (a voice cloud engine needs the same provider key).
@@ -1295,7 +1237,7 @@ def _download_local_model(dest_dir, installing=False):
 
 
 def _default_voice():
-    """Theme and voice are no longer asked at setup: /theme, /sound and the
+    """Theme and voice are no longer asked at setup: /theme and the
     /voice MENU (out TTS, in STT, language) are chat commands. Defaults are
     the safe offline ones."""
     return {"tts": "off", "stt": "off", "tts_lang": "auto", "stt_lang": "es"}
@@ -1651,7 +1593,6 @@ def main():
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _fix_erase()
-    _open_audio()
     clear()
 
     # Greeting (first boot)
@@ -1659,7 +1600,7 @@ def main():
     time.sleep(0.4)
     wg("You have just booted Artificial Intelligence Operating System.")
     wg("Press F1 or Super+F1 (Super = the Windows key) to view the keyboard shortcuts")
-    wg("(Chat commands like /sound, /voice, /theme work after setup, once the agent/LLM starts.)")
+    wg("(Chat commands like /voice and /theme work after setup, once the agent/LLM starts.)")
     wg("")
 
     # Keyboard layout (first boot) - first question, applies TTY + X11, persisted
@@ -1733,5 +1674,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n  Error: {e}")
     finally:
-        _close_audio()
+        pass
     os._exit(0)
