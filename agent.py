@@ -468,6 +468,11 @@ class Agent:
     # a 400-char reply. The text IS still printed: AIOS is a terminal, the text
     # is the interface, and tool output must be readable.
     VOICE_ON = False
+    # Streaming voice hooks: chat.py sets them to voice.stream_feed / .stream_end
+    # for the turn. Kept as callbacks so agent.py never imports voice (voice.py
+    # imports agent: a direct import here would be circular).
+    on_chunk = None
+    on_end = None
     SOUND_ON = True  # typewriter sound toggle (chat.py: /sound)
 
     def __init__(self):
@@ -696,6 +701,11 @@ class Agent:
         try:
             return self._run(query)
         finally:
+            if self.on_end:
+                try:
+                    self.on_end()
+                except Exception:
+                    pass
             try:
                 os.remove("/tmp/aios-agent.busy")
             except Exception:
@@ -810,6 +820,11 @@ class Agent:
                         if "content" in delta and delta["content"]:
                             chunk = delta["content"]
                             content_chunks.append(chunk)
+                            if self.on_chunk:
+                                try:
+                                    self.on_chunk(chunk)
+                                except Exception:
+                                    pass
                             if skip_rest:
                                 _out(chunk)
                             else:

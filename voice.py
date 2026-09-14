@@ -15,6 +15,7 @@ import json
 import base64
 import subprocess
 import threading
+import queue
 import urllib.request
 
 _PROCS = []
@@ -120,6 +121,21 @@ def speak(text, config):
     threading.Thread(target=_speak_sync, args=(tts, clean, lang), daemon=True).start()
 
 
+def _render(tts, text, lang):
+    """Speak ONE sentence with the given engine. Does not stop() nor touch the
+    tic aplay: the caller owns those (so a whole turn closes/reopens it once)."""
+    if tts == "live":
+        # Live API (native audio). Fall back if it cannot run.
+        if not _live_tts(text, lang):
+            _espeak(text, lang)
+    elif tts == "espeak":
+        _espeak(text, lang)
+    elif tts == "gemini":
+        _gemini_tts(text, lang)
+    elif tts == "openai":
+        _openai_tts(text, lang)
+
+
 def _speak_sync(tts, text, lang):
     try:
         stop()
@@ -130,16 +146,7 @@ def _speak_sync(tts, text, lang):
         except Exception as e:
             _log(f"close_audio error: {e}")
         try:
-            if tts == "live":
-                # Live API (native audio). Fall back if it cannot run.
-                if not _live_tts(text, lang):
-                    _espeak(text, lang)
-            elif tts == "espeak":
-                _espeak(text, lang)
-            elif tts == "gemini":
-                _gemini_tts(text, lang)
-            elif tts == "openai":
-                _openai_tts(text, lang)
+            _render(tts, text, lang)
         finally:
             try:
                 import agent
@@ -149,6 +156,142 @@ def _speak_sync(tts, text, lang):
     except Exception as e:
         _log(f"speak_sync error: {e}")
         pass  # voice must never break the chat
+
+
+# ---------------------------------------------------------------------------
+# Sentence streaming: speak WHILE the reply is still being written.
+#
+# chat.py used to call speak(response) once the whole reply was ready, and the
+# engines buffer all their audio, so nothing was heard until the end. Measured
+# 14 Sep 2026: 7.47 s of silence after the text was complete, on top of 23.87 s
+# spent waiting for the first character. Feeding whole sentences as they arrive
+# makes the first words audible in a second or two.
+#
+# One worker thread drains a queue, so sentences never overlap, and the tic
+# aplay is closed/reopened ONCE per turn (not once per sentence). A generation
+# counter lets a new turn abandon the previous one (barge-in).
+# ---------------------------------------------------------------------------
+
+_SENT_END = (". ", "! ", "? ", ".\n", "!\n", "?\n", "\u2026 ", "\n\n")
+
+_NARR = {"gen": 0, "q": None, "buf": "", "in_code": False, "tts": None, "lang": None}
+
+
+def _strip_md(text):
+    """Remove light markdown so no TTS reads asterisks or backticks."""
+    import re as _re
+    text = _re.sub(r"`([^`]*)`", r"\1", text)          # inline code
+    text = _re.sub(r"\*\*([^*]+)\*\*", r"\1", text)    # bold
+    text = _re.sub(r"(?<!\w)\*([^*\n]+)\*(?!\w)", r"\1", text)  # italics
+    text = _re.sub(r"^\s*#{1,6}\s*", "", text, flags=_re.M)  # headings
+    text = _re.sub(r"^\s*[-*+]\s+", "", text, flags=_re.M)   # bullets
+    text = _re.sub(r"^\s*\d+[.)]\s+", "", text, flags=_re.M)  # numbered lists
+    text = _re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)   # links
+    text = text.replace("|", " ").replace("_", " ")         # tables / emphasis
+    return text
+
+
+def _find_cut(text, start):
+    """Index just past the first sentence delimiter at/after start (-1 if none)."""
+    best = -1
+    for d in _SENT_END:
+        k = text.find(d, start)
+        if k >= 0:
+            end = k + len(d)
+            if best < 0 or end < best:
+                best = end
+    return best
+
+
+def stream_begin(config):
+    """Start narrating sentence by sentence. Returns True if the narrator is on."""
+    voice = config.get("voice", {}) if isinstance(config, dict) else {}
+    tts = voice.get("tts", "off")
+    if tts in (None, "off"):
+        return False
+    stop()                       # cut anything still sounding (barge-in)
+    _NARR["gen"] += 1
+    gen = _NARR["gen"]
+    _NARR["q"] = queue.Queue()
+    _NARR["buf"] = ""
+    _NARR["in_code"] = False
+    _NARR["tts"] = tts
+    _NARR["lang"] = voice.get("tts_lang", "auto")
+    threading.Thread(target=_narrator, args=(gen, tts, _NARR["lang"]), daemon=True).start()
+    return True
+
+
+def _narrator(gen, tts, lang):
+    """Drain the sentence queue, one at a time, holding the PCM device."""
+    q = _NARR.get("q")
+    try:
+        import agent
+        agent._close_audio()     # once per turn, not once per sentence
+    except Exception as e:
+        _log(f"narrator close_audio: {e}")
+    try:
+        while True:
+            frase = q.get()
+            if frase is None:
+                break
+            if _NARR.get("gen") != gen:
+                break            # a newer turn took over (barge-in)
+            if not frase.strip():
+                continue
+            l = _detect_lang(frase) if lang == "auto" else lang
+            try:
+                _render(tts, frase, l)
+            except Exception as e:
+                _log(f"narrator render: {e}")
+    except Exception as e:
+        _log(f"narrator error: {e}")
+    finally:
+        if _NARR.get("gen") == gen:
+            try:
+                import agent
+                agent._reopen_audio()
+            except Exception as e:
+                _log(f"narrator reopen_audio: {e}")
+
+
+def stream_feed(chunk):
+    """Feed a stream chunk: queue every complete sentence it completes."""
+    q = _NARR.get("q")
+    if q is None or not chunk:
+        return
+    txt = _NARR["buf"] + chunk
+    listas, i, n = [], 0, len(txt)
+    while i < n:
+        if txt.startswith("```", i):
+            _NARR["in_code"] = not _NARR["in_code"]
+            i += 3
+            continue
+        if _NARR["in_code"]:
+            i += 1               # inside a code block: never spoken
+            continue
+        corte = _find_cut(txt, i)
+        if corte < 0:
+            break
+        listas.append(txt[i:corte])
+        i = corte
+    _NARR["buf"] = txt[i:]
+    for f in listas:
+        f = _strip_md(f).strip()
+        if f:
+            q.put(f)
+
+
+def stream_end():
+    """Flush the trailing text and tell the narrator there is no more."""
+    q = _NARR.get("q")
+    if q is None:
+        return
+    resto = _strip_md(_NARR["buf"]).strip()
+    if resto:
+        q.put(resto)
+    _NARR["buf"] = ""
+    _NARR["q"] = None
+    q.put(None)                  # sentinel: the worker exits (and reopens audio)
 
 
 # ---------------------------------------------------------------------------

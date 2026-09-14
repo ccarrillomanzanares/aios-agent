@@ -1528,7 +1528,21 @@ def main():
 
             while True:
 
+                _narrando = False
+                if config.get("voice", {}).get("tts", "off") not in (None, "off"):
+                    try:
+                        import voice
+                        _narrando = voice.stream_begin(config)
+                        if _narrando:
+                            agent.on_chunk = voice.stream_feed
+                            agent.on_end = voice.stream_end
+                    except Exception:
+                        _narrando = False
+
                 response = agent.run(query)
+
+                agent.on_chunk = None
+                agent.on_end = None
 
                 # Barge-in: the user interrupted mid-turn to add info (text or voice).
 
@@ -1626,13 +1640,13 @@ def main():
 
                     pass
 
-                if config.get("voice", {}).get("tts", "off") not in (None, "off"):
+                if (not _narrando) and config.get("voice", {}).get("tts", "off") not in (None, "off"):
 
                     try:
 
                         import voice
 
-                        voice.speak(response, config)  # closes/reopens the tic aplay inside its thread
+                        voice.speak(response, config)  # whole reply (fallback: no streaming)
 
                     except Exception:
 
