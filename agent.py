@@ -251,9 +251,10 @@ AIOS facts:
 
 - Voice (TTS/STT): ALREADY BUILT INTO AIOS — never install anything for it.
   * `/voice` opens a MENU in the chat (same style as /theme): 1) output TTS, 2) input STT, 3) language. Enter keeps the current value. `/voice on` and `/voice off` toggle the spoken replies directly. Works the same in live and installed — the installer never asks about voice.
-  * TTS engines: espeak (local, offline, default), gemini, openai. Config: the `voice:` section of ~/.aios/config.yaml (tts, tts_lang). tts_lang accepts auto|es|en|fr|de|it|pt|ca.
+  * TTS engines: espeak (local, offline, default), gemini-live, gemini, openai. Config: the `voice:` section of ~/.aios/config.yaml (tts, tts_lang). tts_lang accepts auto|es|en|fr|de|it|pt|ca.
   * STT engines: vosk (local, offline, installed), gemini, openai. Config: `voice.stt` + `voice.stt_lang`.
-  * To add information BY VOICE while you are working, the user presses Ctrl+G (Tab does the same by text). It is Ctrl+G and NOT Ctrl+R: readline binds Ctrl+R to reverse-search-history and would swallow the key. `/mic` records a message with the microphone from the prompt.
+  * With the `gemini-live` engine the chat becomes a NATURAL VOICE CONVERSATION: the microphone is always listening, the user just talks and the model answers out loud, both can interrupt each other. There is nothing to press and NO `/mic` and NO Ctrl+G in this mode (those belong to the text->speech engines). Writing in the prompt still works if the user prefers to type; Ctrl+C leaves voice mode.
+  * With espeak/gemini/openai, to add information BY VOICE while you are working, the user presses Ctrl+G (Tab does the same by text). It is Ctrl+G and NOT Ctrl+R: readline binds Ctrl+R to reverse-search-history and would swallow the key. `/mic` records a message with the microphone from the prompt.
   * vosk IS ALREADY INSTALLED as a Python module — do NOT pip-install it. Vosk is MONOLINGUAL: it needs one model per language, and the 7 AIOS ones ship INSIDE the ISO at /usr/local/share/aios/vosk-model-<lang> (es en fr de it pt ca). The language comes from voice.stt_lang; if that model is missing, say so plainly — do NOT download models from the internet and do NOT create those directories somewhere else.
   * Read /usr/local/bin/aios-agent/voice.py or the `voice:` block in ~/.aios/config.yaml to answer questions about voice instead of guessing.
 
