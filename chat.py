@@ -940,6 +940,128 @@ def _write_voice_state(config):
 
 
 
+# ---------------------------------------------------------------------------
+# gemini-live (POC, 14 Sep 2026): audio helpers for the new path.
+#
+# The Live API returns PCM already streaming, so it is written straight into an
+# open aplay (same trick that made the `live` engine audible at 1.1 s instead of
+# 14 s). These helpers are used ONLY by the gemini-live path; the existing
+# engines keep using voice.speak() / the narrator untouched.
+# ---------------------------------------------------------------------------
+
+_GL_AUDIO = {"p": None}
+
+
+def _voice_open():
+    """Open an aplay for the live audio. Returns True on success."""
+    try:
+        import agent as _ag
+        # Take the device from the tick, same single-owner rule as the narrator.
+        _ag._audio_hold(True)
+    except Exception:
+        pass
+    try:
+        p = subprocess.Popen(["aplay", "-q", "-f", "S16_LE", "-r", "24000", "-c", "1"],
+                             stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        _GL_AUDIO["p"] = p
+        return True
+    except Exception:
+        _GL_AUDIO["p"] = None
+        return False
+
+
+def _voice_feed(data):
+    """Write audio as it arrives (never buffers the whole turn)."""
+    p = _GL_AUDIO.get("p")
+    if p is None or p.stdin is None or not data:
+        return
+    try:
+        p.stdin.write(data)
+        p.stdin.flush()
+    except Exception:
+        pass
+
+
+def _voice_close():
+    """Close the aplay and give the device back to the tick."""
+    p = _GL_AUDIO.get("p")
+    _GL_AUDIO["p"] = None
+    if p is not None:
+        try:
+            if p.stdin:
+                p.stdin.close()
+            p.wait(timeout=90)
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
+    try:
+        import agent as _ag
+        _ag._audio_hold(False)
+    except Exception:
+        pass
+
+
+def _handle_gemini_live(agent, config, query, open_audio, feed_audio, close_audio):
+    """Serve one turn with the Live API. Returns True if it answered."""
+    import gemini_live
+    from tools import TOOLS, execute_tool
+
+    # The agent's own system prompt (identity, rules, tools guidance) travels with
+    # the turn, so the Live answers with AIOS' personality and knows its tools.
+    system_prompt = ""
+    try:
+        if agent.messages and agent.messages[0].get("role") == "system":
+            system_prompt = agent.messages[0].get("content") or ""
+    except Exception:
+        pass
+
+    def _runner(name, args):
+        try:
+            return execute_tool(name, args, context=agent.messages)
+        except Exception as e:
+            return json.dumps({"error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+    def _out(text):
+        sys.stdout.write(text.replace("\n", chr(13) + "\n"))
+        sys.stdout.flush()
+
+    started = open_audio()
+    if not started:
+        print("(no audio device; continuing anyway)")
+
+    ok, transcript, tool_calls, nbytes = gemini_live.run_turn(
+        query,
+        system_prompt=system_prompt,
+        tools=TOOLS,
+        tool_runner=_runner,
+        out_sink=_out,
+        audio=feed_audio,
+        cfg=config,
+    )
+
+    close_audio()
+
+    if not ok:
+        print("\n  gemini-live did not answer; falling back.")
+        return False
+
+    # Keep the conversation in the agent's history so the next turn has context
+    # (and so tools that read agent.messages see it).
+    try:
+        agent.messages.append({"role": "user", "content": query})
+        agent.messages.append({"role": "assistant", "content": transcript})
+        agent._save_session()
+    except Exception:
+        pass
+
+    print()
+    if tool_calls:
+        print(f"  [{len(tool_calls)} tool call(s), {nbytes // 48000}.{int(nbytes / 480) % 10}s audio]")
+    return True
+
+
 def main():
 
     config = load_or_setup()
@@ -1210,7 +1332,7 @@ def main():
 
             print(f"    1) Voice output (TTS): {tts_now}")
 
-            print("       off | espeak (local) | live (Gemini, audio nativo) | gemini | openai")
+            print("       off | espeak (local) | gemini-live (Gemini IS the LLM) | gemini | openai")
 
             print(f"    2) Voice input (STT):  {stt_now}")
 
@@ -1539,7 +1661,29 @@ def main():
                     except Exception:
                         _narrando = False
 
-                response = agent.run(query)
+                # ------------------------------------------------------------------
+                # gemini-live: the Live API IS the model for this turn (new path).
+                # Added 14 Sep 2026. It does NOT replace anything: with any other
+                # engine we fall through to agent.run() exactly as before.
+                # ------------------------------------------------------------------
+                _live_handled = False
+                if (config.get("voice", {}).get("tts") == "gemini-live"
+                        and not query.startswith("/")):
+                    try:
+                        import gemini_live
+                        _okl, _why = gemini_live.available()
+                        if not _okl:
+                            print(f"  gemini-live unavailable ({_why}); using the normal path.")
+                        else:
+                            print("  [gemini-live] ", end="", flush=True)
+                            _live_handled = _handle_gemini_live(
+                                agent, config, query, _voice_open, _voice_feed, _voice_close)
+                    except Exception as _e:
+                        print(f"  gemini-live failed ({type(_e).__name__}: {str(_e)[:120]}).")
+                        _live_handled = False
+
+                if not _live_handled:
+                    response = agent.run(query)
 
                 agent.on_chunk = None
                 agent.on_end = None
