@@ -945,7 +945,8 @@ def main():
     config = load_or_setup()
 
     _voice_engine = config.get("voice", {}).get("tts", "off") or "espeak"
-    _sync_voice_on(config)   # print at once when the voice is on
+    # NOTE: _sync_voice_on imports `agent`, which freezes AIOS_LLAMA_SERVER
+    # (agent.py:10) at import time -- it MUST run after the mode block below.
 
     _write_voice_state(config)
 
@@ -1050,13 +1051,23 @@ def main():
 
     # Local model thinking switch (applies to local and hybrid). Must run BEFORE
 
-    # importing agent, because agent.py reads AIOS_LOCAL_THINK when imported.
+    # importing agent, because agent.py reads AIOS_LOCAL_THINK when imported --
+
+    # and it also freezes AIOS_LLAMA_SERVER and AIOS_MODE at that point. Importing
+
+    # `agent` any earlier (e.g. from a helper) pins the endpoint to the default
+
+    # (localhost:8083) and cloud mode silently fails with connection refused.
 
     if mode in ("local", "hybrid"):
 
         os.environ["AIOS_LOCAL_THINK"] = "true" if config.get("local", {}).get("think", False) else "false"
 
 
+
+    # The voice flag must be set here, not earlier: importing `agent` freezes
+    # AIOS_LLAMA_SERVER / AIOS_MODE at module level (agent.py:10).
+    _sync_voice_on(config)   # print at once when the voice is on
 
     from agent import Agent
 
