@@ -852,11 +852,17 @@ class Agent:
                             chunk = delta["content"]
                             content_chunks.append(chunk)
                             if self.on_chunk:
+                                # Voice on: the narrator cuts by sentence (it needs
+                                # them to speak). Print the same sentences at once
+                                # instead of every 4-char stream chunk, which looked
+                                # like a typewriter without being one.
                                 try:
-                                    self.on_chunk(chunk)
+                                    _txt = self.on_chunk(chunk) or ""
                                 except Exception:
-                                    pass
-                            if skip_rest:
+                                    _txt = chunk
+                                if _txt:
+                                    _out(_txt)
+                            elif skip_rest:
                                 _out(chunk)
                             else:
                                 for i, ch in enumerate(chunk):
@@ -904,6 +910,14 @@ class Agent:
                 if stream_log:
                     stream_log.close()
                 _cbreak_off(fd_cb, old_cb)
+                # Flush the trailing text (the reply may end without a delimiter).
+                if self.on_end:
+                    try:
+                        _resto = self.on_end() or ""
+                    except Exception:
+                        _resto = ""
+                    if _resto:
+                        _out(_resto)
 
             if barged:
                 _out("\n")

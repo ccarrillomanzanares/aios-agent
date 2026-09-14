@@ -295,10 +295,15 @@ def _narrator(gen, tts, lang):
 
 
 def stream_feed(chunk):
-    """Feed a stream chunk: queue every complete sentence it completes."""
+    """Feed a stream chunk.
+
+    Queues every complete sentence for the narrator and RETURNS the text of
+    those sentences, so the caller can print them in one go (with the voice on,
+    printing each 4-char stream chunk looks like a typewriter and is not one).
+    """
     q = _NARR.get("q")
     if q is None or not chunk:
-        return
+        return ""
     txt = _NARR["buf"] + chunk
     listas, i, n = [], 0, len(txt)
     while i < n:
@@ -315,23 +320,30 @@ def stream_feed(chunk):
         listas.append(txt[i:corte])
         i = corte
     _NARR["buf"] = txt[i:]
+    salida = []
     for f in listas:
-        f = _strip_md(f).strip()
-        if f:
-            q.put(f)
+        limpio = _strip_md(f).strip()
+        if limpio:
+            q.put(limpio)
+            salida.append(f)     # el texto SIN limpiar, tal como lo escribio el modelo
+    return "".join(salida)
 
 
 def stream_end():
-    """Flush the trailing text and tell the narrator there is no more."""
+    """Flush the trailing text, tell the narrator there is no more, and return
+    the trailing text so the caller can print it. Idempotent (safe to call from
+    a finally block): the second call returns ""."""
     q = _NARR.get("q")
     if q is None:
-        return
-    resto = _strip_md(_NARR["buf"]).strip()
+        return ""
+    crudo = _NARR["buf"]
+    resto = _strip_md(crudo).strip()
     if resto:
         q.put(resto)
     _NARR["buf"] = ""
     _NARR["q"] = None
     q.put(None)                  # sentinel: the worker exits (and reopens audio)
+    return crudo
 
 
 # ---------------------------------------------------------------------------
