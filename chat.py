@@ -1263,6 +1263,12 @@ def main():
 
             vc = config.setdefault("voice", {})
 
+            # Older configs stored the engine as "live" (the old text->Live path
+            # that made the model converse instead of read). Move it to the new
+            # name so the gemini-live path handles the turn.
+            if vc.get("tts") == "live":
+                vc["tts"] = "gemini-live"
+
             _arg = query[6:].strip().lower()
 
 
@@ -1312,7 +1318,7 @@ def main():
 
 
 
-            tts_opts = {"1": "off", "2": "espeak", "3": "live", "4": "gemini", "5": "openai"}
+            tts_opts = {"1": "off", "2": "espeak", "3": "gemini-live", "4": "gemini", "5": "openai"}
 
             stt_opts = {"1": "off", "2": "vosk", "3": "gemini", "4": "openai"}
 
@@ -1376,7 +1382,7 @@ def main():
 
             if sel == "1":
 
-                r = _ask("    TTS (1 off, 2 espeak, 3 live, 4 gemini, 5 openai) [keep]: ",
+                r = _ask("    TTS (1 off, 2 espeak, 3 gemini-live, 4 gemini, 5 openai) [keep]: ",
                      tts_opts)
 
                 if r is not None:
