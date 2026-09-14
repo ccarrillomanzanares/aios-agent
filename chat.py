@@ -1197,6 +1197,59 @@ def main():
 
 
 
+    # ------------------------------------------------------------------
+    # gemini-live: NATURAL VOICE CONVERSATION (14 Sep 2026).
+    #
+    # With this engine the Live API IS the model, so there is no text turn to
+    # narrate: it listens to the microphone, answers out loud and its transcript
+    # is what goes on screen. /mic and Ctrl+G make no sense here (they belong to
+    # the text->speech engines) so they are not used.
+    #
+    # The text prompt stays available: inside the loop you can type and it is
+    # sent to the same session. Ctrl+C leaves and returns to the normal prompt.
+    #
+    # With any other engine this block does not run and the chat behaves exactly
+    # as before (espeak/gemini/openai + their own path).
+    # ------------------------------------------------------------------
+    if config.get("voice", {}).get("tts") == "gemini-live":
+        try:
+            import gemini_live_converse as _glc
+            from tools import TOOLS as _TOOLS, execute_tool as _exec_tool
+            _okl, _why = _glc.available()
+            if _okl:
+                _conv_ok = True
+                while _conv_ok:
+                    print()
+                    print("  AIOS VOICE — you can talk; type to send text; Ctrl+C to leave.")
+                    try:
+                        _okc, _motivo = _glc.converse(
+                            system_prompt=(agent.messages[0].get("content")
+                                           if agent.messages else ""),
+                            tools=_TOOLS,
+                            tool_runner=lambda n, a: _exec_tool(n, a, context=agent.messages),
+                            out_sink=lambda t: (sys.stdout.write(
+                                str(t).replace("\n", chr(13) + "\n")), sys.stdout.flush()),
+                            audio_open=_voice_open,
+                            audio_feed=_voice_feed,
+                            audio_close=_voice_close,
+                            cfg=config,
+                        )
+                    except KeyboardInterrupt:
+                        _okc, _motivo = True, "Ctrl+C"
+                    if _okc:
+                        print()
+                        print("  (out of voice mode: %s)" % _motivo)
+                        # Back to the normal prompt. Re-enter voice mode with /voice.
+                        _conv_ok = False
+                    else:
+                        print("  gemini-live unavailable (%s); text mode." % _motivo)
+                        _conv_ok = False
+            else:
+                print("  gemini-live unavailable (%s); text mode." % _why)
+        except Exception as _e:
+            print("  gemini-live failed (%s: %s); text mode."
+                  % (type(_e).__name__, str(_e)[:120]))
+
     while True:
 
         try:
