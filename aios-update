@@ -89,6 +89,7 @@ MANIFEST=(
   "agent/scripts/audio-detect.py       /usr/local/bin/aios-agent/scripts/audio-detect.py"
   "agent/scripts/screenshot.sh         /usr/local/bin/aios-agent/scripts/screenshot.sh"
   "agent/scripts/setup-audio-voice.sh  /usr/local/bin/aios-agent/scripts/setup-audio-voice.sh"
+  "agent/gemini_live.py                /usr/local/bin/aios-agent/gemini_live.py"
   # --- Configs (aios-lfs repo, configs/ → /home/aios/.config/) ---
   "lfs/configs/home/aios/.config/i3/config              /home/aios/.config/i3/config"
   "lfs/configs/home/aios/.config/i3/shortcuts.txt       /home/aios/.config/i3/shortcuts.txt"
