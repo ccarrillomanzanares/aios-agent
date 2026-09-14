@@ -102,6 +102,46 @@ def _play_pcm(pcm, rate=24000):
     p.communicate(pcm)
 
 
+def _open_pcm_stream(rate=24000):
+    """Start an aplay that we feed incrementally. Returns the process or None."""
+    try:
+        p = subprocess.Popen(["aplay", "-q", "-f", "S16_LE", "-r", str(rate), "-c", "1"],
+                             stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        _track(p)
+        return p
+    except Exception as e:
+        _log(f"open_pcm_stream: {e}")
+        return None
+
+
+def _feed_pcm_stream(p, data):
+    """Write audio to a stream opened by _open_pcm_stream."""
+    if p is None or p.stdin is None or not data:
+        return False
+    try:
+        p.stdin.write(data)
+        p.stdin.flush()
+        return True
+    except Exception as e:
+        _log(f"feed_pcm_stream: {e}")
+        return False
+
+
+def _close_pcm_stream(p):
+    if p is None:
+        return
+    try:
+        if p.stdin:
+            p.stdin.close()
+        p.wait(timeout=30)
+    except Exception as e:
+        _log(f"close_pcm_stream: {e}")
+        try:
+            p.kill()
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------------------
 # TTS (speak)
 # ---------------------------------------------------------------------------
@@ -332,8 +372,16 @@ def _live_tts(text, lang):
         _log(f"live: missing dependency ({e}); falling back")
         return False
 
+    _LOCAL_STREAMED = [None]   # holds the streaming aplay for this call
+
     async def _run():
+        # Feed an open aplay as chunks arrive instead of buffering everything:
+        # measured 14 Sep 2026 -- the first chunk lands at 1.1 s and the whole
+        # 13 s of speech is received by 4.7 s, but turnComplete drags to 14.3 s.
+        # Buffering meant waiting those extra ~10 s with the audio already done.
         pcm = bytearray()
+        stream = _open_pcm_stream(24000)
+        _LOCAL_STREAMED[0] = stream
         async with websockets.connect(LIVE_URL + "?key=" + key,
                                       open_timeout=30, close_timeout=5) as ws:
             await ws.send(_json.dumps({
@@ -367,7 +415,10 @@ def _live_tts(text, lang):
                 for part in sc.get("modelTurn", {}).get("parts", []):
                     data = part.get("inlineData", {}).get("data")
                     if data:
-                        pcm.extend(base64.b64decode(data))
+                        trozo = base64.b64decode(data)
+                        pcm.extend(trozo)
+                        if stream is not None:
+                            _feed_pcm_stream(stream, trozo)
                 if sc.get("turnComplete"):
                     break
         return bytes(pcm)
@@ -380,7 +431,11 @@ def _live_tts(text, lang):
     if not audio:
         _log("live: no audio returned; falling back")
         return False
-    _play_pcm(audio, rate=24000)   # el Live devuelve PCM 16-bit a 24 kHz
+    if not _LOCAL_STREAMED[0]:
+        _play_pcm(audio, rate=24000)   # el Live devuelve PCM 16-bit a 24 kHz
+    else:
+        _close_pcm_stream(_LOCAL_STREAMED[0])
+        _LOCAL_STREAMED[0] = None
     return True
 
 
