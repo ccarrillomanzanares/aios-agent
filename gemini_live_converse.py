@@ -328,6 +328,17 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                     # ESTE equipo). Si aun no hay umbral, se usa el minimo.
                     umbral = mic.umbral or UMBRAL_MIN
                     nivel = _rms(trozo)
+
+                    # Diagnostico: el log debe decir el nivel SIEMPRE, no solo
+                    # cuando dispara. Sin esto, "no me oye" es indistinguible de
+                    # "el nivel no llega" (y se acaba adivinando).
+                    est["nivel_max"] = max(est.get("nivel_max", 0), nivel)
+                    est["n_trozos"] = est.get("n_trozos", 0) + 1
+                    if est["n_trozos"] % 50 == 0:          # cada 5 s
+                        _log("nivel max en 5s: %d (umbral %d, hablando=%s)"
+                             % (est["nivel_max"], umbral, est["hablando"]))
+                        est["nivel_max"] = 0
+
                     if nivel >= umbral:
                         est["n_habla"] += 1
                         est["n_silencio"] = 0
@@ -425,12 +436,30 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         if part.get("text") and out_sink:
                             out_sink(part["text"])
 
+                    # LO QUE TE OYE: el setup pide `inputAudioTranscription`, asi
+                    # que el servidor manda la transcripcion de tu voz. Antes NO se
+                    # leia (se tiraba), y por eso no habia forma de ver que habia
+                    # entendido el Live: se mostraba solo lo que el decia.
+                    it = (sc.get("inputTranscription") or {}).get("text")
+                    if it:
+                        est["oyo"] = est.get("oyo", "") + it
+                        _log("oyo: %s" % it.replace("\n", " ")[:200])
+                        if out_sink:
+                            out_sink("\r\nyou: %s\n" % it)
+
                     ot = (sc.get("outputTranscription") or {}).get("text")
-                    if ot and out_sink:
-                        out_sink(ot)
+                    if ot:
+                        est["dijo"] = est.get("dijo", "") + ot
+                        if out_sink:
+                            out_sink(ot)
 
                     if sc.get("turnComplete"):
                         est["turnos"] += 1
+                        _log("turno %d: oyo=%r dijo=%r"
+                             % (est["turnos"], est.get("oyo", "")[-160:],
+                                est.get("dijo", "")[-160:]))
+                        est["oyo"] = ""
+                        est["dijo"] = ""
                         if out_sink:
                             out_sink("\n")
 
