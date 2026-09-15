@@ -35,6 +35,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
 
@@ -271,14 +272,23 @@ class _Teclado:
         threading.Thread(target=self._leer, daemon=True).start()
 
     def _leer(self):
+        # readline() en vez de input(): chat.py deja la terminal en modo cbreak
+        # (typewriter/barge-in) y ahi input() no recibe lineas completas de forma
+        # fiable desde un hilo. Con readline() el texto escrito si llega.
         while not self.parar.is_set():
             try:
-                linea = input()
+                linea = sys.stdin.readline()
             except (EOFError, KeyboardInterrupt):
                 self.q.put(None)
                 return
-            except Exception:
+            except Exception as e:
+                _log("teclado: error de lectura: %s" % e)
                 return
+            if not linea:          # EOF (stdin cerrado)
+                self.q.put(None)
+                return
+            linea = linea.rstrip("\r\n")
+            _log("teclado: linea leida (%d chars)" % len(linea))
             if not self.parar.is_set():
                 self.q.put(linea)
 
@@ -471,6 +481,9 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         return
                     if out_sink:
                         out_sink("\n> %s\n" % linea)
+                    # traza: sin esto, "no responde al texto" no se distingue de
+                    # "el texto nunca salio"
+                    _log("enviando texto: %r" % linea[:80])
                     await ws.send(json.dumps({"realtimeInput": {"text": linea}}))
 
             async def recibir():
