@@ -77,6 +77,11 @@ CHUNKS_SILENCIO_FIN = 15
 COOLDOWN_MS = 300          # margen tras terminar la reproduccion
 MARGEN_REPRO_MS = 500      # margen por latencia de aplay
 ECO_MAX_MS = 30000         # tope de seguridad: nunca mudo mas de 30 s
+# Reconexion: la sesion del Live se cae sola (medido: el proceso quedaba vivo pero
+# sin conexion ni micro, mudo durante horas). Hay que detectarlo y reconectar.
+SIN_TRAFICO_MS = 60000     # 60 s sin NINGUN mensaje del servidor = sesion muerta
+RECONEX_INTENTOS = 3       # intentos antes de rendirse y volver al prompt
+RECONEX_ESPERA_MS = 1500   # espera entre intentos (crece con cada fallo)
 CHUNKS_MIN_HABLA = 2       # 200 ms: no perder frases cortas
 
 
@@ -268,7 +273,7 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
     mic = _Mic(mic_q)
     tec = _Teclado(txt_q)
     est = {"turnos": 0, "audio": 0, "salir": False, "hablando": False,
-           "n_habla": 0, "n_silencio": 0,
+           "n_habla": 0, "n_silencio": 0, "caida": None,
            # anti-realimentacion: el Live no debe oirse a si mismo
            "live_hablando": False, "fin_voz": 0.0,
            # anti-eco por BYTES: el audio suena a 24 kHz, asi que la duracion
@@ -438,10 +443,16 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
             async def recibir():
                 while not est["salir"]:
                     try:
-                        raw = await asyncio.wait_for(ws.recv(), timeout=600)
+                        raw = await asyncio.wait_for(ws.recv(), timeout=SIN_TRAFICO_MS / 1000.0)
                     except asyncio.TimeoutError:
+                        # mucho tiempo sin nada del servidor: puede ser normal si
+                        # nadie habla, asi que solo se registra (no se corta).
+                        _log("aviso: %ds sin trafico del servidor" % (SIN_TRAFICO_MS // 1000))
                         continue
-                    except Exception:
+                    except Exception as e:
+                        # AQUI se detecta la caida real de la sesion
+                        est["caida"] = "%s: %s" % (type(e).__name__, str(e)[:120])
+                        _log("SESION CAIDA: %s" % est["caida"])
                         return
                     if isinstance(raw, bytes):
                         raw = raw.decode("utf-8", "replace")
@@ -545,6 +556,9 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
             try:
                 while not est["salir"]:
                     await asyncio.sleep(0.2)
+                    # si la recepcion murio (sesion caida), se sale para reconectar
+                    if est["caida"]:
+                        break
                     if all(t.done() for t in tareas):
                         break
             finally:
@@ -558,13 +572,33 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
     if not mic.start():
         _log("sin micro; solo texto")
     tec.start()
+    # Reconexion: si la sesion del Live se cae, se vuelve a conectar solo. Medido:
+    # sin esto el proceso quedaba VIVO pero mudo (sin conexion ni micro) durante
+    # HORAS, y el usuario le hablaba a un proceso muerto.
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        _log("Ctrl+C: fin de la conversacion")
-    except Exception as e:
-        _log("error: %s: %s" % (type(e).__name__, str(e)[:200]))
-        return False, "%s: %s" % (type(e).__name__, str(e)[:120])
+        for intento in range(1, RECONEX_INTENTOS + 1):
+            est["caida"] = None
+            try:
+                asyncio.run(main())
+            except KeyboardInterrupt:
+                _log("Ctrl+C: fin de la conversacion")
+                break
+            except Exception as e:
+                est["caida"] = "%s: %s" % (type(e).__name__, str(e)[:120])
+                _log("error: %s" % est["caida"])
+
+            if est["salir"] or not est["caida"]:
+                break
+
+            # se avisa al usuario (pantalla) y se reintenta
+            if out_sink:
+                out_sink("\n\n[conexion con Gemini cortada: %s]\n" % est["caida"])
+                out_sink("[reconectando... intento %d de %d]\n" % (intento, RECONEX_INTENTOS))
+            _log("reconectando (intento %d de %d)" % (intento, RECONEX_INTENTOS))
+            time.sleep(RECONEX_ESPERA_MS * intento / 1000.0)
+            est["hablando"] = False
+            est["n_habla"] = 0
+            est["n_silencio"] = 0
     finally:
         est["salir"] = True
         mic.stop()
