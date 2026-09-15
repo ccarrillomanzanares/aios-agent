@@ -58,29 +58,26 @@ IDIOMA_VOZ = "es-ES"       # espanol de Espana (acento castellano)
 CHUNK_MS = 100
 CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
 
-# VAD local (energia). El umbral NO puede ser una constante fija: medido en el
-# portatil, el ruido de fondo tiene RMS ~180 y la voz del usuario ~550, asi que
-# un umbral fijo de 500 dejaba la voz EN EL FILO y `activityStart` no se disparaba
-# nunca (el Live oia silencio y no contestaba).
-#
-# UMBRAL FIJO, sin calibracion. Carlos: "no hagas calibracion, lo complica".
+# VAD local (energia), SIN calibracion. Carlos: "no hagas calibracion, lo complica".
 #
 # La calibracion dio un resultado distinto cada vez (midio 135 con ruido real 14;
-# 160 por el transitorio de arecord; 814 = SU VOZ al arrancar -> umbral al techo y
-# sordo). Con micro bueno y sin ruido alrededor, un umbral fijo bajo es mas simple.
+# 160 por el transitorio de arecord; y 814 = SU VOZ al arrancar, que dejaba el
+# umbral en el techo y sordo toda la sesion). Umbral fijo y medido.
 #
-# Medido en este portatil (Capture 45%, voz real de Carlos):
-#     VOZ:   p50 = 330, p90 = 830, max = 1784
+# Numeros medidos en este portatil (Capture 45%, voz real de Carlos):
+#     VOZ:   p50 = 330, p90 = 830, max = 1784 (picos de 6760-9992 en uso real)
 #     RUIDO: p50 = 14-20, p90 = 45
-#   250 separa limpiamente: la voz lo pasa con margen, el ruido no.
-UMBRAL_HABLA = 250
+UMBRAL_HABLA = 400         # holgadamente por encima del ruido y dentro de la voz
 GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
                            # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
-CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
+# 1500 ms de silencio para cerrar el turno. Con 800 ms la frase se cortaba por la
+# mitad (al hablar se hacen pausas normales: pensar, respirar), el Live recibia
+# trozos sueltos y NO respondia. Medido con umbral 250: 8 activityStart, 0 turnos.
+CHUNKS_SILENCIO_FIN = 15
 COOLDOWN_MS = 300          # margen tras terminar la reproduccion
 MARGEN_REPRO_MS = 500      # margen por latencia de aplay
 ECO_MAX_MS = 30000         # tope de seguridad: nunca mudo mas de 30 s
-CHUNKS_MIN_HABLA = 3       # 300 ms de habla minima para considerarlo voz
+CHUNKS_MIN_HABLA = 2       # 200 ms: no perder frases cortas
 
 
 def _log(msg):
