@@ -83,6 +83,8 @@ ECO_MAX_MS = 30000         # tope de seguridad: nunca mudo mas de 30 s
 SIN_TRAFICO_MS = 60000     # 60 s sin NINGUN mensaje del servidor = sesion muerta
 RECONEX_INTENTOS = 3       # intentos antes de rendirse y volver al prompt
 RECONEX_ESPERA_MS = 1500   # espera entre intentos (crece con cada fallo)
+TOOL_TIMEOUT_S = 45        # tope de una herramienta: si no acaba, se responde error
+                           # y el Live sigue (antes bloqueaba el turno para siempre)
 CHUNKS_MIN_HABLA = 2       # 200 ms: no perder frases cortas
 
 
@@ -513,10 +515,26 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                             nombre = fc.get("name", "")
                             args = fc.get("args") or {}
                             _log("tool: %s %s" % (nombre, str(args)[:140]))
+                            # La herramienta se ejecuta en un HILO APARTE: si tarda
+                            # o se queda esperando (p.ej. run_command pidiendo
+                            # confirmacion o la contrasena de sudo), NO puede parar
+                            # el bucle del WebSocket. Antes lo bloqueaba y el turno
+                            # se quedaba colgado para siempre.
+                            res = "{}"
                             try:
-                                res = tool_runner(nombre, args) if tool_runner else "{}"
+                                if tool_runner:
+                                    res = await asyncio.wait_for(
+                                        loop.run_in_executor(None, tool_runner, nombre, args),
+                                        timeout=TOOL_TIMEOUT_S)
+                            except asyncio.TimeoutError:
+                                res = json.dumps({"error":
+                                    "la herramienta tardo mas de %ds" % TOOL_TIMEOUT_S})
+                                _log("tool: TIMEOUT %s" % nombre)
                             except Exception as e:
                                 res = json.dumps({"error": str(e)[:200]})
+                                _log("tool: ERROR %s: %s" % (nombre, str(e)[:150]))
+                            _log("tool: respuesta de %s lista (%d chars)"
+                                 % (nombre, len(str(res))))
                             respuestas.append({
                                 "id": fc.get("id", ""),
                                 "name": nombre,
@@ -524,6 +542,7 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                             })
                         await ws.send(json.dumps({
                             "toolResponse": {"functionResponses": respuestas}}))
+                        _log("tool: toolResponse ENVIADO (%d)" % len(respuestas))
                         continue
 
                     sc = msg.get("serverContent") or {}
