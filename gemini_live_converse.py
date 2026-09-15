@@ -47,10 +47,18 @@ SPK_RATE = 24000
 CHUNK_MS = 100
 CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
 
-# VAD local (energia). Medido en el portatil: silencio RMS ~270-580 sin hablar.
-UMBRAL_HABLA = 500        # por encima: el usuario esta hablando
-CHUNKS_SILENCIO_FIN = 8   # 800 ms de silencio -> fin de turno
-CHUNKS_MIN_HABLA = 3      # 300 ms de habla minima para considerarlo voz
+# VAD local (energia). El umbral NO puede ser una constante fija: medido en el
+# portatil, el ruido de fondo tiene RMS ~180 y la voz del usuario ~550, asi que
+# un umbral fijo de 500 dejaba la voz EN EL FILO y `activityStart` no se disparaba
+# nunca (el Live oia silencio y no contestaba). El umbral se CALIBRA al arrancar
+# con el ruido real de ESE micro.
+CALIB_MS = 1500            # al arrancar se mide el ruido de fondo
+FACTOR_RUIDO = 2.2         # umbral = piso_ruido * FACTOR_RUIDO
+UMBRAL_MIN = 120           # suelo, para micros muy silenciosos
+GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
+                           # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
+CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
+CHUNKS_MIN_HABLA = 3       # 300 ms de habla minima para considerarlo voz
 
 
 def _log(msg):
@@ -124,13 +132,46 @@ def _rms(dato):
         return 0
 
 
+def _amplifica(dato):
+    """Amplifica el PCM 16-bit con saturacion (sin desbordar).
+
+    Medido en el portatil: la voz llega con pico ~3.900 de 32.767 (12%), muy baja
+    para que el Live la entienda bien. Se multiplica y se recorta al rango valido.
+    """
+    if GANANCIA == 1.0:
+        return dato
+    try:
+        import array
+        a = array.array("h")
+        a.frombytes(dato[:len(dato) // 2 * 2])
+        for i, v in enumerate(a):
+            v = int(v * GANANCIA)
+            if v > 32767:
+                v = 32767
+            elif v < -32768:
+                v = -32768
+            a[i] = v
+        return a.tobytes()
+    except Exception:
+        return dato
+
+
 class _Mic:
-    """arecord en continuo -> cola de trozos PCM 16 kHz mono."""
+    """arecord en continuo -> cola de trozos PCM 16 kHz mono.
+
+    Ademas CALIBRA el ruido de fondo: los primeros CALIB_MS trozos se miden y se
+    fija el umbral del VAD a partir de ellos. Sin esto, un umbral fijo no vale
+    para todos los micros (el ALC3227 del portatil da ruido ~180 y voz ~550).
+    """
 
     def __init__(self, q):
         self.q = q
         self.p = None
         self.parar = threading.Event()
+        self.piso_ruido = None       # RMS del ruido de fondo medido al arrancar
+        self.umbral = None           # umbral resultante
+        self.calibrado = threading.Event()
+        self._calib = []             # niveles de la calibracion
 
     def start(self):
         try:
@@ -142,9 +183,13 @@ class _Mic:
             self.p = None
             return False
         threading.Thread(target=self._leer, daemon=True).start()
+        # el bucle de conversacion espera a tener umbral antes de enviar nada
+        self.calibrado.wait(timeout=6)
         return True
 
     def _leer(self):
+        n_calib = max(1, CALIB_MS // CHUNK_MS)
+        vistos = 0
         while not self.parar.is_set():
             try:
                 dato = self.p.stdout.read(CHUNK)
@@ -152,6 +197,19 @@ class _Mic:
                 break
             if not dato:
                 break
+            if vistos < n_calib:
+                # --- calibracion: medir el ruido de fondo de ESTE micro ---
+                self._calib.append(_rms(dato))
+                vistos += 1
+                if vistos >= n_calib:
+                    niveles = sorted(self._calib)
+                    # mediana: inmune a un golpe o una tos durante la calibracion
+                    self.piso_ruido = niveles[len(niveles) // 2]
+                    self.umbral = max(UMBRAL_MIN, int(self.piso_ruido * FACTOR_RUIDO))
+                    _log("calibrado: piso_ruido=%d -> umbral=%d (ganancia=%.1f)"
+                         % (self.piso_ruido, self.umbral, GANANCIA))
+                    self.calibrado.set()
+                continue
             try:
                 self.q.put_nowait(dato)
             except queue.Full:
@@ -246,7 +304,8 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
             if "setupComplete" not in raw:
                 _log("setup inesperado: %s" % raw[:300])
                 return
-            _log("sesion iniciada (VAD local, umbral=%d)" % UMBRAL_HABLA)
+            _log("sesion iniciada (VAD local adaptativo, umbral=%s, ganancia=%.1f)"
+                 % (mic.umbral, GANANCIA))
             if out_sink:
                 out_sink("\n(escuchando: habla cuando quieras; escribe para texto, "
                          "Ctrl+C para salir)\n")
@@ -265,14 +324,17 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         break
 
                     # --- VAD local: decidir activityStart / activityEnd ---
+                    # El umbral viene de la CALIBRACION del micro (ruido real de
+                    # ESTE equipo). Si aun no hay umbral, se usa el minimo.
+                    umbral = mic.umbral or UMBRAL_MIN
                     nivel = _rms(trozo)
-                    if nivel >= UMBRAL_HABLA:
+                    if nivel >= umbral:
                         est["n_habla"] += 1
                         est["n_silencio"] = 0
                         if not est["hablando"] and est["n_habla"] >= CHUNKS_MIN_HABLA:
                             est["hablando"] = True
                             await ws.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
-                            _log("activityStart (hablas)")
+                            _log("activityStart (hablas, nivel=%d umbral=%d)" % (nivel, umbral))
                     else:
                         est["n_silencio"] += 1
                         if est["hablando"] and est["n_silencio"] >= CHUNKS_SILENCIO_FIN:
@@ -281,10 +343,13 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                             await ws.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
                             _log("activityEnd (callas)")
 
+                    # Ganancia digital: la voz del portatil llega muy baja (medido:
+                    # pico 3.900/32.767 = 12%) y el Live entiende mal con tan poca
+                    # amplitud. Se amplifica ANTES de enviar.
                     await ws.send(json.dumps({
                         "realtimeInput": {
                             "audio": {
-                                "data": base64.b64encode(trozo).decode(),
+                                "data": base64.b64encode(_amplifica(trozo)).decode(),
                                 "mimeType": "audio/pcm;rate=%d" % MIC_RATE,
                             }
                         }
@@ -383,6 +448,8 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
 
     if audio_open:
         audio_open()
+    _log_reset()          # el log es de ESTA sesion (no arrastra el de ayer)
+    _log("--- inicio de conversacion (ganancia=%.1f) ---" % GANANCIA)
     if not mic.start():
         _log("sin micro; solo texto")
     tec.start()
