@@ -55,6 +55,7 @@ CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
 CALIB_MS = 1500            # al arrancar se mide el ruido de fondo
 FACTOR_RUIDO = 2.2         # umbral = piso_ruido * FACTOR_RUIDO
 UMBRAL_MIN = 120           # suelo, para micros muy silenciosos
+UMBRAL_MAX = 600           # techo: un pico en la calibracion no puede dejarnos sordos
 GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
                            # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
 CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
@@ -203,9 +204,12 @@ class _Mic:
                 vistos += 1
                 if vistos >= n_calib:
                     niveles = sorted(self._calib)
-                    # mediana: inmune a un golpe o una tos durante la calibracion
-                    self.piso_ruido = niveles[len(niveles) // 2]
-                    self.umbral = max(UMBRAL_MIN, int(self.piso_ruido * FACTOR_RUIDO))
+                    # percentil 25: si en la calibracion cae un golpe o un pico
+                    # transitorio (paso: midio 135 cuando el ruido real era 14),
+                    # la mediana se contamina y el umbral sale demasiado alto.
+                    self.piso_ruido = niveles[len(niveles) // 4]
+                    self.umbral = min(UMBRAL_MAX,
+                                      max(UMBRAL_MIN, int(self.piso_ruido * FACTOR_RUIDO)))
                     _log("calibrado: piso_ruido=%d -> umbral=%d (ganancia=%.1f)"
                          % (self.piso_ruido, self.umbral, GANANCIA))
                     self.calibrado.set()

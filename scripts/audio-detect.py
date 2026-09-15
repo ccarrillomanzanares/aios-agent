@@ -93,10 +93,18 @@ def _write(conf):
 #     Capture 63 (100%)  -> RMS 14409  (clipped, peak 32768)
 #     Capture 30  (48%)  -> RMS  6452
 #     Capture 20  (32%)  -> RMS  1222
-#     Capture 15  (24%)  -> RMS   269   <- chosen
+#     Capture 15  (24%)  -> RMS   269   <- chosen then
+#
+# Re-measured 15 Sep 2026 with the user actually speaking into it (the 269 above
+# was background noise only). Peak level of the voice, and whether the local VAD
+# could form a run long enough to open a turn:
+#     Capture 15 (24%) + boost 0    -> peak  954, median chunk 14  -> VAD never fires
+#     Capture 45 (71%) + boost 0    -> peak 5321, median chunk 330 -> runs of 7-11, fires
+#     Capture 45 (71%) + boost 24dB -> 32768, CLIPPED              -> unusable
+# 24% left the voice too close to the noise floor for the VAD to separate it.
 # With this setting real speech gave RMS 1628 with no clipping and transcribed.
 # ---------------------------------------------------------------------------
-CAPTURE_GAIN = "24%"
+CAPTURE_GAIN = "45%"
 MIC_BOOST = "0"
 
 
