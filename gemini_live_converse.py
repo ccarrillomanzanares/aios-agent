@@ -53,7 +53,7 @@ SPK_RATE = 24000
 # Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome,
 # Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux,
 # Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat
-VOZ_POR_DEFECTO = "Kore"
+VOZ_POR_DEFECTO = "Sulafat"
 IDIOMA_VOZ = "es-ES"       # espanol de Espana (acento castellano)
 CHUNK_MS = 100
 CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
@@ -71,9 +71,9 @@ UMBRAL_MAX = 600           # techo: un pico en la calibracion no puede dejarnos 
 GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
                            # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
 CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
-COOLDOWN_MS = 300          # minimo tras hablar el Live antes de mirar el eco
-ECO_LIBRE_TROZOS = 4       # trozos seguidos bajo el umbral para dar el eco por ido
-ECO_MAX_MS = 4000          # tope: no dejar al usuario mudo si el ruido no baja
+COOLDOWN_MS = 300          # margen tras terminar la reproduccion
+MARGEN_REPRO_MS = 500      # margen por latencia de aplay
+ECO_MAX_MS = 30000         # tope de seguridad: nunca mudo mas de 30 s
 CHUNKS_MIN_HABLA = 3       # 300 ms de habla minima para considerarlo voz
 
 
@@ -304,8 +304,9 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
            "n_habla": 0, "n_silencio": 0,
            # anti-realimentacion: el Live no debe oirse a si mismo
            "live_hablando": False, "fin_voz": 0.0,
-           # tras el turno del Live: no reanudar hasta que el eco se vaya
-           "eco_esperando": False, "eco_trozos": 0, "eco_inicio": 0.0}
+           # anti-eco por BYTES: el audio suena a 24 kHz, asi que la duracion
+           # es bytes/(24000*2) s. Con eso se sabe cuando TERMINA de sonar.
+           "audio_total": 0, "audio_t0": 0.0, "repro_hasta": 0.0}
 
     async def main():
         key = os.environ.get("GOOGLE_API_KEY", "")
@@ -375,40 +376,20 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                     if trozo is None:
                         break
 
-                    # --- ANTI-REALIMENTACION ---
-                    # Si el Live esta hablando (o acaba de terminar), NO se manda
-                    # su propia voz de vuelta como si fuera el usuario. Sin esto el
-                    # Live se oye, se contesta y no para (medido: 7 turnos y 6
-                    # barge-in a partir de un unico "Hola" del usuario).
+                    # --- ANTI-ECO (por BYTES, no por silencios) ---
+                    # El Live se oia a si mismo: con la v2 (esperar silencio) hacia
+                    # PAUSAS entre frases, el micro se reanudaba y pillaba la frase
+                    # siguiente: "you: Son las 9:20 de la manana" = su PROPIA voz.
+                    # La API no trae cancelacion de eco, asi que se calcula CUANDO
+                    # TERMINA de sonar: el audio va a 24 kHz -> bytes/(24000*2) s.
                     ahora = time.time()
-                    # Red de seguridad: si no llego el turnComplete, el micro no
-                    # puede quedarse mudo para siempre.
-                    if est["live_hablando"] and (ahora - est.get("inicio_voz", 0)) > 30:
-                        _log("aviso: el Live lleva >30s sin turnComplete; se reanuda el micro")
+                    if est["live_hablando"] and (ahora - est.get("inicio_voz", 0)) > (ECO_MAX_MS / 1000.0):
+                        _log("aviso: el Live lleva >%ds sin terminar; se reanuda el micro" % (ECO_MAX_MS // 1000))
                         est["live_hablando"] = False
-                        est["fin_voz"] = ahora
-                        est["eco_esperando"] = False
+                        est["repro_hasta"] = ahora
 
-                    # --- ¿hay que ignorar el micro AHORA? ---
-                    ignorar = False
-                    if est["live_hablando"]:
-                        ignorar = True
-                    elif est["eco_esperando"]:
-                        # el Live ya termino, pero el altavoz puede seguir sonando:
-                        # se espera a que el nivel baje (el eco se va) o al tope.
-                        if _rms(trozo) < (mic.umbral or UMBRAL_MIN):
-                            est["eco_trozos"] += 1
-                            if est["eco_trozos"] >= ECO_LIBRE_TROZOS:
-                                est["eco_esperando"] = False
-                                _log("eco ido: se reanuda el micro")
-                        else:
-                            est["eco_trozos"] = 0
-                        if (ahora - est["eco_inicio"]) > (ECO_MAX_MS / 1000.0):
-                            est["eco_esperando"] = False
-                            _log("eco: tope de %d ms alcanzado; se reanuda el micro" % ECO_MAX_MS)
-                        ignorar = est["eco_esperando"]
-                    elif (ahora - est["fin_voz"]) < (COOLDOWN_MS / 1000.0):
-                        ignorar = True
+                    ignorar = (est["live_hablando"]
+                               or ahora < (est["repro_hasta"] + COOLDOWN_MS / 1000.0))
 
                     if ignorar:
                         if est["hablando"]:
@@ -442,6 +423,9 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         est["n_silencio"] = 0
                         if not est["hablando"] and est["n_habla"] >= CHUNKS_MIN_HABLA:
                             est["hablando"] = True
+                            # turno NUEVO del usuario: la medida de audio anterior ya no vale
+                            est["audio_total"] = 0
+                            est["audio_t0"] = 0.0
                             await ws.send(json.dumps({"realtimeInput": {"activityStart": {}}}))
                             _log("activityStart (hablas, nivel=%d umbral=%d)" % (nivel, umbral))
                     else:
@@ -525,9 +509,10 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         # aqui, live_hablando se queda True y el micro no vuelve
                         est["live_hablando"] = False
                         est["fin_voz"] = time.time()
-                        est["eco_esperando"] = True
-                        est["eco_trozos"] = 0
-                        est["eco_inicio"] = time.time()
+                        # al interrumpir, se corta el audio: fin de reproduccion ya
+                        est["repro_hasta"] = time.time()
+                        est["audio_total"] = 0
+                        est["audio_t0"] = 0.0
                         if out_sink:
                             out_sink("\n[tú]\n")
 
@@ -536,8 +521,16 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         if data:
                             trozo = base64.b64decode(data)
                             est["audio"] += len(trozo)
-                            est["live_hablando"] = True      # anti-realimentacion
-                            est["inicio_voz"] = time.time()
+                            # anti-eco: acumular bytes y estimar el fin de la
+                            # reproduccion (24 kHz, 16-bit mono)
+                            est["audio_total"] = est.get("audio_total", 0) + len(trozo)
+                            if not est.get("audio_t0"):
+                                est["audio_t0"] = time.time()
+                            est["repro_hasta"] = (est["audio_t0"]
+                                                  + est["audio_total"] / float(SPK_RATE * 2))
+                            if not est["live_hablando"]:
+                                est["live_hablando"] = True
+                                est["inicio_voz"] = time.time()
                             if audio_feed:
                                 audio_feed(trozo)
                         if part.get("text") and out_sink:
@@ -562,12 +555,15 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
 
                     if sc.get("turnComplete"):
                         est["turnos"] += 1
-                        # el Live deja de hablar: se espera a que el eco se vaya
+                        # el turno acaba, pero el altavoz sigue sonando: NO se
+                        # reanuda el micro hasta que la reproduccion termina
                         est["live_hablando"] = False
-                        est["fin_voz"] = time.time()
-                        est["eco_esperando"] = True
-                        est["eco_trozos"] = 0
-                        est["eco_inicio"] = time.time()
+                        est["fin_voz"] = ahora
+                        est["repro_hasta"] = est.get("repro_hasta", 0) + MARGEN_REPRO_MS / 1000.0
+                        _log("turno %d: micro en silencio hasta %.2fs (reproduccion)"
+                             % (est["turnos"], est.get("repro_hasta", 0) - time.time()))
+                        est["audio_total"] = 0
+                        est["audio_t0"] = 0.0
                         _log("turno %d: oyo=%r dijo=%r"
                              % (est["turnos"], est.get("oyo", "")[-160:],
                                 est.get("dijo", "")[-160:]))
