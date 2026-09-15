@@ -44,6 +44,17 @@ URL = ("wss://generativelanguage.googleapis.com/ws/"
 
 MIC_RATE = 16000
 SPK_RATE = 24000
+
+# Voz del Live. Sin esto el modelo ELIGE la voz y cambia (medido: cambiaba entre
+# turnos). Debe ir DENTRO de generationConfig: al nivel del setup la API lo
+# rechaza con "Unknown name speechConfig".
+# Se puede cambiar con `voice.live_voice` en config.yaml.
+# Voces disponibles (30): Zephyr, Puck, Charon, Kore, Fenrir, Leda, Orus, Aoede,
+# Callirrhoe, Autonoe, Enceladus, Iapetus, Umbriel, Algieba, Despina, Erinome,
+# Algenib, Rasalgethi, Laomedeia, Achernar, Alnilam, Schedar, Gacrux,
+# Pulcherrima, Achird, Zubenelgenubi, Vindemiatrix, Sadachbia, Sadaltager, Sulafat
+VOZ_POR_DEFECTO = "Kore"
+IDIOMA_VOZ = "es-ES"       # espanol de Espana (acento castellano)
 CHUNK_MS = 100
 CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
 
@@ -60,8 +71,9 @@ UMBRAL_MAX = 600           # techo: un pico en la calibracion no puede dejarnos 
 GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
                            # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
 CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
-COOLDOWN_MS = 400          # tras hablar el Live, se sigue ignorando el micro
-                           # (el altavoz aun suena y el micro lo captaria)
+COOLDOWN_MS = 300          # minimo tras hablar el Live antes de mirar el eco
+ECO_LIBRE_TROZOS = 4       # trozos seguidos bajo el umbral para dar el eco por ido
+ECO_MAX_MS = 4000          # tope: no dejar al usuario mudo si el ruido no baja
 CHUNKS_MIN_HABLA = 3       # 300 ms de habla minima para considerarlo voz
 
 
@@ -291,13 +303,30 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
     est = {"turnos": 0, "audio": 0, "salir": False, "hablando": False,
            "n_habla": 0, "n_silencio": 0,
            # anti-realimentacion: el Live no debe oirse a si mismo
-           "live_hablando": False, "fin_voz": 0.0}
+           "live_hablando": False, "fin_voz": 0.0,
+           # tras el turno del Live: no reanudar hasta que el eco se vaya
+           "eco_esperando": False, "eco_trozos": 0, "eco_inicio": 0.0}
 
     async def main():
         key = os.environ.get("GOOGLE_API_KEY", "")
+        # la voz: config.yaml manda; si no, el defecto
+        voz = VOZ_POR_DEFECTO
+        try:
+            voz = ((cfg or {}).get("voice", {}) or {}).get("live_voice") or VOZ_POR_DEFECTO
+        except Exception:
+            pass
+        _log("voz: %s" % voz)
+
         setup = {
             "model": "models/" + MODEL,
-            "generationConfig": {"responseModalities": ["AUDIO"]},
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": {"voiceName": voz}},
+                    "languageCode": IDIOMA_VOZ,
+                },
+            },
             "outputAudioTranscription": {},
             "inputAudioTranscription": {},
             # VAD MANUAL: la automatica no detecta el audio por trozos (medido).
@@ -306,7 +335,13 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
             },
         }
         if system_prompt:
-            setup["systemInstruction"] = {"parts": [{"text": system_prompt[:30000]}]}
+            # El Live respondia en INGLES aunque el prompt de AIOS esta en ingles:
+            # languageCode fija la VOZ, no el idioma de la respuesta. Se anade una
+            # instruccion explicita AL FINAL (no se sustituye nada del prompt).
+            _apendice = ("\n\n[VOICE MODE] Speak ONLY in Spanish (es-ES, castellano "
+                         "de Espana). Always answer out loud in Spanish, even if this "
+                         "system prompt is written in English. Keep it short and natural.")
+            setup["systemInstruction"] = {"parts": [{"text": (system_prompt + _apendice)[:30000]}]}
         gt = _geminify(tools)
         if gt:
             setup["tools"] = gt
@@ -352,7 +387,30 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         _log("aviso: el Live lleva >30s sin turnComplete; se reanuda el micro")
                         est["live_hablando"] = False
                         est["fin_voz"] = ahora
-                    if est["live_hablando"] or (ahora - est["fin_voz"]) < (COOLDOWN_MS / 1000.0):
+                        est["eco_esperando"] = False
+
+                    # --- ¿hay que ignorar el micro AHORA? ---
+                    ignorar = False
+                    if est["live_hablando"]:
+                        ignorar = True
+                    elif est["eco_esperando"]:
+                        # el Live ya termino, pero el altavoz puede seguir sonando:
+                        # se espera a que el nivel baje (el eco se va) o al tope.
+                        if _rms(trozo) < (mic.umbral or UMBRAL_MIN):
+                            est["eco_trozos"] += 1
+                            if est["eco_trozos"] >= ECO_LIBRE_TROZOS:
+                                est["eco_esperando"] = False
+                                _log("eco ido: se reanuda el micro")
+                        else:
+                            est["eco_trozos"] = 0
+                        if (ahora - est["eco_inicio"]) > (ECO_MAX_MS / 1000.0):
+                            est["eco_esperando"] = False
+                            _log("eco: tope de %d ms alcanzado; se reanuda el micro" % ECO_MAX_MS)
+                        ignorar = est["eco_esperando"]
+                    elif (ahora - est["fin_voz"]) < (COOLDOWN_MS / 1000.0):
+                        ignorar = True
+
+                    if ignorar:
                         if est["hablando"]:
                             est["hablando"] = False
                             est["n_habla"] = 0
@@ -463,6 +521,13 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                     sc = msg.get("serverContent") or {}
                     if sc.get("interrupted"):
                         _log("barge-in: el usuario interrumpio")
+                        # al interrumpir, el Live deja de hablar: si no se limpia
+                        # aqui, live_hablando se queda True y el micro no vuelve
+                        est["live_hablando"] = False
+                        est["fin_voz"] = time.time()
+                        est["eco_esperando"] = True
+                        est["eco_trozos"] = 0
+                        est["eco_inicio"] = time.time()
                         if out_sink:
                             out_sink("\n[tú]\n")
 
@@ -497,9 +562,12 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
 
                     if sc.get("turnComplete"):
                         est["turnos"] += 1
-                        # el Live deja de hablar: arranca el cooldown
+                        # el Live deja de hablar: se espera a que el eco se vaya
                         est["live_hablando"] = False
                         est["fin_voz"] = time.time()
+                        est["eco_esperando"] = True
+                        est["eco_trozos"] = 0
+                        est["eco_inicio"] = time.time()
                         _log("turno %d: oyo=%r dijo=%r"
                              % (est["turnos"], est.get("oyo", "")[-160:],
                                 est.get("dijo", "")[-160:]))
