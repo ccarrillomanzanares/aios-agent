@@ -167,12 +167,46 @@ def _is_destructive_command(command: str) -> bool:
     # move/rename system directories (bypasses rm because it does not delete)
     if re.search(r'\bmv\b\s+/(var|etc|boot|usr|lib|bin|sbin|opt|root|home)\b', lower):
         return True
+    # --- AIOS PATCH (15 Sep 2026): installing/removing software and changing
+    # system services needs the user's permission. Measured bug: with the Live as
+    # the model, Carlos said "Hola" and it ran `sudo sven install docker` on its
+    # own -- nothing in this list covered package installation, and sven's own
+    # "Proceed? [Y/n]" prompt was being auto-answered.
+    if re.search(r'\bsven\s+(install|remove|upgrade|update|sync|add)\b', lower):
+        return True
+    if re.search(r'\b(apt|apt-get|dnf|yum|pacman|emerge|zypper)\s+(-\S+\s+)*(install|remove|erase|upgrade|-S|-R)\b', lower):
+        return True
+    if re.search(r'\b(pip|pip3)\s+install\b', lower):
+        return True
+    if re.search(r'\b(cargo|npm|gem)\s+install\b', lower):
+        return True
+    if re.search(r'\bmake\s+install\b', lower):
+        return True
+    # system services: enabling/disabling/masking them changes the machine
+    if re.search(r'\bsystemctl\b\s+(enable|disable|mask|unmask)\b', lower):
+        return True
     return False
+
+
+# Voice mode (the Live as the model): the confirmation prompt cannot be read from
+# stdin, because the voice loop owns it. Without a way to ASK, the answer is NO.
+# Carlos: "pues no deberia instalar nada sin consentimiento".
+VOICE_MODE = False
+
+
+def set_voice_mode(on: bool):
+    """chat.py marks voice mode so destructive commands fail closed (never silently)."""
+    global VOICE_MODE
+    VOICE_MODE = bool(on)
 
 
 def _confirm_destructive(command: str, timeout: int = 10) -> bool:
     """Ask user for confirmation before running a destructive command."""
     import sys as _sys
+    if VOICE_MODE:
+        # Cannot ask in voice mode: refuse and tell the model to ask out loud.
+        _log_voice_refusal(command)
+        return False
     _sys.stderr.write(f"\u26a0\ufe0f Destructive command detected: {command}. Continue? (y/N): ")
     _sys.stderr.flush()
     try:
@@ -193,6 +227,16 @@ def _confirm_destructive(command: str, timeout: int = 10) -> bool:
         return False
 
 
+def _log_voice_refusal(command: str):
+    """Record that a command was refused for lack of consent (diagnostics)."""
+    try:
+        with open("/tmp/aios-gemini-live.log", "a", encoding="utf-8") as f:
+            f.write("%s RECHAZADO sin consentimiento: %s\n"
+                    % (time.strftime("%H:%M:%S"), command[:200]))
+    except Exception:
+        pass
+
+
 def _strip_ansi(s: str) -> str:
     """Remove ANSI escape codes (sven/docker colored output) from tool text."""
     return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", s)
@@ -210,8 +254,14 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
 
     if _is_destructive_command(command):
         if not _confirm_destructive(command):
-            return json.dumps({"error": "Command cancelled by user", "exit_code": -1,
-                              "stdout": "", "stderr": "Cancelled by user"}, ensure_ascii=False)
+            motivo = ("NEEDS PERMISSION: installing or changing system software requires "
+                      "the user's explicit consent, and in voice mode there is no way to ask. "
+                      "Tell the user out loud what you want to run and why, and wait for a "
+                      "clear yes before doing it.")
+            if not VOICE_MODE:
+                motivo = "Command cancelled by user"
+            return json.dumps({"error": motivo, "exit_code": -1,
+                              "stdout": "", "stderr": motivo}, ensure_ascii=False)
 
     t0 = time.time()
     attempts = 0

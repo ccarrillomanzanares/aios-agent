@@ -60,6 +60,8 @@ UMBRAL_MAX = 600           # techo: un pico en la calibracion no puede dejarnos 
 GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
                            # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
 CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
+COOLDOWN_MS = 400          # tras hablar el Live, se sigue ignorando el micro
+                           # (el altavoz aun suena y el micro lo captaria)
 CHUNKS_MIN_HABLA = 3       # 300 ms de habla minima para considerarlo voz
 
 
@@ -287,7 +289,9 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
     mic = _Mic(mic_q)
     tec = _Teclado(txt_q)
     est = {"turnos": 0, "audio": 0, "salir": False, "hablando": False,
-           "n_habla": 0, "n_silencio": 0}
+           "n_habla": 0, "n_silencio": 0,
+           # anti-realimentacion: el Live no debe oirse a si mismo
+           "live_hablando": False, "fin_voz": 0.0}
 
     async def main():
         key = os.environ.get("GOOGLE_API_KEY", "")
@@ -335,6 +339,29 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         break
                     if trozo is None:
                         break
+
+                    # --- ANTI-REALIMENTACION ---
+                    # Si el Live esta hablando (o acaba de terminar), NO se manda
+                    # su propia voz de vuelta como si fuera el usuario. Sin esto el
+                    # Live se oye, se contesta y no para (medido: 7 turnos y 6
+                    # barge-in a partir de un unico "Hola" del usuario).
+                    ahora = time.time()
+                    # Red de seguridad: si no llego el turnComplete, el micro no
+                    # puede quedarse mudo para siempre.
+                    if est["live_hablando"] and (ahora - est.get("inicio_voz", 0)) > 30:
+                        _log("aviso: el Live lleva >30s sin turnComplete; se reanuda el micro")
+                        est["live_hablando"] = False
+                        est["fin_voz"] = ahora
+                    if est["live_hablando"] or (ahora - est["fin_voz"]) < (COOLDOWN_MS / 1000.0):
+                        if est["hablando"]:
+                            est["hablando"] = False
+                            est["n_habla"] = 0
+                            await ws.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
+                        await ws.send(json.dumps({
+                            "realtimeInput": {"audio": {
+                                "data": base64.b64encode(b"\x00" * len(trozo)).decode(),
+                                "mimeType": "audio/pcm;rate=%d" % MIC_RATE}}}))
+                        continue
 
                     # --- VAD local: decidir activityStart / activityEnd ---
                     # El umbral viene de la CALIBRACION del micro (ruido real de
@@ -444,6 +471,8 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                         if data:
                             trozo = base64.b64decode(data)
                             est["audio"] += len(trozo)
+                            est["live_hablando"] = True      # anti-realimentacion
+                            est["inicio_voz"] = time.time()
                             if audio_feed:
                                 audio_feed(trozo)
                         if part.get("text") and out_sink:
@@ -468,6 +497,9 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
 
                     if sc.get("turnComplete"):
                         est["turnos"] += 1
+                        # el Live deja de hablar: arranca el cooldown
+                        est["live_hablando"] = False
+                        est["fin_voz"] = time.time()
                         _log("turno %d: oyo=%r dijo=%r"
                              % (est["turnos"], est.get("oyo", "")[-160:],
                                 est.get("dijo", "")[-160:]))

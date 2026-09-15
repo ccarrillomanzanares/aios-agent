@@ -1215,6 +1215,13 @@ def main():
         try:
             import gemini_live_converse as _glc
             from tools import TOOLS as _TOOLS, execute_tool as _exec_tool
+            # Tools must know we are in voice mode: with no way to ask, installing
+            # software fails closed instead of running without consent.
+            try:
+                from tools import set_voice_mode as _set_voice_mode
+                _set_voice_mode(True)
+            except Exception:
+                pass
             _okl, _why = _glc.available()
             if _okl:
                 _conv_ok = True
@@ -1237,6 +1244,10 @@ def main():
                     except KeyboardInterrupt:
                         _okc, _motivo = True, "Ctrl+C"
                     if _okc:
+                        try:
+                            _set_voice_mode(False)
+                        except Exception:
+                            pass
                         print()
                         print("  (out of voice mode: %s)" % _motivo)
                         # Back to the normal prompt. Re-enter voice mode with /voice.
