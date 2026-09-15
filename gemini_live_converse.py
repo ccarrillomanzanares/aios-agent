@@ -61,13 +61,19 @@ CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
 # VAD local (energia). El umbral NO puede ser una constante fija: medido en el
 # portatil, el ruido de fondo tiene RMS ~180 y la voz del usuario ~550, asi que
 # un umbral fijo de 500 dejaba la voz EN EL FILO y `activityStart` no se disparaba
-# nunca (el Live oia silencio y no contestaba). El umbral se CALIBRA al arrancar
-# con el ruido real de ESE micro.
-CALIB_MS = 1500            # al arrancar se mide el ruido de fondo
-CALENT_MS = 1000           # primeros ms de arecord: transitorio, se descarta
-FACTOR_RUIDO = 2.2         # umbral = piso_ruido * FACTOR_RUIDO
-UMBRAL_MIN = 120           # suelo, para micros muy silenciosos
-UMBRAL_MAX = 600           # techo: un pico en la calibracion no puede dejarnos sordos
+# nunca (el Live oia silencio y no contestaba).
+#
+# UMBRAL FIJO, sin calibracion. Carlos: "no hagas calibracion, lo complica".
+#
+# La calibracion dio un resultado distinto cada vez (midio 135 con ruido real 14;
+# 160 por el transitorio de arecord; 814 = SU VOZ al arrancar -> umbral al techo y
+# sordo). Con micro bueno y sin ruido alrededor, un umbral fijo bajo es mas simple.
+#
+# Medido en este portatil (Capture 45%, voz real de Carlos):
+#     VOZ:   p50 = 330, p90 = 830, max = 1784
+#     RUIDO: p50 = 14-20, p90 = 45
+#   250 separa limpiamente: la voz lo pasa con margen, el ruido no.
+UMBRAL_HABLA = 250
 GANANCIA = 3.0             # ganancia digital antes de mandar el audio al Live
                            # (medido: la voz llegaba con pico 3.900/32.767 = 12%)
 CHUNKS_SILENCIO_FIN = 8    # 800 ms de silencio -> fin de turno
@@ -173,21 +179,13 @@ def _amplifica(dato):
 
 
 class _Mic:
-    """arecord en continuo -> cola de trozos PCM 16 kHz mono.
-
-    Ademas CALIBRA el ruido de fondo: los primeros CALIB_MS trozos se miden y se
-    fija el umbral del VAD a partir de ellos. Sin esto, un umbral fijo no vale
-    para todos los micros (el ALC3227 del portatil da ruido ~180 y voz ~550).
-    """
+    """arecord en continuo -> cola de trozos PCM 16 kHz mono."""
 
     def __init__(self, q):
         self.q = q
         self.p = None
         self.parar = threading.Event()
-        self.piso_ruido = None       # RMS del ruido de fondo medido al arrancar
-        self.umbral = None           # umbral resultante
-        self.calibrado = threading.Event()
-        self._calib = []             # niveles de la calibracion
+        self.umbral = UMBRAL_HABLA   # fijo (sin calibracion; ver arriba)
 
     def start(self):
         try:
@@ -199,18 +197,9 @@ class _Mic:
             self.p = None
             return False
         threading.Thread(target=self._leer, daemon=True).start()
-        # el bucle de conversacion espera a tener umbral antes de enviar nada
-        self.calibrado.wait(timeout=6)
         return True
 
     def _leer(self):
-        n_calib = max(1, CALIB_MS // CHUNK_MS)
-        # arecord entrega un transitorio en los primeros trozos (medido: el piso
-        # salia 160 cuando el ruido real era 13-17, y el umbral quedaba al filo de
-        # la voz). Se DESCARTA el calentamiento antes de calibrar.
-        n_calent = max(1, CALENT_MS // CHUNK_MS)
-        vistos = 0
-        calent = 0
         while not self.parar.is_set():
             try:
                 dato = self.p.stdout.read(CHUNK)
@@ -218,25 +207,6 @@ class _Mic:
                 break
             if not dato:
                 break
-            if calent < n_calent:
-                calent += 1          # calentamiento: se tira, no se mide
-                continue
-            if vistos < n_calib:
-                # --- calibracion: medir el ruido de fondo de ESTE micro ---
-                self._calib.append(_rms(dato))
-                vistos += 1
-                if vistos >= n_calib:
-                    niveles = sorted(self._calib)
-                    # percentil 25: si en la calibracion cae un golpe o un pico
-                    # transitorio (paso: midio 135 cuando el ruido real era 14),
-                    # la mediana se contamina y el umbral sale demasiado alto.
-                    self.piso_ruido = niveles[len(niveles) // 4]
-                    self.umbral = min(UMBRAL_MAX,
-                                      max(UMBRAL_MIN, int(self.piso_ruido * FACTOR_RUIDO)))
-                    _log("calibrado: piso_ruido=%d -> umbral=%d (ganancia=%.1f)"
-                         % (self.piso_ruido, self.umbral, GANANCIA))
-                    self.calibrado.set()
-                continue
             try:
                 self.q.put_nowait(dato)
             except queue.Full:
@@ -357,8 +327,8 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
             if "setupComplete" not in raw:
                 _log("setup inesperado: %s" % raw[:300])
                 return
-            _log("sesion iniciada (VAD local adaptativo, umbral=%s, ganancia=%.1f)"
-                 % (mic.umbral, GANANCIA))
+            _log("sesion iniciada (VAD fijo, umbral=%d, ganancia=%.1f)"
+                 % (UMBRAL_HABLA, GANANCIA))
             if out_sink:
                 out_sink("\n(escuchando: habla cuando quieras; escribe para texto, "
                          "Ctrl+C para salir)\n")
@@ -405,7 +375,7 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
                     # --- VAD local: decidir activityStart / activityEnd ---
                     # El umbral viene de la CALIBRACION del micro (ruido real de
                     # ESTE equipo). Si aun no hay umbral, se usa el minimo.
-                    umbral = mic.umbral or UMBRAL_MIN
+                    umbral = UMBRAL_HABLA
                     nivel = _rms(trozo)
 
                     # Diagnostico: el log debe decir el nivel SIEMPRE, no solo
