@@ -85,12 +85,44 @@ RECONEX_ESPERA_MS = 1500   # espera entre intentos (crece con cada fallo)
 CHUNKS_MIN_HABLA = 2       # 200 ms: no perder frases cortas
 
 
+def _limpia_procesos_audio():
+    """Mata los arecord/aplay del agente al salir.
+
+    Medido: si el agente muere sin hacerlo, sus hijos quedan HUERFANOS con el audio
+    abierto; como el micro tiene una sola entrada, NINGUNA app puede sonar y el
+    equipo parece colgado. Y no mueren con TERM: hace falta KILL.
+    """
+    import subprocess as _sp
+    for nombre in ("arecord", "aplay"):
+        try:
+            _sp.run(["pkill", "-9", "-x", nombre], capture_output=True, timeout=5)
+        except Exception:
+            pass
+
+
 def _log(msg):
     try:
         with open("/tmp/aios-gemini-live.log", "a", encoding="utf-8") as f:
             f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
     except Exception:
         pass
+
+
+def _instala_limpieza_por_senal():
+    """Libera el audio si matan el agente desde fuera (SIGTERM/SIGINT/SIGHUP)."""
+    import atexit
+    import signal
+
+    def _salida(*_a):
+        _limpia_procesos_audio()
+        raise SystemExit(0)
+
+    atexit.register(_limpia_procesos_audio)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(sig, _salida)
+        except Exception:
+            pass
 
 
 def _log_reset():
@@ -268,6 +300,7 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
     import asyncio
     import websockets
 
+    _instala_limpieza_por_senal()
     mic_q = queue.Queue(maxsize=200)
     txt_q = queue.Queue()
     mic = _Mic(mic_q)
@@ -605,5 +638,8 @@ def converse(system_prompt=None, tools=None, tool_runner=None,
         tec.stop()
         if audio_close:
             audio_close()
+        # liberar SIEMPRE el audio (si no, quedan huerfanos y bloquean el sonido
+        # del equipo entero: el micro tiene una sola entrada)
+        _limpia_procesos_audio()
 
     return True, "turnos=%d audio=%.1fs" % (est["turnos"], est["audio"] / (SPK_RATE * 2))
