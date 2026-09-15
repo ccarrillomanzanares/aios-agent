@@ -53,6 +53,7 @@ CHUNK = MIC_RATE * 2 * CHUNK_MS // 1000        # 3200 bytes = 100 ms
 # nunca (el Live oia silencio y no contestaba). El umbral se CALIBRA al arrancar
 # con el ruido real de ESE micro.
 CALIB_MS = 1500            # al arrancar se mide el ruido de fondo
+CALENT_MS = 1000           # primeros ms de arecord: transitorio, se descarta
 FACTOR_RUIDO = 2.2         # umbral = piso_ruido * FACTOR_RUIDO
 UMBRAL_MIN = 120           # suelo, para micros muy silenciosos
 UMBRAL_MAX = 600           # techo: un pico en la calibracion no puede dejarnos sordos
@@ -190,7 +191,12 @@ class _Mic:
 
     def _leer(self):
         n_calib = max(1, CALIB_MS // CHUNK_MS)
+        # arecord entrega un transitorio en los primeros trozos (medido: el piso
+        # salia 160 cuando el ruido real era 13-17, y el umbral quedaba al filo de
+        # la voz). Se DESCARTA el calentamiento antes de calibrar.
+        n_calent = max(1, CALENT_MS // CHUNK_MS)
         vistos = 0
+        calent = 0
         while not self.parar.is_set():
             try:
                 dato = self.p.stdout.read(CHUNK)
@@ -198,6 +204,9 @@ class _Mic:
                 break
             if not dato:
                 break
+            if calent < n_calent:
+                calent += 1          # calentamiento: se tira, no se mide
+                continue
             if vistos < n_calib:
                 # --- calibracion: medir el ruido de fondo de ESTE micro ---
                 self._calib.append(_rms(dato))
