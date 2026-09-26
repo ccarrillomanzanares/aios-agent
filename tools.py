@@ -207,7 +207,11 @@ def _segmento_bloqueado(seg: str) -> bool:
         return True
     if re.search(r"\bmkfs\.\w+", lower):
         return True
-    if re.search(r"\bfdisk\b", lower):
+    # `fdisk`, `parted`, `sgdisk` y `gdisk` SOLO se bloquean cuando MODIFICAN.
+    # `fdisk -l`, `parted -l` o `parted print` son lectura, y bloquearlas castiga
+    # la conducta correcta: se midio al modelo mirando el disco antes de tocarlo.
+    if re.search(r"\b(fdisk|parted|sgdisk|gdisk)\b", lower) and not re.search(
+            r"\b(fdisk|parted)\b[^;|&]*\s-{1,2}(l|list|print)\b", lower):
         return True
     if re.search(r"\bchmod\b.*(?:-r\s+)?000\b", lower):
         return True
