@@ -92,100 +92,241 @@ def _check_sudo_nopasswd():
     return _SUDO_NOPASSWD
 
 
-def _is_blocked_command(command: str) -> bool:
-    """Return True if command matches an unconditionally blocked dangerous pattern."""
-    lower = command.lower()
-    if re.search(r'\brm\s+-rf\s+/\s*$', lower) or re.search(r'\brm\s+-rf\s+/*\b', lower):
-        return True
-    if re.search(r'\brm\s+-rf\s+/var/lib/docker(/|\s|$|\*)', lower):
-        return True
-    if re.search(r'\bdd\s+if=\S+\s+of=/dev/\S+', lower):
-        return True
-    if re.search(r'\bmkfs\.\w+\s+\S+', lower):
-        return True
-    if re.search(r'\bfdisk\b', lower):
-        return True
-    if re.search(r'\bchmod\b.*(?:-r\s+)?000\b', lower):
-        return True
-    # Expose Docker API without TLS is effectively root-for-everyone on the network
-    if re.search(r'\bdockerd\b.*--host\s*=\s*tcp://0\.0\.0\.0', lower):
-        return True
-    if re.search(r'\bdockerd\b.*--host\s+tcp://0\.0\.0\.0', lower):
-        return True
-    # Kill all / any broad signal to system daemons is too risky to auto-run
-    if re.search(r'\bkillall\s+(?:dockerd|containerd|systemd|init|Xorg|wpa_supplicant)', lower):
-        return True
-    if re.search(r'\bpkill\s+-9\s+(-f\s+)?(dockerd|containerd|systemd|init|Xorg|wpa_supplicant)', lower):
-        return True
-    # --- AIOS PATCH (12 Sep 2026): irreversible vectors not covered ---
-    if re.search(r'\bshred\b', lower):
-        return True
-    if re.search(r'\bwipefs\b', lower):
-        return True
-    if re.search(r'\bbadblocks\b.*-w', lower):
+# ──────────────────────────────────────────────────────────────────────────────
+# CAPA DE SEGURIDAD DE EJECUCION
+# Reescrita el 26 Sep 2026 a partir de una auditoria MEDIDA: 41 casos, 27/41.
+# Dos reglas de diseno salen de esa auditoria:
+#
+#   1. SE EVALUA POR SEGMENTOS, nunca la cadena entera. Un comando compuesto es
+#      una secuencia de comandos y cada uno merece su veredicto. Antes se miraba
+#      la cadena completa, asi que un `/tmp` o un `>>` en CUALQUIER parte
+#      desactivaba detecciones para todo el comando:
+#          find /etc -delete && touch /tmp/x   -> pasaba sin confirmar
+#          echo y > /etc/passwd >> /tmp/log    -> pasaba sin confirmar
+#
+#   2. UN UNICO PUNTO DE PASO (`verificar_comando`). Antes `run_command` filtraba
+#      y `process_start` no, de modo que el MISMO `rm -rf` se bloqueaba por una
+#      via y se ejecutaba por la otra. El prompt de produccion ademas empuja al
+#      modelo hacia `process_start` para scripts interactivos.
+#
+# Niveles: 'bloquea' (no se ejecuta jamas, ni con permiso) > 'confirma' (permiso
+# explicito del usuario) > 'adelante'. En modo voz 'confirma' se rechaza: sin
+# forma de preguntar, la respuesta es NO.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Comandos que se saltan para llegar al verbo real: `sudo rm -rf /`
+_PREFIJOS = ("sudo", "doas", "command", "env", "nice", "ionice", "time", "timeout")
+
+# Rutas del sistema: escribir o borrar aqui no es trabajo normal.
+_PREFIJOS_SISTEMA = ("/etc", "/boot", "/usr", "/lib", "/lib64", "/bin", "/sbin",
+                     "/opt", "/root", "/srv", "/var/lib", "/sys", "/proc", "/dev")
+
+# Unidades cuya parada corta el acceso a la maquina o a su red.
+_UNIDADES_CRITICAS = ("sshd", "ssh", "systemd-networkd", "networkmanager",
+                      "systemd-resolved", "systemd-logind", "dbus")
+
+# Separadores de comandos: cada trozo se evalua por su cuenta.
+_SEPARADOR = re.compile(r";|&&|\|\||\||\n")
+
+
+def _es_tmp(texto: str) -> bool:
+    """True si el texto se refiere a /tmp o /var/tmp (exento por diseno)."""
+    return bool(re.search(r"(?<![\w/])/(var/)?tmp(?:/|\s|$)", texto or ""))
+
+
+def _es_ruta_sistema(ruta: str) -> bool:
+    """True si la ruta apunta al sistema (y no esta bajo /tmp)."""
+    r = (ruta or "").strip("\"'")
+    if not r.startswith("/") or _es_tmp(r):
+        return False
+    return any(r == p or r.startswith(p + "/") for p in _PREFIJOS_SISTEMA)
+
+
+def _segmentos(comando: str):
+    """Parte un comando compuesto en comandos simples."""
+    return [s.strip() for s in _SEPARADOR.split(comando or "") if s.strip()]
+
+
+def _operandos(segmento: str):
+    """Operandos de un comando simple: sin sudo, sin el verbo y sin banderas."""
+    toks = [t for t in segmento.strip().split() if t]
+    i = 0
+    while i < len(toks) and (toks[i].lower() in _PREFIJOS or toks[i].startswith("-")):
+        i += 1
+    i += 1  # el verbo
+    return [t.strip("\"'") for t in toks[i:] if not t.startswith("-")]
+
+
+def _tiene_recursiva(segmento: str) -> bool:
+    """True si hay una bandera recursiva (-r, -R, -rf, --recursive)."""
+    for t in segmento.split():
+        if t in ("--recursive", "--recursive=true"):
+            return True
+        if t.startswith("-") and not t.startswith("--") and "r" in t.lstrip("-").lower():
+            return True
+    return False
+
+
+def _redireccion_peligrosa(segmento: str) -> bool:
+    """True si el segmento SOBREESCRIBE un fichero que no es /dev ni /tmp.
+
+    Se miran TODAS las redirecciones, una a una. Antes bastaba un `>>` en
+    cualquier parte del comando para desactivar este chequeo entero.
+    """
+    for m in re.finditer(r"(?<![0-9&>])(>>?)(?!=)\s*([^\s;|&<>()]+)", segmento):
+        operador, destino = m.group(1), m.group(2).strip("\"'")
+        if operador == ">>":            # anadir al final no destruye
+            continue
+        if re.search(r"/dev/(sd|nvme|vd|hd|mmcblk)", destino):
+            return True                 # escribir un disco
+        if destino.startswith("/dev/") or destino.startswith("/proc/"):
+            continue
+        if _es_tmp(destino):
+            continue
         return True
     return False
+
+
+def _segmento_bloqueado(seg: str) -> bool:
+    """True si este comando simple NO debe ejecutarse nunca, ni con permiso."""
+    lower = seg.lower()
+
+    # `rm` sobre la raiz, y solo eso. El resto de `rm` pide confirmacion, para
+    # que el usuario pueda autorizarlo. Antes la regex `rm\\s+-rf\\s+/*\\b` casaba
+    # CUALQUIER ruta absoluta: `rm -rf /var/log/viejo` quedaba bloqueado para
+    # siempre y sin posibilidad de decir que si, mientras que el caso
+    # catastrofico `rm -rf /*` se le escapaba y caia al nivel de confirmacion.
+    if re.search(r"\brm\b", lower):
+        for op in _operandos(seg):
+            if op in ("/", "/*", "*") or (op.startswith("/") and op.rstrip("/") == ""):
+                return True
+            if op.startswith("/var/lib/docker"):
+                return True
+
+    if re.search(r"\bdd\s+if=\S+\s+of=/dev/\S+", lower):
+        return True
+    if re.search(r"\bmkfs\.\w+", lower):
+        return True
+    if re.search(r"\bfdisk\b", lower):
+        return True
+    if re.search(r"\bchmod\b.*(?:-r\s+)?000\b", lower):
+        return True
+    if re.search(r"\bdockerd\b.*--host\s*=?\s*tcp://0\.0\.0\.0", lower):
+        return True
+    if re.search(r"\bkillall\s+(?:dockerd|containerd|systemd|init|Xorg|wpa_supplicant)", lower):
+        return True
+    if re.search(r"\bpkill\s+-9\s+(-f\s+)?(dockerd|containerd|systemd|init|Xorg|wpa_supplicant)", lower):
+        return True
+    # --- vectores irreversibles (parche AIOS del 12 Sep 2026) ---
+    if re.search(r"\bshred\b", lower):
+        return True
+    if re.search(r"\bwipefs\b", lower):
+        return True
+    if re.search(r"\bbadblocks\b.*-w", lower):
+        return True
+    return False
+
+
+def _segmento_destructivo(seg: str) -> bool:
+    """True si este comando simple necesita el permiso explicito del usuario."""
+    lower = seg.lower()
+
+    # --- rm recursivo ---------------------------------------------------------
+    # Exento SOLO si TODOS los objetivos estan bajo /tmp o /var/tmp. Es la
+    # exencion que el codigo ya documentaba pero que nunca podia alcanzarse,
+    # porque el bloqueo incondicional actuaba antes.
+    if re.search(r"\brm\b", lower) and _tiene_recursiva(seg):
+        objetivos = _operandos(seg)
+        if not objetivos or not all(_es_tmp(o) for o in objetivos):
+            return True
+    if re.search(r"\bsudo\s+rm\b", lower):
+        return True
+
+    # --- escrituras -----------------------------------------------------------
+    if _redireccion_peligrosa(seg):
+        return True
+    if re.search(r"\bdd\s+if=\S+", lower):
+        return True
+    if re.search(r"\btruncate\b.*\s-?s\s*0\b", lower) and not _es_tmp(seg):
+        return True
+    # tee: EL idioma habitual para escribir ficheros de sistema, y no estaba en
+    # ninguna lista. `sudo tee /etc/passwd` se ejecutaba sin preguntar.
+    if re.search(r"\btee\b", lower):
+        if any(_es_ruta_sistema(o) for o in _operandos(seg)):
+            return True
+    # cp / ln -sf contra el sistema (el ultimo operando es el destino)
+    if re.search(r"\b(cp|ln)\b", lower):
+        objs = _operandos(seg)
+        if objs and _es_ruta_sistema(objs[-1]):
+            return True
+    # chown/chmod recursivos sobre la raiz o sobre el sistema
+    if re.search(r"\b(chown|chmod|chgrp)\b", lower) and _tiene_recursiva(seg):
+        objs = _operandos(seg)
+        if any(o in ("/", "/*") or _es_ruta_sistema(o) for o in objs):
+            return True
+
+    # --- borrado recursivo por find ------------------------------------------
+    if re.search(r"\bfind\b.*\s-delete\b", lower):
+        raices = [t.strip("\"'") for t in seg.split() if t.startswith("/")]
+        if not raices or not all(_es_tmp(r) for r in raices):
+            return True
+
+    # --- mover directorios de sistema (esquiva al rm porque no borra) --------
+    if re.search(r"\bmv\b\s+(-\S+\s+)*/(var|etc|boot|usr|lib|lib64|bin|sbin|opt|root|home|srv)\b", lower):
+        return True
+
+    # --- software: instalar o quitar exige permiso ----------------------------
+    # El bug medido: Carlos dijo "Hola" y el modelo lanzo `sudo sven install
+    # docker` por su cuenta; el "Proceed? [Y/n]" de sven se auto-respondia.
+    # Ahora se admiten banderas entre el verbo y el paquete, porque
+    # `sven -y install docker` se colaba.
+    if re.search(r"\bsven\b(\s+-{1,2}[\w=]+)*\s+(install|remove|upgrade|update|sync|add)\b", lower):
+        return True
+    if re.search(r"\b(apt|apt-get|dnf|yum|pacman|emerge|zypper)\b(\s+-{1,2}[\w=]+)*\s+(install|remove|erase|upgrade|-S|-R)\b", lower):
+        return True
+    if re.search(r"\b(pip|pip3)\s+install\b", lower):
+        return True
+    if re.search(r"\b(cargo|npm|gem)\s+install\b", lower):
+        return True
+    if re.search(r"\bmake\s+install\b", lower):
+        return True
+
+    # --- servicios ------------------------------------------------------------
+    if re.search(r"\bsystemctl\b(\s+-{1,2}[\w=]+)*\s+(enable|disable|mask|unmask)\b", lower):
+        return True
+    # Parar o reiniciar lo que da acceso a la maquina corta el acceso remoto.
+    if re.search(r"\bsystemctl\b(\s+-{1,2}[\w=]+)*\s+(stop|restart|kill)\b", lower):
+        if any(u in lower for u in _UNIDADES_CRITICAS):
+            return True
+    return False
+
+
+def verificar_comando(command: str):
+    """Veredicto de seguridad: ('bloquea'|'confirma'|'adelante', motivo).
+
+    UNICO punto de paso de la capa. Lo usan `run_command` (tools.py) y
+    `process_start` (process.py), que antes iban por libre. Se evalua cada
+    segmento del comando por separado, y gana el veredicto mas grave.
+    """
+    if not command or not command.strip():
+        return ("adelante", "")
+    for seg in _segmentos(command):
+        if _segmento_bloqueado(seg):
+            return ("bloquea", "operacion irreversible: %s" % seg[:120])
+    for seg in _segmentos(command):
+        if _segmento_destructivo(seg):
+            return ("confirma", seg[:120])
+    return ("adelante", "")
+
+
+def _is_blocked_command(command: str) -> bool:
+    """Compatibilidad: True si el comando se bloquea sin ofrecer confirmacion."""
+    return verificar_comando(command)[0] == "bloquea"
 
 
 def _is_destructive_command(command: str) -> bool:
-    """Return True if command requires human confirmation before execution."""
-    lower = command.lower()
-    if re.search(r'\brm\s+-rf\b', lower):
-        return True
-    if re.search(r'\bsudo\s+rm\b', lower):
-        return True
-    if re.search(r'\b>\s*/dev/sd[a-z]', lower):
-        return True
-    if re.search(r'\bFORMAT_BLOCKED\b', lower):
-        return True
-    if re.search(r'\bdd\s+if=\S+', lower):
-        return True
-    # Docker daemon exposed to network (even localhost-only tcp or explicit tls=false needs review)
-    if re.search(r'\bdockerd\b.*--host\s*=\s*tcp://', lower):
-        return True
-    if re.search(r'\bdockerd\b.*--host\s+tcp://', lower):
-        return True
-    # --- AIOS PATCH (12 Sep 2026): 6 vectors that slipped through ---
-    # exemption: anything under /tmp or /var/tmp needs no confirmation
-    _en_tmp = bool(re.search(r'(?<![\w/])/(var/)?tmp(?:/|\s|$)', lower))
-    # truncate to zero (truncate -s 0 X)
-    if re.search(r'\btruncate\b.*\s-?s\s*0\b', lower):
-        return not _en_tmp
-    # "> file" overwrites (single >, not >>)
-    if re.search(r'>\s*\S+', lower) and not re.search(r'>>', lower):
-        m = re.search(r'>\s*([^\s;|&]+)', lower)
-        if m:
-            destino = m.group(1)
-            if destino in ('/dev/null', '/dev/stdout', '/dev/stderr') or destino.startswith('/dev/fd'):
-                return False
-            if re.search(r'/dev/(sd|nvme|vd|hd)', destino):
-                return True
-            return not _en_tmp
-    # recursive delete via find
-    if re.search(r'\bfind\b.*\s-delete\b', lower):
-        return not _en_tmp
-    # move/rename system directories (bypasses rm because it does not delete)
-    if re.search(r'\bmv\b\s+/(var|etc|boot|usr|lib|bin|sbin|opt|root|home)\b', lower):
-        return True
-    # --- AIOS PATCH (15 Sep 2026): installing/removing software and changing
-    # system services needs the user's permission. Measured bug: with the Live as
-    # the model, Carlos said "Hola" and it ran `sudo sven install docker` on its
-    # own -- nothing in this list covered package installation, and sven's own
-    # "Proceed? [Y/n]" prompt was being auto-answered.
-    if re.search(r'\bsven\s+(install|remove|upgrade|update|sync|add)\b', lower):
-        return True
-    if re.search(r'\b(apt|apt-get|dnf|yum|pacman|emerge|zypper)\s+(-\S+\s+)*(install|remove|erase|upgrade|-S|-R)\b', lower):
-        return True
-    if re.search(r'\b(pip|pip3)\s+install\b', lower):
-        return True
-    if re.search(r'\b(cargo|npm|gem)\s+install\b', lower):
-        return True
-    if re.search(r'\bmake\s+install\b', lower):
-        return True
-    # system services: enabling/disabling/masking them changes the machine
-    if re.search(r'\bsystemctl\b\s+(enable|disable|mask|unmask)\b', lower):
-        return True
-    return False
+    """Compatibilidad: True si el comando exige permiso explicito del usuario."""
+    return verificar_comando(command)[0] == "confirma"
 
 
 # Voice mode (the Live as the model): the confirmation prompt cannot be read from
@@ -248,11 +389,13 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     # sven install/upgrade/sync takes minutes (DB sync + download + install): generous timeout.
     if any(kw in command for kw in ("sven install", "sven upgrade", "sven sync", "sven update")):
         timeout = 600
-    if _is_blocked_command(command):
-        return json.dumps({"error": "Command blocked: dangerous operation", "exit_code": -1,
-                          "stdout": "", "stderr": "Blocked for security reasons"}, ensure_ascii=False)
+    veredicto, motivo = verificar_comando(command)
+    if veredicto == "bloquea":
+        return json.dumps({"error": "Command blocked: dangerous operation (%s)" % motivo,
+                          "exit_code": -1, "stdout": "",
+                          "stderr": "Blocked for security reasons"}, ensure_ascii=False)
 
-    if _is_destructive_command(command):
+    if veredicto == "confirma":
         if not _confirm_destructive(command):
             motivo = ("NEEDS PERMISSION: installing or changing system software requires "
                       "the user's explicit consent, and in voice mode there is no way to ask. "
@@ -353,10 +496,18 @@ def read_file(path: str) -> str:
 
 
 def write_file(path: str, content: str) -> str:
-    """Write a file. Warns if the path is a system directory."""
+    """Write a file. BLOCKS system paths (it does not merely warn).
+
+    La auditoria del 26 Sep 2026 midio que faltaban /usr/ (donde viven los
+    binarios con usrmerge: sven, aios-update, llama-server) y /var/lib/sven/
+    (la base de datos de paquetes). Se podia sobreescribir cualquiera de los
+    dos. El docstring ademas decia "Warns" mientras el codigo bloqueaba.
+    """
     try:
         p = Path(path).resolve()
-        danger_zones = ["/etc/", "/boot/", "/sys/", "/proc/", "/dev/"]
+        danger_zones = ["/etc/", "/boot/", "/sys/", "/proc/", "/dev/",
+                        "/usr/", "/bin/", "/sbin/", "/lib/", "/lib64/",
+                        "/var/lib/sven/", "/var/lib/docker/"]
         for zone in danger_zones:
             if str(p).startswith(zone):
                 return json.dumps({"warning": f"System path ({zone}). Write blocked.", "path": str(p)}, ensure_ascii=False)
@@ -401,11 +552,27 @@ def web_search(query: str, limit: int = 3) -> str:
 
 
 def git_operation(op: str, args: str = "") -> str:
-    """Run allowed git operations in /home/ccmai/sre-agent/. Returns JSON."""
-    repo = "/home/ccmai/sre-agent"
-    op = op.strip().lower()
-    allowed = {"status", "commit", "push", "diff", "log"}
-    rejected = {"reset", "rebase", "merge", "stash"}
+    """Run allowed git operations on the agent's own repository. Returns JSON.
+
+    Arreglado el 26 Sep 2026. La auditoria midio dos cosas:
+
+      1. INYECCION: `command = f"git -C {repo} {op} {args}"` se ejecutaba con
+         shell=True, asi que args entraba crudo en un shell. Probado:
+         git_operation("status", "; echo INYECTADO") ejecutaba el echo.
+         Ahora se pasa una LISTA de argumentos y shell=False: no hay shell que
+         interpretar, y ademas op sale de una allowlist y args se parte con
+         shlex (que no se come metacaracteres).
+
+      2. RUTA MUERTA: apuntaba a /home/ccmai/sre-agent, el nombre VIEJO del
+         proyecto, que no existe. Ahora el repositorio es este mismo (el del
+         agente), que es lo que tiene sentido, y se puede cambiar con la
+         variable de entorno AIOS_GIT_REPO.
+    """
+    import shlex
+    repo = os.environ.get("AIOS_GIT_REPO") or str(Path(__file__).resolve().parent)
+    op = (op or "").strip().lower()
+    allowed = {"status", "commit", "push", "diff", "log", "show", "branch", "add", "pull", "fetch", "rev-parse"}
+    rejected = {"reset", "rebase", "merge", "stash", "clean", "rm", "mv", "checkout"}
     if op in rejected:
         return json.dumps({"error": f"Git operation '{op}' not allowed"}, ensure_ascii=False)
     if op not in allowed:
@@ -413,9 +580,13 @@ def git_operation(op: str, args: str = "") -> str:
     lowered = args.lower()
     if "branch" in lowered and ("-d" in lowered or "-delete" in lowered or "-D" in args):
         return json.dumps({"error": "Deleting branches is not allowed"}, ensure_ascii=False)
-    command = f"git -C {repo} {op} {args}" if args else f"git -C {repo} {op}"
     try:
-        r = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+        partes = shlex.split(args, posix=True) if args else []
+    except ValueError as e:
+        return json.dumps({"error": f"Invalid arguments: {e}"}, ensure_ascii=False)
+    command = ["git", "-C", repo, op] + partes
+    try:
+        r = subprocess.run(command, shell=False, capture_output=True, text=True, timeout=30)
         if op == "commit" and (not args or "-m" not in args):
             return json.dumps({"error": "commit requires a message (-m)"}, ensure_ascii=False)
         return json.dumps({"stdout": r.stdout.strip()[:2000], "stderr": r.stderr.strip()[:2000], "exit_code": r.returncode}, ensure_ascii=False)

@@ -32,7 +32,44 @@ class ProcessManager:
         return output
 
     def start(self, command: str, timeout: int = 30) -> str:
-        """Start a process in a PTY and return its ID plus initial output."""
+        """Start a process in a PTY and return its ID plus initial output.
+
+        MISMO guardian que run_command, y esto es un arreglo, no un adorno.
+        La auditoria del 26 Sep 2026 lo midio: este fichero no consultaba el
+        filtro en ninguna linea, asi que el mismo comando que run_command
+        BLOQUEABA se ejecutaba aqui sin bloqueo y sin preguntar.
+
+            _is_blocked_command("rm -rf <dir>")  -> True
+            run_command("rm -rf <dir>")          -> "Command blocked"  (dir intacto)
+            process_start("rm -rf <dir>")        -> exit_code 0       (dir BORRADO)
+
+        No es un ataque: el prompt de produccion ordena usar process_start para
+        scripts interactivos, asi que un modelo que sigue sus instrucciones cae
+        aqui sin proponerselo. Si la capa no se puede importar, se falla CERRADO.
+        """
+        try:
+            from tools import verificar_comando
+        except Exception as e:
+            return json.dumps({
+                "error": f"Security layer unavailable, refusing to start: {e}",
+                "exit_code": -1, "stdout": "", "stderr": "Fail closed",
+            }, ensure_ascii=False)
+
+        veredicto, motivo = verificar_comando(command)
+        if veredicto == "bloquea":
+            return json.dumps({
+                "error": f"Command blocked: dangerous operation ({motivo})",
+                "exit_code": -1, "stdout": "",
+                "stderr": "Blocked for security reasons",
+            }, ensure_ascii=False)
+        if veredicto == "confirma":
+            from tools import _confirm_destructive
+            if not _confirm_destructive(command):
+                return json.dumps({
+                    "error": "Command cancelled by user", "exit_code": -1,
+                    "stdout": "", "stderr": "Cancelled",
+                }, ensure_ascii=False)
+
         proc_id = f"proc_{int(time.time() * 1000)}"
         try:
             master_fd, slave_fd = pty.openpty()
