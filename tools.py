@@ -302,6 +302,27 @@ def _segmento_destructivo(seg: str) -> bool:
     if re.search(r"\bsystemctl\b(\s+-{1,2}[\w=]+)*\s+(stop|restart|kill)\b", lower):
         if any(u in lower for u in _UNIDADES_CRITICAS):
             return True
+
+    # --- docker: lo que BORRA datos exige permiso -----------------------------
+    # Medido el 27 Sep 2026: `docker system prune -a --volumes`, `docker volume
+    # prune -f`, `docker volume rm`, `docker compose down -v` y `docker rmi -f`
+    # pasaban sin barrera alguna. El 4B SIN andamio llego a ejecutar el primero
+    # durante el banco. La capa solo cubria `rm -rf /var/lib/docker` y el
+    # `dockerd --host tcp://` sin TLS: nada que borre desde dentro de docker.
+    # Se CONFIRMA, no se bloquea: borrar un volumen es legitimo si el usuario lo
+    # autoriza, igual que `sven remove`.
+    # Fuera a proposito: `docker ps/images/logs/system df/volume ls` (consulta),
+    # `docker run` (incluido `--rm`, que borra ESE contenedor y nada del host:
+    # cazarlo seria un falso positivo que castiga el uso normal) y
+    # `docker stop/kill` (reversible y sin perdida de datos; parar el stack de
+    # produccion tiene su propio procedimiento).
+    if re.search(r"\bdocker\b", lower):
+        if re.search(r"\bdocker\b(?:\s+-\S+)*\s+(?:rm|rmi|prune)\b", lower):
+            return True
+        if re.search(r"\bdocker\b(?:\s+-\S+)*\s+(?:volume|container|image|network|builder|system)\s+(?:\w+\s+)*(?:rm|rmi|prune)\b", lower):
+            return True
+        if re.search(r"\bdocker\b(?:\s+-\S+)*\s+compose\b[^;|&]*\s+down\b", lower):
+            return True
     return False
 
 
