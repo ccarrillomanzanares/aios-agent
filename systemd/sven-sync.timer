@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly sven package database sync (with boot retry)
+
+[Timer]
+# REINTENTO: si el sync del arranque falla (red que aun no estaba), a los 10 min ya hay red y
+# se reintenta solo. Antes solo habia `OnCalendar=weekly`, asi que un fallo al arrancar dejaba
+# la base desactualizada hasta la semana siguiente; en la practica, todo el dia.
+OnBootSec=10min
+OnUnitActiveSec=1d
+Persistent=true
+
+[Install]
+WantedBy=timers.target

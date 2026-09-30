@@ -1,0 +1,18 @@
+[Unit]
+Description=Sven package database sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Esperar a la red de verdad: el arranque es 5 s despues del boot y el DNS no esta listo.
+# No se usa network-online.target como garantia porque systemd-networkd-wait-online no esta
+# instalado en esta maquina: el target se alcanza sin esperar a nada.
+ExecStartPre=/usr/local/bin/sven-esperar-red.sh
+ExecStart=/usr/bin/sven sync
+# `sven sync` baja core+extra+multilib (extra.db son ~9 MiB): tarda minutos. Los 120 s
+# anteriores lo mataban a mitad. Medido: el sync completo de esta maquina tarda ~2-3 min.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
