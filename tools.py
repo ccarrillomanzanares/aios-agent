@@ -483,6 +483,114 @@ def _strip_ansi(s: str) -> str:
 
 
 
+
+_SVEN_LOCK_MSG = "Another Sven process is already running"
+_SVEN_LOCK_PATH = "/var/lib/sven/lock"
+
+
+def _describir_proceso(pid: int) -> str:
+    """Comando del pid y cuanto lleva vivo, en texto. Para el aviso."""
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()[:140]
+    except Exception:
+        cmd = "?"
+    try:
+        edad = int(time.time() - os.path.getmtime("/proc/%d" % pid))
+        edad = "%d min %d s" % (edad // 60, edad % 60)
+    except Exception:
+        edad = "?"
+    return cmd, edad
+
+
+def _quien_tiene_bloqueo_sven():
+    """Devuelve (pid, comando, edad) del proceso que TIENE el flock de sven, o None.
+
+    OJO con leer el pid del fichero: sven lo abre con mode "w" (LO TRUNCA) ANTES de intentar
+    el flock. Medido el 30 Sep 2026: con el bloqueo tomado por otro proceso, sven llego a
+    "Installing…", fallo el flock, y dejo el fichero VACIO — borrando el pid que habia escrito
+    el que SI lo tenia. Asi que el contenido solo vale si no ha habido intentos fallidos por
+    medio (y en el incidente real hubo decenas).
+
+    La via que no falla: preguntarle al kernel quien tiene el fichero abierto, con /proc.
+    """
+    # 1. via rapida: el pid que sven escribe dentro mientras lo tiene el mismo
+    try:
+        with open(_SVEN_LOCK_PATH) as f:
+            _pid = int(f.read().strip().split()[0])
+        if _pid > 0 and os.path.exists("/proc/%d" % _pid):
+            cmd, edad = _describir_proceso(_pid)
+            return _pid, cmd, edad
+    except Exception:
+        pass
+
+    # 2. via fiable: quien tiene el fichero ABIERTO ahora mismo
+    try:
+        candidatos = [n for n in os.listdir("/proc") if n.isdigit()]
+    except Exception:
+        candidatos = []
+    for nombre in candidatos:
+        fddir = "/proc/%s/fd" % nombre
+        try:
+            fds = os.listdir(fddir)
+        except OSError:
+            continue          # proceso ajeno o ya muerto: no se puede mirar
+        for fd in fds:
+            try:
+                if os.readlink(os.path.join(fddir, fd)) == _SVEN_LOCK_PATH:
+                    pid = int(nombre)
+                    cmd, edad = _describir_proceso(pid)
+                    return pid, cmd, edad
+            except OSError:
+                continue
+    return None
+
+
+def _explicar_bloqueo_sven(salida: str) -> str:
+    """Si sven dice que ya hay otro proceso, decir QUIEN tiene el bloqueo. Devuelve un aviso
+    para el modelo, o "" si el mensaje no aparece.
+
+    Medido el 30 Sep 2026: el modelo se topo con "Another Sven process is already running" y lo
+    leyo como un problema de CONFIRMACION interactiva ("no puedo responderla automaticamente
+    con `y`"), y paso a `echo 'y' | sudo -S sven ...`, que falla igual. No mentia: improvisaba
+    con lo unico que sabia. Lo que le faltaba es esto.
+
+    Y el mensaje enganaba por su POSICION: sale DESPUES de "▍ Installing…", o sea despues del
+    ":: Proceed? [Y/n]". Parece que el "y" no valio; en realidad la confirmacion habia
+    funcionado y lo que fallaba era el bloqueo.
+
+    Lo que se sabe del bloqueo (leido en sven/db/local_db.py):
+      - es un `flock` del KERNEL, no "existe el fichero": al morir el proceso, el kernel lo
+        suelta solo. Un sven solo puede estar bloqueado por un proceso VIVO.
+      - ojo: sven abre el fichero con mode "w", asi que un intento fallido lo deja vacio.
+    """
+    if _SVEN_LOCK_MSG not in salida:
+        return ""
+
+    quien = _quien_tiene_bloqueo_sven()
+
+    if quien is None:
+        return ("\n[AVISO] sven NO ha hecho nada: dice que hay otro proceso con el bloqueo, pero "
+                "AHORA MISMO no hay ningun proceso sujetandolo (/var/lib/sven/lock esta libre). "
+                "Vamos: el que lo tenia ya ha terminado o ha muerto. REPITE el mismo comando tal "
+                "cual y funcionara.\n"
+                "  - IMPORTANTE: esto NO es un problema de confirmacion interactiva; tu 'y' si "
+                "funciono. No lo resuelvas con `echo y | sven`, no ayuda.\n"
+                "  - Y no le digas al usuario que se cancelo por la confirmacion: no es eso.")
+
+    pid, cmd, edad = quien
+    return ("\n[AVISO] sven NO ha hecho nada: hay OTRO sven vivo con el bloqueo "
+            "%s. Es el pid %d, lleva asi %s, y su comando es: %s\n"
+            "  - Si esa instalacion es de verdad, ESPERA a que acabe y repite; no hay atajo.\n"
+            "  - Si esta colgada, hay que MATAR ese pid: mientras viva, NINGUN comando de sven "
+            "puede funcionar. (El bloqueo es un flock del kernel: al morir el proceso se suelta "
+            "solo; no hace falta borrar ningun fichero.)\n"
+            "  - IMPORTANTE: esto NO es un problema de confirmacion interactiva; tu 'y' si "
+            "funciono. No lo resuelvas con `echo y | sven`, no ayuda.\n"
+            "  - Y no le digas al usuario que se cancelo por la confirmacion: no es eso."
+            % (_SVEN_LOCK_PATH, pid, edad, cmd))
+
+
 def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
     """Execute a shell command. Returns JSON with stdout, stderr, exit_code, elapsed."""
     # sven install/upgrade/sync takes minutes (DB sync + download + install): generous timeout.
@@ -555,12 +663,60 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
         elapsed = time.time() - t0
         remaining = max(0.1, timeout - elapsed)
         try:
-            r = subprocess.run(current_command, shell=True, capture_output=True, text=True,
-                               timeout=remaining, stdin=stdin_arg, input=stdin_input)
+            # SESION PROPIA + MATAR EL GRUPO AL AGOTAR EL TIEMPO. Las dos cosas hacen falta.
+            #
+            # Medido en esta maquina (30 Sep 2026): con `subprocess.run(..., timeout=)` a
+            # secas, al vencer el tiempo Python mata a su hijo directo (el `sh`) pero el
+            # arbol sigue vivo: `sh -> sudo -> sven`. El `sven` superviviente se quedo
+            # /var/lib/sven/lock y a partir de ahi TODA instalacion fallaba con "Another
+            # Sven process is already running" durante horas; el modelo lo leyo como "la
+            # confirmacion fallo" y dio decenas de vueltas. Medido con la prueba del
+            # fichero de PID: el nieto sobrevivia, y con start_new_session solo TAMBIEN,
+            # asi que la sesion propia sin killpg no arregla nada — la sesion propia
+            # existe para que el killpg NO alcance al agente.
+            _p = subprocess.Popen(current_command, shell=True, text=True,
+                                  stdin=subprocess.PIPE if stdin_input is not None else stdin_arg,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  start_new_session=True)
+            try:
+                _out, _err = _p.communicate(input=stdin_input, timeout=remaining)
+                r = subprocess.CompletedProcess(current_command, _p.returncode, _out, _err)
+            except subprocess.TimeoutExpired:
+                # Llevarse el arbol entero. Primero con buenos modales, luego sin ellos.
+                _limpiados = 0
+                try:
+                    _pgid = os.getpgid(_p.pid)
+                    os.killpg(_pgid, signal.SIGTERM)
+                    _limpiados += 1
+                    _p.wait(timeout=5)
+                except Exception:
+                    pass
+                try:
+                    os.killpg(os.getpgid(_p.pid), signal.SIGKILL)
+                    _limpiados += 1
+                except (ProcessLookupError, PermissionError):
+                    pass
+                except Exception:
+                    pass
+                try:
+                    _p.wait(timeout=5)
+                except Exception:
+                    pass
+                # Decirlo, no callarlo: un cuelgue silencioso es lo que hizo que este
+                # fallo pasara horas inadvertido. `exit_code 124` es el de timeout.
+                return json.dumps({
+                    "stdout": "", "stderr":
+                        "Timeout (%ss). El comando se colgo y se ha MATADO al proceso y a "
+                        "todo su arbol (sh, sudo y lo que hubiera lanzado), para no dejar "
+                        "procesos huerfanos ni bloqueos. Si el comando deja un fichero de "
+                        "bloqueo, ya esta libre. exit_code=124." % timeout,
+                    "exit_code": 124, "elapsed": round(time.time() - t0, 2),
+                    "killed_tree": _limpiados > 0,
+                }, ensure_ascii=False)
             # Strip ANSI and cap output size: huge command logs inflate the
             # conversation context and make reasoning models slow (timeouts).
-            stdout = _strip_ansi(r.stdout.strip())[:1200]
-            stderr = _strip_ansi(r.stderr.strip())[:1000]
+            stdout = _strip_ansi((r.stdout or "").strip())[:1200]
+            stderr = _strip_ansi((r.stderr or "").strip())[:1000]
 
             if retry and r.returncode != 0 and ("apt" in current_command or "apt-get" in current_command):
                 lower_err = (stdout + "\n" + stderr).lower()
@@ -583,8 +739,13 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
             except Exception:
                 pass
 
-            return json.dumps({"stdout": stdout, "stderr": stderr, "exit_code": r.returncode,
-                              "elapsed": round(time.time() - t0, 2)}, ensure_ascii=False)
+            # Si sven se queja de que ya hay otro proceso, decir quien lo tiene: el modelo
+            # lo estaba leyendo como un fallo de confirmacion y probaba rodeos que no pueden
+            # funcionar. Ver _explicar_bloqueo_sven.
+            _aviso = _explicar_bloqueo_sven(stdout + "\n" + stderr)
+            return json.dumps({"stdout": stdout, "stderr": (stderr + _aviso).strip(),
+                               "exit_code": r.returncode,
+                               "elapsed": round(time.time() - t0, 2)}, ensure_ascii=False)
         except subprocess.TimeoutExpired:
             return json.dumps({"stdout": "", "stderr": f"Timeout ({timeout}s)", "exit_code": 124,
                               "elapsed": timeout}, ensure_ascii=False)
