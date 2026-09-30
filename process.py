@@ -64,10 +64,22 @@ class ProcessManager:
             }, ensure_ascii=False)
         if veredicto == "confirma":
             from tools import _confirm_destructive
-            if not _confirm_destructive(command):
+            _respuesta = _confirm_destructive(command)
+            # Tres estados, no dos: `_confirm_destructive` devuelve "yes"/"no"/"timeout".
+            # Antes esto trataba la respuesta como un booleano (`not ...`), y como un
+            # texto no vacio es siempre verdadero en Python, el rechazo del usuario se
+            # ignoraba y el comando se ejecutaba igual. Medido: el guardian preguntaba y
+            # el `rm -rf` borraba el directorio aunque el usuario dijera que no.
+            if _respuesta != "yes":
+                if _respuesta == "timeout":
+                    _motivo = ("NOT RUN: the approval prompt timed out with no answer. The "
+                               "user did not refuse this -- nobody answered in time.")
+                else:
+                    _motivo = ("Command refused by the user: they answered no to the "
+                               "approval prompt. Do not retry it.")
                 return json.dumps({
-                    "error": "Command cancelled by user", "exit_code": -1,
-                    "stdout": "", "stderr": "Cancelled",
+                    "error": _motivo, "exit_code": -1,
+                    "stdout": "", "stderr": _motivo,
                 }, ensure_ascii=False)
 
         proc_id = f"proc_{int(time.time() * 1000)}"
