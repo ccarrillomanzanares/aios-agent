@@ -323,6 +323,54 @@ def _segmento_destructivo(seg: str) -> bool:
             return True
         if re.search(r"\bdocker\b(?:\s+-\S+)*\s+compose\b[^;|&]*\s+down\b", lower):
             return True
+
+    # --- instalar software SIN el gestor de paquetes --------------------------
+    # Medido el 30 Sep 2026: cuando `sven` no tenia `docker-compose-plugin`, el
+    # modelo se fue a GitHub con curl, descomprimio en /usr/local/bin y le puso
+    # chmod +x. Los tres comandos devolvian False: era la via que esquivaba las
+    # reglas de sven/apt/pip, que si existen. Lo intento 6 veces en veinte minutos
+    # y termino proponiendolo como plan ("descargar los binarios necesarios y
+    # ejecutarlos directamente sin depender del sistema de paquetes"). Que no
+    # pasara nada fue suerte: la URL daba 404 y el fichero tenia 9 bytes.
+    #
+    # Se PREGUNTA, no se prohibe. Carlos: "sven es el gestor de paquetes pero
+    # puede haber excepciones" y "si yo le pido descargar un software para
+    # instalar deberia hacerlo, o para compilar". Asi que bajar fuente a /tmp,
+    # compilar, cmake, git clone: todo sigue en silencio. Lo que pide permiso es
+    # escribir en una ruta del SISTEMA o meter una descarga en un shell.
+    #
+    # La distincion clave es el DESTINO, no el verbo: `curl -o /tmp/x` calla (ya
+    # hay exencion de /tmp por diseno) y `curl -o /usr/local/bin/x` pregunta.
+    if re.search(r"\b(curl|wget)\b", lower):
+        # descarga apuntando directamente a una ruta del sistema
+        if re.search(r"(?:-o|--output|-O|--output-document)\s*(\S+)", lower):
+            destino = re.search(r"(?:-o|--output|-O|--output-document)\s*(\S+)", lower).group(1)
+            if _es_ruta_sistema(destino):
+                return True
+        # (la descarga alimentando un shell se comprueba en `verificar_comando`, sobre el
+        # comando entero: al partir por segmentos el `|` desaparece)
+    # descomprimir EN una ruta del sistema
+    if re.search(r"\b(tar|unzip|bsdtar|7z)\b", lower):
+        if re.search(r"\s-[cC]\s*(\S+)", seg):
+            destino = re.search(r"\s-[cC]\s*(\S+)", seg).group(1)
+            if _es_ruta_sistema(destino):
+                return True
+        if re.search(r"\bunzip\b[^;|&]*-d\s*(\S+)", lower):
+            destino = re.search(r"\bunzip\b[^;|&]*-d\s*(\S+)", lower).group(1)
+            if _es_ruta_sistema(destino):
+                return True
+    # hacer ejecutable, o cambiar el dueno, algo del sistema (ademas de lo recursivo
+    # que ya se cubre arriba: `chmod +x /usr/local/bin/x` no lleva -R)
+    if re.search(r"\b(chmod|chown|chgrp)\b", lower):
+        if any(_es_ruta_sistema(o) for o in _operandos(seg)):
+            return True
+    # mover, copiar o instalar HACIA una ruta del sistema. La regla de arriba solo
+    # cubria SACAR algo de una (`mv /etc/x /tmp/`), asi que `mv /tmp/x /usr/bin/x`
+    # pasaba limpio. El ultimo operando es el destino.
+    if re.search(r"\b(mv|cp|install|rsync)\b", lower):
+        objs = _operandos(seg)
+        if objs and _es_ruta_sistema(objs[-1]):
+            return True
     return False
 
 
@@ -335,6 +383,12 @@ def verificar_comando(command: str):
     """
     if not command or not command.strip():
         return ("adelante", "")
+    # Descarga alimentando directamente un shell: se mira el comando ENTERO. Al partir por
+    # segmentos el `|` desaparece, asi que `curl https://x | bash` se veria como dos comandos
+    # simples (`curl ...`, `bash`) y ninguno delata la ejecucion de codigo remoto. Medido el
+    # 30 Sep 2026: sin esta comprobacion, los dos casos daban "adelante".
+    if re.search(r"\b(curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|k)?sh\b", command, re.I):
+        return ("confirma", command[:120])
     for seg in _segmentos(command):
         if _segmento_bloqueado(seg):
             return ("bloquea", "operacion irreversible: %s" % seg[:120])
@@ -366,31 +420,51 @@ def set_voice_mode(on: bool):
     VOICE_MODE = bool(on)
 
 
-def _confirm_destructive(command: str, timeout: int = 10) -> bool:
-    """Ask user for confirmation before running a destructive command."""
+def _confirm_destructive(command: str, timeout: int = 30) -> str:
+    """Pide al usuario que apruebe un comando. Devuelve "yes", "no" o "timeout".
+
+    Los tres resultados se mantienen separados a proposito. Antes devolvia True/False, asi
+    que "el usuario dijo que no" y "nadie contesto" acababan siendo lo mismo -- y
+    run_command lo reportaba como "Command cancelled by user". El modelo le dijo entonces a
+    Carlos dos veces que habia cancelado instalaciones que nunca vio (30 sep 2026). Una
+    conversacion no puede contener hechos que no ocurrieron.
+
+    30 s y no 10: Carlos estaba leyendo la pregunta y 10 s se le agotaron antes de contestar.
+    Se imprime una cuenta atras para que la ventana se vea en vez de ser silenciosa.
+    """
     import sys as _sys
     if VOICE_MODE:
-        # Cannot ask in voice mode: refuse and tell the model to ask out loud.
+        # Sin forma de preguntar en modo voz: se rechaza y se le dice al modelo que pregunte
+        # en voz alta.
         _log_voice_refusal(command)
-        return False
-    _sys.stderr.write(f"\u26a0\ufe0f Destructive command detected: {command}. Continue? (y/N): ")
+        return "no"
+    _sys.stderr.write("\n\U0001f6d1 NEEDS YOUR APPROVAL: %s\n"
+                      "   Continue? [y = run it / anything else = no]\n" % command)
     _sys.stderr.flush()
     try:
-        def _timeout_handler(signum, frame):
-            raise TimeoutError
-        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(timeout)
-        try:
-            answer = _sys.stdin.readline().strip()
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-        return answer in ("y", "Y")
-    except TimeoutError:
-        _sys.stderr.write("Confirmation timeout\n")
-        return False
+        import select as _select
+        t0 = time.time()
+        while True:
+            restante = timeout - (time.time() - t0)
+            if restante <= 0:
+                _sys.stderr.write("\r   NOT RUN: no answer in %ds.\n" % timeout)
+                _sys.stderr.flush()
+                return "timeout"
+            _sys.stderr.write("\r   waiting for your answer... %2ds " % int(restante))
+            _sys.stderr.flush()
+            listo, _, _ = _select.select([_sys.stdin], [], [], 1.0)
+            if listo:
+                break
+        answer = _sys.stdin.readline().strip()
+        if answer in ("y", "Y", "yes", "s", "si", "sí", "S"):
+            _sys.stderr.write("\r   approved by the user.\n")
+            _sys.stderr.flush()
+            return "yes"
+        _sys.stderr.write("\r   refused by the user (they answered %r).\n" % answer[:20])
+        _sys.stderr.flush()
+        return "no"
     except Exception:
-        return False
+        return "no"
 
 
 def _log_voice_refusal(command: str):
@@ -421,13 +495,21 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
                           "stderr": "Blocked for security reasons"}, ensure_ascii=False)
 
     if veredicto == "confirma":
-        if not _confirm_destructive(command):
-            motivo = ("NEEDS PERMISSION: installing or changing system software requires "
-                      "the user's explicit consent, and in voice mode there is no way to ask. "
-                      "Tell the user out loud what you want to run and why, and wait for a "
-                      "clear yes before doing it.")
-            if not VOICE_MODE:
-                motivo = "Command cancelled by user"
+        _respuesta = _confirm_destructive(command)
+        if _respuesta != "yes":
+            if VOICE_MODE:
+                motivo = ("NEEDS PERMISSION: installing or changing system software requires "
+                          "the user's explicit consent, and in voice mode there is no way to ask. "
+                          "Tell the user out loud what you want to run and why, and wait for a "
+                          "clear yes before doing it.")
+            elif _respuesta == "timeout":
+                # Decirlo claro: nadie contesto. NO reportarlo como una negativa.
+                motivo = ("NOT RUN: the approval prompt timed out with no answer. The user did "
+                          "not refuse this -- nobody answered in time. If you still need it, ask "
+                          "again in the conversation and wait for an explicit yes.")
+            else:
+                motivo = ("Command refused by the user: they answered no to the approval "
+                          "prompt. Do not retry it; ask why if you need to.")
             return json.dumps({"error": motivo, "exit_code": -1,
                               "stdout": "", "stderr": motivo}, ensure_ascii=False)
 
