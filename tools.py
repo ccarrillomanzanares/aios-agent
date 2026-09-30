@@ -452,7 +452,14 @@ def run_command(command: str, timeout: int = 30, retry: bool = True) -> str:
         current_command = re.sub(r"\bsudo\b", "sudo -S", current_command, count=1)
 
     # stdin: sven asks ":: Proceed? [Y/n]" → auto-confirm; sudo -S reads the password.
-    _auto_confirm = any(kw in command for kw in ("sven install", "sven upgrade", "sven update"))
+    # sven 2.1.1 prompts ":: Proceed? [Y/n]" in EIGHT subcommands (clean, install, orphans,
+    # remove, rollback, self_remove, self_update, upgrade) and reads the answer from STDIN
+    # (ui/prompt.py: raw keypress on a tty, input() otherwise -- there is no --noconfirm
+    # flag). Any other sven call gets stdin=DEVNULL and hangs on the prompt until the
+    # timeout: measured with `sven remove`, which is how a cancelled install turned into
+    # "sven needs interaction I cannot give". Answer sven whenever sven is invoked; a
+    # subcommand that never asks just ignores the input.
+    _auto_confirm = re.search(r"\bsven\b", command) is not None
     stdin_parts = []
     if need_sudo_password:
         stdin_parts.append(_SUDO_PASSWORD + "\n")

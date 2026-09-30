@@ -230,7 +230,7 @@ def _is_trivial_query(q: str) -> bool:
 
 _AIOS_GROUNDING = """AIOS is Linux From Scratch (LFS), NOT Debian/Ubuntu/Arch/Fedora. Packages are managed ONLY with `sven`:
 - `sven install <pkg>` / `sven remove <pkg>` / `sven search <q>` / `sven update` / `sven upgrade`
-- `sven` requires root: ALWAYS run it with sudo (e.g. `sudo sven install docker`). It auto-confirms its prompts, so run it directly and wait for the result.
+- `sven` requires root: ALWAYS run it with sudo (e.g. `sudo sven install docker`). run_command answers sven's ":: Proceed? [Y/n]" prompt for you, so call it directly and wait for the result. Do NOT pipe answers into it (`echo y | sudo sven ...`) and do NOT wrap it in process_start: it needs no interaction from you. If an install reports cancelled, re-run the SAME command -- it is not a missing feature, and dpkg/rpm do not exist in AIOS.
 - There is NO apt/apt-get, NO dnf/yum, NO pacman. Never suggest them.
 
 AIOS facts:
